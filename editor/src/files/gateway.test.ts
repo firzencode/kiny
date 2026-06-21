@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { defaultKipName } from './gateway'
+import { defaultKipName, starterManifest } from './gateway'
 
 describe('defaultKipName', () => {
   it('正常故事名加 .kip 后缀', () => {
@@ -11,5 +11,11 @@ describe('defaultKipName', () => {
   it('空名或全非法字符回退为 story', () => {
     expect(defaultKipName('   ')).toBe('story.kip')
     expect(defaultKipName('/\\:*?')).toBe('story.kip')
+  })
+})
+
+describe('starterManifest', () => {
+  it('engine 取注入的 Kiny 版本', () => {
+    expect(starterManifest('我的故事').engine).toBe(__KINY_VERSION__)
   })
 })

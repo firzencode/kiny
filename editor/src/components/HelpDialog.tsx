@@ -9,9 +9,9 @@ export interface HelpDialogProps {
   onClose: () => void
 }
 
-/* 版本号：当前各 package.json 仍是占位 0.0.0，仅 tauri.conf.json 为 0.1.0。
-   待各子项目版本定稿后，把这里改成从真实版本源读取（或构建期注入）。 */
-const VERSIONS = { editor: '0.1.0', engine: '0.1.0', player: '0.1.0', license: 'Apache-2.0' }
+/* 版本号由 vite define 注入（__KINY_VERSION__ = editor/package.json version）。
+   统一全局版本后 editor/engine/player 同号，故三者读同一常量。 */
+const VERSIONS = { editor: __KINY_VERSION__, engine: __KINY_VERSION__, player: __KINY_VERSION__, license: 'Apache-2.0' }
 
 /** 把多行 .kin 源码渲染成与编辑器语义着色一致的 token 序列。 */
 function KinCode({ src }: { src: string }) {

@@ -6,8 +6,9 @@ import { fileURLToPath } from 'node:url'
 /**
  * 一键编译 editor / reader 的 Windows release，并把安装包汇总到仓库根 output/。
  *
- * 拷贝对象：各 app 的 src-tauri/target/release/bundle/{nsis,msi} 下的 .exe / .msi
- * 安装包（独立 app.exe 不可分发、且两 app 重名，故不拷）。
+ * 默认只打 NSIS setup.exe（不要 MSI）；传 `--bundles all` 可恢复全部 bundle。
+ * 拷贝对象：各 app 的 src-tauri/target/release/bundle/nsis 下的 .exe 安装包
+ * （独立 app.exe 不可分发、且两 app 重名，故不拷）。
  * output/ 每次先清空再填，避免残留旧版本；该目录已在 .gitignore。
  *
  * 用法：
@@ -46,7 +47,7 @@ function main() {
   const apps = argv.filter((a) => !a.startsWith('--') && KNOWN_APPS.includes(a))
   const targets = apps.length ? apps : KNOWN_APPS
   const bIdx = argv.indexOf('--bundles')
-  const bundles = bIdx >= 0 ? argv[bIdx + 1] : null
+  const bundles = bIdx >= 0 ? argv[bIdx + 1] : 'nsis'  // 默认只打 NSIS setup.exe（不要 MSI）
 
   const outDir = join(repoRoot, 'output')
   rmSync(outDir, { recursive: true, force: true })

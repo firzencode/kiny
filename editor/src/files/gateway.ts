@@ -92,7 +92,7 @@ export function normalizeKinName(raw: string): string {
 
 /** 起始 kiny.json 脚手架（newProject 用，name 由调用方填）。 */
 export function starterManifest(name: string): Manifest {
-  return { name, version: '1.0.0', engine: '0.1.0', entry: 'main.kin' }
+  return { name, version: '1.0.0', engine: __KINY_VERSION__, entry: 'main.kin' }
 }
 
 /** 故事名 → 安全的默认 .kip 文件名：去 Windows 文件名非法字符与首尾空白，空结果回退 story。 */
