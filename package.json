@@ -1,0 +1,31 @@
+{
+  "name": "kiny",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Kiny — 受 Ink 启发的互动叙事 DSL 生态（engine / player / web-reader / editor）。子项目各自自包含构建，本文件只做跨子项目的顺序编排，不使用 npm workspaces。",
+  "scripts": {
+    "install:all": "npm --prefix engine install && npm --prefix player install && npm --prefix web-reader install && npm --prefix editor install && npm --prefix reader install",
+    "build:engine": "npm --prefix engine run build",
+    "build:player": "npm --prefix player run build",
+    "build:core": "npm run build:engine && npm run build:player",
+    "build:web-reader": "npm run build:core && npm --prefix web-reader run build",
+    "build:editor": "npm run build:core && npm --prefix editor run build",
+    "build:reader": "npm run build:core && npm --prefix reader run build",
+    "build": "npm run build:core",
+    "test:engine": "npm --prefix engine test",
+    "test:player": "npm --prefix player test",
+    "test:web-reader": "npm --prefix web-reader test",
+    "test:editor": "npm --prefix editor test",
+    "test:reader": "npm --prefix reader test",
+    "test": "npm run test:engine && npm run test:player && npm run test:web-reader && npm run test:editor && npm run test:reader",
+    "typecheck": "npm --prefix engine run typecheck && npm --prefix player run typecheck && npm --prefix web-reader run typecheck && npm --prefix editor run typecheck && npm --prefix reader run typecheck",
+    "dev:web-reader": "npm run build:core && npm --prefix web-reader run dev",
+    "dev:editor": "npm run build:core && npm --prefix editor run tauri dev",
+    "dev:reader": "npm run build:core && npm --prefix reader run tauri dev",
+    "tauri:build": "npm run build:core && npm --prefix editor run tauri build",
+    "tauri:build:reader": "npm run build:core && npm --prefix reader run tauri build",
+    "release:win": "node scripts/build-release.mjs",
+    "play": "npm --prefix engine run play",
+    "worktree": "node scripts/new-worktree.mjs"
+  }
+}

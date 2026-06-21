@@ -1,0 +1,32 @@
+/* 全屏氛围底图：模糊 + 压暗 */
+.bg-layer {
+  position: fixed; inset: 0; z-index: 0;
+  background-size: cover; background-position: center;
+  filter: blur(3px) brightness(.45); transition: background-image .6s ease;
+}
+.bg-layer::after { content: ""; position: absolute; inset: 0; background: rgba(10, 14, 20, .55); }
+
+/* 阅读流：居中单栏 */
+.player { position: relative; z-index: 1; min-height: 100vh; }
+/* player-content 必须自成定位层（z-index ≥ 1）：它与 .bg-layer 同为 .player 的子元素，
+   而 .bg-layer 是 positioned（fixed, z-index:0）。若 player-content 留在普通流（无定位），
+   按 CSS 堆叠规则会被 positioned 的 .bg-layer 覆盖 —— 正文被压暗的背景层盖死，表现为「黑屏无文字」。
+   此守卫 jsdom 测不出（不渲染 CSS），删改前务必在浏览器验证。 */
+.player-content { position: relative; z-index: 1;
+  max-width: 680px; margin: 0 auto; padding: 64px 24px 120px;
+  display: flex; flex-direction: column; gap: 14px; }
+.story-log { display: flex; flex-direction: column; gap: 14px; }
+.narration { margin: 0; line-height: 1.9; font-size: 1.05rem; }
+.story-end { margin: 12px 0; text-align: center; opacity: .6; letter-spacing: .2em; }
+
+/* 选项 */
+.choices { display: flex; flex-direction: column; gap: 10px; margin-top: 18px; }
+.choice { text-align: left; padding: 12px 16px; font-size: 1rem; color: #fff;
+  background: rgba(255, 255, 255, .06); border: 1px solid rgba(255, 255, 255, .35);
+  border-radius: 8px; cursor: pointer; transition: background .15s; }
+.choice:hover { background: rgba(255, 255, 255, .14); }
+
+.player-error { color: #ff8585; }
+
+.audio-toggle { position: fixed; top: 14px; right: 16px; z-index: 2; font-size: 1.1rem;
+  background: rgba(0, 0, 0, .4); border: none; border-radius: 16px; padding: 6px 12px; cursor: pointer; }

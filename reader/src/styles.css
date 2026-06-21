@@ -1,0 +1,63 @@
+:root {
+  color-scheme: dark;
+  --bg0:#16181f; --bg1:#1b1e27; --bg2:#232733; --bg3:#2c3140;
+  --border:#272b36; --border2:#333949;
+  --text:#e4e7ee; --dim:#9aa1b2; --faint:#5b6273;
+  --accent:#d2a24c; --accent-soft:rgba(210,162,76,.16); --accent-line:rgba(210,162,76,.42);
+  --shadow:0 18px 50px rgba(0,0,0,.5);
+}
+* { box-sizing: border-box; }
+html, body, #root { margin:0; height:100%; }
+body { overflow:hidden; background:var(--bg1); color:var(--text);
+  font-family:'PingFang SC','Noto Sans SC','Hiragino Sans GB',system-ui,sans-serif; -webkit-font-smoothing:antialiased; }
+.app { display:flex; flex-direction:column; height:100%; }
+
+.shelfbar { display:flex; align-items:center; gap:14px; padding:16px 22px 14px; border-bottom:1px solid var(--border); }
+.shelfbar h1 { margin:0; font-size:17px; font-weight:600; }
+.shelfbar .count { color:var(--faint); font-size:12.5px; }
+.btn-import { margin-left:auto; display:inline-flex; align-items:center; gap:8px; font:inherit; font-size:13px; cursor:pointer;
+  padding:8px 16px; border-radius:9px; background:var(--accent); color:#15120a; border:1px solid var(--accent); font-weight:600; }
+.btn-import:hover { filter:brightness(1.07); }
+.btn-import:disabled { opacity:.55; cursor:default; }
+.shelf { flex:1; padding:8px 22px 24px; overflow-y:auto; }
+
+.ed-list { display:flex; flex-direction:column; }
+.ed-row { display:flex; align-items:center; gap:18px; padding:16px 6px; border-bottom:1px solid var(--border); cursor:pointer; position:relative; }
+.ed-row:hover { background:var(--bg0); }
+.ed-row:last-child { border-bottom:none; }
+.ed-cover { width:58px; height:78px; flex:none; border-radius:7px; overflow:hidden; border:1px solid var(--border2); background:var(--bg2); position:relative; }
+.ed-cover img { width:100%; height:100%; object-fit:cover; display:block; }
+.ed-cover.ph { display:grid; place-items:center; background:radial-gradient(120% 90% at 30% 18%, var(--bg3), var(--bg1)); }
+.ed-cover.ph span { font-size:30px; font-weight:700; color:var(--accent); opacity:.85; }
+.ed-cover.ph::after { content:''; position:absolute; left:9px; right:9px; bottom:9px; height:2px; background:var(--accent-line); border-radius:2px; }
+.ed-body { flex:1; min-width:0; }
+.ed-top { display:flex; align-items:baseline; gap:10px; }
+.ed-title { font-size:16px; font-weight:600; color:var(--text); }
+.ed-author { font-size:12px; color:var(--dim); }
+.ed-desc { margin:6px 0 0; font-size:13px; color:var(--dim); line-height:1.6;
+  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.ed-go { flex:none; font:inherit; font-size:13px; cursor:pointer; color:var(--accent); background:transparent;
+  border:1px solid var(--accent-line); border-radius:8px; padding:7px 14px; }
+.ed-go:hover { background:var(--accent-soft); }
+.ed-del { flex:none; width:30px; height:30px; border-radius:8px; display:grid; place-items:center; opacity:0;
+  background:transparent; border:1px solid transparent; color:var(--faint); cursor:pointer; transition:.14s; font-size:13px; }
+.ed-row:hover .ed-del { opacity:1; }
+.ed-del:hover { background:#c8443a; color:#fff; border-color:#c8443a; }
+
+.empty { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; gap:18px; padding:40px; }
+.empty .icon { width:88px; height:88px; border-radius:18px; display:grid; place-items:center; border:2px dashed var(--border2); color:var(--accent); background:var(--accent-soft); }
+.empty h2 { margin:4px 0 0; font-size:18px; font-weight:600; }
+.empty p { margin:0; color:var(--dim); font-size:13.5px; line-height:1.7; max-width:340px; }
+.empty .kip { color:var(--accent); font-family:ui-monospace,monospace; }
+
+.toast-error { position:fixed; top:14px; left:50%; transform:translateX(-50%); z-index:50; cursor:pointer;
+  background:#3a2020; color:#ffb4ac; border:1px solid #6e3b35; border-radius:9px; padding:10px 16px; font-size:13px; max-width:80vw; }
+
+/* 阅读屏返回条（叠在 player 之上）*/
+.reading { position:fixed; inset:0; overflow-y:auto; }
+.reading-bar { position:fixed; top:0; left:0; right:0; z-index:3; height:52px; display:flex; align-items:center; gap:10px; padding:0 14px;
+  background:linear-gradient(180deg, rgba(8,11,16,.72), transparent); pointer-events:none; }
+.reading-bar .back { pointer-events:auto; font:inherit; font-size:13px; cursor:pointer; color:#d8dbe2; background:rgba(8,11,16,.5);
+  border:1px solid rgba(255,255,255,.14); border-radius:9px; padding:7px 13px; }
+.reading-bar .back:hover { background:rgba(20,24,32,.8); }
+.reading-bar .title-chip { font-size:12.5px; color:#9aa1b2; letter-spacing:.06em; }

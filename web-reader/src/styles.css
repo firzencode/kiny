@@ -1,0 +1,14 @@
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; font-family: system-ui, "Noto Sans SC", sans-serif; background: #0d1117; color: #e8e8e8; }
+
+.app-status { display: flex; align-items: center; justify-content: center; min-height: 100vh; opacity: .7; }
+.app-error { color: #ff8585; padding: 0 24px; text-align: center; }
+
+/* 首屏门 */
+.start-gate { position: relative; z-index: 1; min-height: 100vh; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 28px; }
+.start-title { font-size: 2.4rem; letter-spacing: .1em; }
+.start-button { padding: 12px 32px; font-size: 1.1rem; color: #0d1117; background: #e8e8e8;
+  border: none; border-radius: 8px; cursor: pointer; }
+.start-button:hover { background: #fff; }

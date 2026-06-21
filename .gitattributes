@@ -1,0 +1,16 @@
+# 行尾基线：所有文本在仓库内统一存 LF，且工作区也强制 LF（eol=lf）。
+# eol=lf 优先级高于本机 core.autocrlf——跨 Windows/macOS 行为完全一致，
+# 不依赖各机器配置，杜绝 CRLF/LF 噪音造成的「伪修改」。
+# （git hooks 也由此规则覆盖：CRLF 会让 sh 执行 hook 时因 \r 出错。）
+* text=auto eol=lf
+
+# 二进制资源：禁止任何行尾/文本转换，防止 CRLF 损坏。
+*.jpg binary
+*.jpeg binary
+*.png binary
+*.gif binary
+*.webp binary
+*.mp3 binary
+*.wav binary
+*.ogg binary
+*.m4a binary
