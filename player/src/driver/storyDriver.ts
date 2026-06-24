@@ -1,8 +1,8 @@
 import { RuntimeError } from '@kiny/engine'
-import type { Story, ChoiceView } from '@kiny/engine'
+import type { Story, ChoiceView, RichSpan } from '@kiny/engine'
 import { type HostState, type ResolveAsset, emptyHost, applyCommand } from '../host/commands'
 
-export type LogEntry = { kind: 'narration'; text: string } | { kind: 'end' }
+export type LogEntry = { kind: 'narration'; spans: RichSpan[] } | { kind: 'end' }
 
 export interface PlayState {
   log: LogEntry[]
@@ -36,7 +36,7 @@ export function advance(story: Story, prev: PlayState, resolve: ResolveAsset): A
   try {
     while (story.canContinue) {
       const e = story.continue()
-      if (e.kind === 'text') log = [...log, { kind: 'narration', text: e.text }]
+      if (e.kind === 'text') log = [...log, { kind: 'narration', spans: e.spans }]
       else if (e.name === 'sfx') sfx.push(resolve(String(e.args[0]))) // 一次性音效：瞬时收集，不进 host
       else host = applyCommand(host, e, resolve)
     }

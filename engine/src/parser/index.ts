@@ -16,4 +16,6 @@ export type {
   LogicBlock,
   Command,
   InlineSegment,
+  InlineStyle,
+  RichTextIssue,
 } from './ast'

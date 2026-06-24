@@ -18,6 +18,8 @@ import { makeVariants } from './variants'
 import type { Variants } from './variants'
 import { RuntimeError } from './types'
 import type { ChoiceView, OutputEvent, StoryOptions } from './types'
+import type { RichSpan } from './spans'
+import { makeTextSpan, mergeSpans } from './spans'
 import { buildBlockPaths, enumerateChoices, fingerprint } from './snapshot'
 import type { StorySnapshot, RestoreData } from './snapshot'
 
@@ -26,7 +28,7 @@ const DEFAULT_SEED = 0x9e3779b9
 
 export class Story {
   private readonly stack = new FrameStack()
-  private buffer: string | null = null
+  private buffer: RichSpan[] | null = null
   private bufferGlued = false // buffer 末尾来自 glue 文本，待与后续内容粘连，不可 flush
   private ended = false
   private currentKnot!: Knot
@@ -213,11 +215,11 @@ export class Story {
   }
 
   /**
-   * 把 text 追加进文本缓冲，并设定本次写入是否为 glue 开口（待与后续粘连）。
+   * 把富文本 spans 追加进文本缓冲（glue 跨行时归并边界），并设定本次写入是否为 glue 开口（待与后续粘连）。
    * 唯一的 (buffer, bufferGlued) 写点，确保每次写都同步维护 glue 标记。
    */
-  private appendText(text: string, glue: boolean): void {
-    this.buffer = (this.buffer ?? '') + text
+  private appendSpans(spans: RichSpan[], glue: boolean): void {
+    this.buffer = mergeSpans(this.buffer ?? [], spans)
     this.bufferGlued = glue
   }
 
@@ -228,7 +230,7 @@ export class Story {
       const t = this.buffer
       this.buffer = null
       this.bufferGlued = false
-      return { kind: 'text', text: t }
+      return { kind: 'text', spans: t }
     }
     // buffer 空：取 parked 元素产出事件（当前唯一 park 即命令）。
     const cmd = this.parkedCommand()
@@ -254,7 +256,7 @@ export class Story {
     this.turns++
     const ev = this.takeChoice(entry.choice)
     // 点击正文追加进 buffer（与文本缓冲统一），成行（非 glue）下次 continue flush。
-    if (ev && ev.kind === 'text') this.appendText(ev.text, false)
+    if (ev && ev.kind === 'text') this.appendSpans(ev.spans, false)
   }
 
   /** 进入一个新的 knot 上下文：切 currentKnot、建全新节点局部作用域 L、记录访问回合。 */
@@ -318,7 +320,7 @@ export class Story {
       const el = frame.block[frame.index]!
       if (el.kind === 'text') {
         // 文本就地累积进 buffer；glue 则继续合并，否则成行（下一轮顶部 flush）。
-        this.appendText(this.renderText(el.segments, el.line), el.glue)
+        this.appendSpans(this.renderSpans(el.segments, el.line), el.glue)
         frame.index++
         continue
       }
@@ -350,7 +352,7 @@ export class Story {
     )
     if (available.length > 0) {
       this.pendingChoices = available.map((c, i) => ({
-        view: { text: this.renderText([...c.before, ...(c.inner ?? [])], c.line), index: i },
+        view: { spans: this.renderSpans([...c.before, ...(c.inner ?? [])], c.line), index: i },
         choice: c,
       }))
       return
@@ -389,7 +391,7 @@ export class Story {
       const g = this.G as Record<string, unknown>
       g[c.label] = ((g[c.label] as number) ?? 0) + 1
     }
-    const narrative = this.renderText([...c.before, ...c.after], c.line)
+    const narrative = this.renderSpans([...c.before, ...c.after], c.line)
     if (c.body.length > 0) {
       this.stack.push(c.body)
     } else if (c.resultDivert !== null) {
@@ -399,7 +401,7 @@ export class Story {
         line: c.resultDivert.line,
       }
     }
-    return narrative === '' ? null : { kind: 'text', text: narrative }
+    return narrative.length === 0 ? null : { kind: 'text', spans: narrative }
   }
 
   /** 弹掉所有已耗尽的栈顶帧，使 current 指向真正可执行的元素或栈空。 */
@@ -505,13 +507,19 @@ export class Story {
   }
 
   /**
-   * 渲染行内片段：literal 取 value 拼接；interp 段求值后转串（null/undefined→空串）。
+   * 渲染行内片段为富文本 spans：literal 取 value + 其 style；interp 段求值转串（null/undefined→空串）
+   * 并承继其 style；break → 换行 span。空文本段不产 span；相邻同样式文本段归并（纯文本恒为单 span）。
    * `line` 为片段所在行（TextLine.line / Choice.line），出错时透传给 RuntimeError 定位。
    */
-  private renderText(segments: InlineSegment[], line = 0): string {
-    let out = ''
+  private renderSpans(segments: InlineSegment[], line = 0): RichSpan[] {
+    const raw: RichSpan[] = []
     for (const seg of segments) {
-      if (seg.kind === 'literal') out += seg.value
+      if (seg.kind === 'break') {
+        raw.push({ kind: 'break' })
+        continue
+      }
+      let text: string
+      if (seg.kind === 'literal') text = seg.value
       else {
         let v: unknown
         try {
@@ -519,9 +527,11 @@ export class Story {
         } catch (e) {
           throw new RuntimeError(`JS 执行错误：${(e as Error).message}`, this.currentFile, line)
         }
-        out += v === undefined || v === null ? '' : String(v)
+        text = v === undefined || v === null ? '' : String(v)
       }
+      if (text === '') continue
+      raw.push(makeTextSpan(text, seg.style))
     }
-    return out
+    return mergeSpans([], raw) // 经 coalesce 归并相邻同样式段
   }
 }

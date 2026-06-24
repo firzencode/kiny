@@ -1,10 +1,12 @@
+import type { RichSpan } from './spans'
+
 export type OutputEvent =
-  | { kind: 'text'; text: string }
+  | { kind: 'text'; spans: RichSpan[] }
   | { kind: 'command'; name: string; args: unknown[] }
 
-/** 呈现给玩家的选项（列表文字 + 在 currentChoices 中的下标）。 */
+/** 呈现给玩家的选项（列表富文本 + 在 currentChoices 中的下标）。 */
 export interface ChoiceView {
-  text: string
+  spans: RichSpan[]
   index: number
 }
 

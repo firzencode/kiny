@@ -1,3 +1,4 @@
+import { plainText } from './spans'
 import { describe, it, expect } from 'vitest'
 import { story, play, texts } from './_test-helpers'
 
@@ -14,13 +15,13 @@ describe('runtime 3h —— 带参 + turns', () => {
   it('turns_since 跨回合递增', () => {
     const src = ['=== A ===', '* [去B] -> B', '=== B ===', '* [去C] -> C', '=== C ===', '距A{turns_since("A")}', '-> END'].join('\n')
     const s = story(src); const out: string[] = []
-    for(;;){ while(s.canContinue){const e=s.continue(); if(e.kind==='text')out.push(e.text)} if(s.currentChoices.length>0)s.choose(0); else break }
+    for(;;){ while(s.canContinue){const e=s.continue(); if(e.kind==='text')out.push(plainText(e.spans))} if(s.currentChoices.length>0)s.choose(0); else break }
     expect(out).toContain('距A2')  // 进A turns=0 visitedAt{A:0}；去B turns=1；去C turns=2；C 内 turns_since(A)=2-0=2
   })
   it('turns_since 未访问为 -1，访问后递增', () => {
     const src = ['=== A ===', '差{turns_since("B")}', '* [去B] -> B', '=== B ===', '差{turns_since("B")}', '-> END'].join('\n')
     const s = story(src); const out: string[] = []
-    for(;;){ while(s.canContinue){const e=s.continue(); if(e.kind==='text')out.push(e.text)} if(s.currentChoices.length>0)s.choose(0); else break }
+    for(;;){ while(s.canContinue){const e=s.continue(); if(e.kind==='text')out.push(plainText(e.spans))} if(s.currentChoices.length>0)s.choose(0); else break }
     expect(out[0]).toBe('差-1')   // 进 A 时 B 未访问
     expect(out[1]).toBe('差0')    // 刚进 B（同回合）
   })

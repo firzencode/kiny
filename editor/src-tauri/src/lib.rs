@@ -1,20 +1,32 @@
 mod kip;
+mod webpage;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // 运行时错误收集：日志插件 release 也启用，写 appLogDir、单文件 5MB 轮转、保留当前+1 归档。
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .target(tauri_plugin_log::Target::new(
+                    tauri_plugin_log::TargetKind::LogDir { file_name: Some("kiny".into()) },
+                ))
+                .level(log::LevelFilter::Info)
+                .max_file_size(5_000_000)
+                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepOne)
+                .build(),
+        )
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_clipboard_manager::init())
-        .invoke_handler(tauri::generate_handler![kip::export_kip])
-        .setup(|app| {
-            if cfg!(debug_assertions) {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Info)
-                        .build(),
-                )?;
-            }
+        .plugin(tauri_plugin_opener::init())
+        .invoke_handler(tauri::generate_handler![kip::export_kip, webpage::export_webpage])
+        .setup(|_app| {
+            // 启动行：定位版本 / 平台；Rust 端 panic 也经 log 插件落同一文件。
+            log::info!(
+                "app started · Kiny 编辑器 v{} · {}",
+                env!("CARGO_PKG_VERSION"),
+                std::env::consts::OS
+            );
             Ok(())
         })
         .run(tauri::generate_context!())

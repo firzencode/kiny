@@ -4,8 +4,8 @@ import userEvent from '@testing-library/user-event'
 import { loadProjectFromFiles, analyze, resolveStart, createStory } from '@kiny/engine'
 import { App } from './App'
 
-vi.mock('./load/loadDemo')
-import { loadDemo } from './load/loadDemo'
+vi.mock('./load/loadStory')
+import { loadStory } from './load/loadStory'
 
 beforeEach(() => {
   window.HTMLMediaElement.prototype.play = vi.fn().mockResolvedValue(undefined)
@@ -25,7 +25,7 @@ function realStory() {
 
 describe('App', () => {
   it('加载成功 → StartGate → 点开始进入故事', async () => {
-    vi.mocked(loadDemo).mockResolvedValue({
+    vi.mocked(loadStory).mockResolvedValue({
       ok: true, value: { story: realStory(), assetBase: 'demo/', title: '雾港之夜' },
     })
     render(<App />)
@@ -34,8 +34,16 @@ describe('App', () => {
     expect(screen.getByText('开场白。')).toBeInTheDocument()
   })
 
+  it('加载成功后页面标题置为故事名', async () => {
+    vi.mocked(loadStory).mockResolvedValue({
+      ok: true, value: { story: realStory(), assetBase: 'demo/', title: '雾港之夜' },
+    })
+    render(<App />)
+    await waitFor(() => expect(document.title).toBe('雾港之夜'))
+  })
+
   it('加载失败 → 显示错误消息', async () => {
-    vi.mocked(loadDemo).mockResolvedValue({ ok: false, message: '加载失败：缺少 kiny.json' })
+    vi.mocked(loadStory).mockResolvedValue({ ok: false, message: '加载失败：缺少 kiny.json' })
     render(<App />)
     await waitFor(() => expect(screen.getByText(/加载失败/)).toBeInTheDocument())
   })

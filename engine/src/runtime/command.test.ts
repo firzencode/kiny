@@ -17,16 +17,16 @@ describe('runtime 3a —— 命令事件', () => {
     const src = ['=== A ===', '@bg_show("h.jpg")', '雾涌上来。', '-> END'].join('\n')
     expect(drain(story(src))).toEqual([
       { kind: 'command', name: 'bg_show', args: ['h.jpg'] },
-      { kind: 'text', text: '雾涌上来。' },
+      { kind: 'text', spans: [{ text: '雾涌上来。' }] },
     ])
   })
 
   it('glue 文本后接命令：先 flush 文本（命令是硬边界）', () => {
     const src = ['=== A ===', '甲<>', '@bg_hide()', '乙', '-> END'].join('\n')
     expect(drain(story(src))).toEqual([
-      { kind: 'text', text: '甲' },
+      { kind: 'text', spans: [{ text: '甲' }] },
       { kind: 'command', name: 'bg_hide', args: [] },
-      { kind: 'text', text: '乙' },
+      { kind: 'text', spans: [{ text: '乙' }] },
     ])
   })
 

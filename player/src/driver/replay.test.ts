@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { loadProjectFromFiles, analyze, resolveStart } from '@kiny/engine'
+import { loadProjectFromFiles, analyze, resolveStart, plainText } from '@kiny/engine'
 import type { ValidatedProgram } from '@kiny/engine'
 import { replay } from './replay'
 import type { ResolveAsset } from '../host/commands'
@@ -71,7 +71,7 @@ describe('replay', () => {
     expect(r.appliedCount).toBe(2)
     expect(r.state.ended).toBe(true)
     expect(r.state.error).toBeNull()
-    const prose = r.state.log.filter((e) => e.kind === 'narration').map((e: any) => e.text)
+    const prose = r.state.log.filter((e) => e.kind === 'narration').map((e: any) => plainText(e.spans))
     expect(prose).toContain('进了 A。')
     expect(prose).toContain('收束。')
   })
@@ -81,7 +81,7 @@ describe('replay', () => {
     const r = replay(program, start, 1, [0, 5], RESOLVE) // 第二步位置 5 越界
     expect(r.appliedCount).toBe(1)
     expect(r.state.ended).toBe(false)
-    expect(r.state.choices.map((c) => c.text)).toEqual(['A1', 'A2']) // 停在 A 节点的选项前
+    expect(r.state.choices.map((c) => plainText(c.spans))).toEqual(['A1', 'A2']) // 停在 A 节点的选项前
   })
 
   it('故事提前结束：剩余 choiceSeq 被安全忽略', () => {
@@ -99,7 +99,7 @@ describe('replay', () => {
     const a = replay(program, '雾号', 5, [0, 0, 0], RESOLVE)
     const b = replay(program, '雾号', 5, [0, 0, 0], RESOLVE)
     expect(a).toEqual(b)
-    const prose = a.state.log.filter((e) => e.kind === 'narration').map((e: any) => e.text)
+    const prose = a.state.log.filter((e) => e.kind === 'narration').map((e: any) => plainText(e.spans))
     expect(prose[0]).toBe('今夜骰子 5 点。') // seed 5 下 random(1,6)=5（engine 黄金 trace）
   })
 
@@ -107,7 +107,7 @@ describe('replay', () => {
     const { program, start } = build(TREE)
     const r = replay(program, start, 1, [], RESOLVE)
     expect(r.appliedCount).toBe(0)
-    expect(r.state.choices.map((c) => c.text)).toEqual(['A', 'B'])
+    expect(r.state.choices.map((c) => plainText(c.spans))).toEqual(['A', 'B'])
   })
 
   it('运行时错误：重放安全停在出错点，state.error 置位、不抛', () => {

@@ -25,6 +25,16 @@ describe('SettingsDialog', () => {
     expect(screen.getByRole('button', { name: '保存' })).toBeDisabled()
   })
 
+  it('字号单位「px」渲染为步进器内独立的 .settings-unit 后缀格（样式可单独定位）', () => {
+    const { container } = render(<SettingsDialog {...base} />)
+    const units = container.querySelectorAll('.settings-stepper .settings-unit')
+    // 代码字号 + 正文字号两处带 px 单位；行距两处无单位（unit=""，不渲染 span，数值格补 .nounit 右边框）。
+    expect(units).toHaveLength(2)
+    units.forEach((u) => expect(u.textContent).toBe('px'))
+    // 行距两处无单位：.settings-stepval.nounit 各一 = 2
+    expect(container.querySelectorAll('.settings-stepval.nounit')).toHaveLength(2)
+  })
+
   it('改代码字号 → 仅动草稿（保存启用、documentElement 不变）', async () => {
     render(<SettingsDialog {...base} />)
     await userEvent.click(screen.getByRole('button', { name: '增大代码字号' }))

@@ -10,9 +10,9 @@ beforeEach(() => {
 })
 
 const atChoice: PlayState = {
-  log: [{ kind: 'narration', text: '开场。' }],
+  log: [{ kind: 'narration', spans: [{ text: '开场。' }] }],
   host: { bg: null, bgm: null },
-  choices: [{ text: 'A', index: 0 }, { text: 'B', index: 1 }],
+  choices: [{ spans: [{ text: 'A' }], index: 0 }, { spans: [{ text: 'B' }], index: 1 }],
   ended: false, error: null,
 }
 

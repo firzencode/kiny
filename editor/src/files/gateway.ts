@@ -49,6 +49,13 @@ export interface FileGateway {
   pickSaveKipPath(defaultName: string): Promise<string | null>
   /** 把项目目录 dir 打包成 .kip 写到 destPath（reader 可导入的 zip）。 */
   exportKip(dir: string, destPath: string): Promise<void>
+  /** 弹原生目录对话框选导出网页的父目录；用户取消返 null。 */
+  pickExportWebpageDir(): Promise<string | null>
+  /**
+   * 把项目导出成自包含独立网页：在 parentDir 下建 folderName 文件夹，写注入了 projectData 的
+   * index.html + 拷 assets。返回最终目标文件夹路径（用于成功提示）。
+   */
+  exportWebpage(projectDir: string, parentDir: string, folderName: string, projectData: string): Promise<string>
   /** 危险操作确认：真实现弹原生框，内存桩返回固定值。 */
   confirm(message: string): Promise<boolean>
   /** 强制关闭窗口（destroy，绕过 close-requested 守卫，避免自触发死循环）。 */
@@ -99,4 +106,24 @@ export function starterManifest(name: string): Manifest {
 export function defaultKipName(storyName: string): string {
   const base = storyName.replace(/[\\/:*?"<>|]/g, '').trim()
   return `${base || 'story'}.kip`
+}
+
+/** 故事名 → 默认导出网页文件夹名 `<名>-web`（去非法字符，空结果回退 story-web）。 */
+export function defaultWebpageDirName(storyName: string): string {
+  const base = storyName.replace(/[\\/:*?"<>|]/g, '').trim()
+  return `${base || 'story'}-web`
+}
+
+/**
+ * 组装导出独立网页的内联数据（写入 `window.__KINY_PROJECT__`，对应 web-reader 的 InlineProject）：
+ * manifest 文本 + 各 .kin 路径→源码。资源走 `assets/` 相对引用（资源名自带 assets/ 前缀），故 assetBase 空。
+ *
+ * 数据被原样拼进导出 index.html 的内联 `<script>`，故须转义 `< > &`——否则 .kin 文本里的
+ * `</script>` 会提前闭合脚本、损坏页面。`\uXXXX` 是合法 JSON 转义，浏览器解析回原字符，往返无损。
+ */
+export function buildProjectData(manifest: Manifest, files: { path: string; source: string }[]): string {
+  const fileMap: Record<string, string> = {}
+  for (const f of files) fileMap[f.path] = f.source
+  const json = JSON.stringify({ manifest: JSON.stringify(manifest), files: fileMap, assetBase: '' })
+  return json.replace(/[<>&]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`)
 }

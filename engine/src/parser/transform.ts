@@ -15,6 +15,7 @@ import type {
   Conditional,
   ConditionalBranch,
   InlineSegment,
+  RichTextIssue,
 } from './ast'
 import type { RawFile, RawBlock, RawChoice, RawChoiceGroup, RawConditional, RawBranch, RawKnot, RawStitch } from './rawblock'
 
@@ -27,10 +28,12 @@ import type { RawFile, RawBlock, RawChoice, RawChoiceGroup, RawConditional, RawB
 export function transform(file: RawFile): ProjectFile {
   const path = file.path
   let nextId = 0
+  const richTextIssues: RichTextIssue[] = []
 
   function scanText(text: string, line: number): { segments: InlineSegment[]; glue: boolean } {
     const r = scanInline(text, nextId, line, path)
     nextId = r.nextId
+    if (r.issues.length > 0) richTextIssues.push(...r.issues)
     return { segments: r.segments, glue: r.glue }
   }
 
@@ -155,5 +158,5 @@ export function transform(file: RawFile): ProjectFile {
 
   const preamble = transformBlock(file.preamble)
   const knots = file.knots.map(transformKnot)
-  return { path, preamble, knots }
+  return { path, preamble, knots, richTextIssues }
 }

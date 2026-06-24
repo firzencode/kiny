@@ -24,6 +24,7 @@ describe('HelpDialog', () => {
     expect(screen.getAllByText('节点').length).toBeGreaterThan(0)
     expect(screen.getAllByText('带参节点').length).toBeGreaterThan(0)
     expect(screen.getAllByText('文本变体').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('内联富文本').length).toBeGreaterThan(0)
     expect(screen.getAllByText('内置命令').length).toBeGreaterThan(0)
   })
 

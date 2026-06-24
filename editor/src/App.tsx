@@ -3,7 +3,7 @@ import { resolveStart } from '@kiny/engine'
 import type { ValidatedProgram } from '@kiny/engine'
 import type { PlayState, ResolveAsset } from '@kiny/player'
 import type { FileGateway } from './files/gateway'
-import { defaultKipName } from './files/gateway'
+import { defaultKipName, defaultWebpageDirName, buildProjectData } from './files/gateway'
 import { editorReducer, initialEditorState, anyDirty, activeBuffer } from './state/editorReducer'
 import { useDebouncedValidation, type ValidationOutcome } from './hooks/useDebouncedValidation'
 import { createIncrementalValidator } from './validate/validate'
@@ -22,6 +22,7 @@ import { ConfirmCloseDialog, type CloseIntent } from './components/ConfirmCloseD
 import { SettingsDialog } from './components/SettingsDialog'
 import { loadSettings, saveSettings, applySettingsVars, clampSettings, DEFAULT_SETTINGS, SETTINGS_BOUNDS, type Settings } from './state/settings'
 import { loadSession, saveSession, resolveSession } from './state/session'
+import { logErrorEntry, ErrorDetailsDialog } from '@kiny/error-report'
 
 const SESSION_SEED = 0x5eed
 const idResolve: ResolveAsset = (n: string) => n
@@ -61,8 +62,12 @@ export function App({ gateway }: { gateway: FileGateway }) {
   const [activeLine, setActiveLine] = useState(1)
   // notice 横幅承载瞬时消息；tone 决定着色/语义（默认 error，成功显式传 'success'）。
   const [notice, setNoticeRaw] = useState<{ text: string; tone: 'error' | 'success' } | null>(null)
-  const setNotice = (msg: string | null, tone: 'error' | 'success' = 'error') =>
+  const [showErrorDetails, setShowErrorDetails] = useState(false)
+  const setNotice = (msg: string | null, tone: 'error' | 'success' = 'error') => {
+    // 错误类 notice 同时记进运行时错误日志，便于事后排查。
+    if (msg != null && tone === 'error') logErrorEntry({ source: 'operation:editor', message: msg })
     setNoticeRaw(msg == null ? null : { text: msg, tone })
+  }
   const [theme, setTheme] = useState<Theme>(loadTheme)
   const [view, setView] = useState<ViewPrefs>(loadView)
   const [settings, setSettings] = useState<Settings>(loadSettings)
@@ -199,6 +204,22 @@ export function App({ gateway }: { gateway: FileGateway }) {
       setNotice(`导出失败：${errMsg(e)}`)
     }
   }
+  const onExportWebpage = async () => {
+    if (!state.projectDir || !state.manifest) return
+    if (anyDirty(state)) {
+      if (!(await gateway.confirm('导出前需保存全部改动，保存并继续？'))) return
+      if (!(await saveAllDirty())) return
+    }
+    const parent = await gateway.pickExportWebpageDir()
+    if (parent == null) return
+    const projectData = buildProjectData(state.manifest, Object.values(state.files))
+    try {
+      const dest = await gateway.exportWebpage(state.projectDir, parent, defaultWebpageDirName(state.manifest.name), projectData)
+      setNotice(`已导出到 ${dest}`, 'success')
+    } catch (e) {
+      setNotice(`导出失败：${errMsg(e)}`)
+    }
+  }
 
   // 关 tab 守卫：脏则弹确认框，否则直接关。
   const requestCloseTab = (path: string) => {
@@ -290,6 +311,7 @@ export function App({ gateway }: { gateway: FileGateway }) {
   }
   const onAbout = () => setHelp('about')
   const onSyntaxRef = () => setHelp('syntax')
+  const onReportIssue = () => setShowErrorDetails(true)
   const onOpenSettings = () => setSettingsOpen(true)
   const onSaveSettings = (next: Settings, th: Theme) => { setSettings(clampSettings(next)); setTheme(th); setSettingsOpen(false) }
   const onCancelSettings = () => setSettingsOpen(false)
@@ -375,12 +397,14 @@ export function App({ gateway }: { gateway: FileGateway }) {
         onSave={onSave}
         onSaveAll={onSaveAll}
         onExportKip={onExportKip}
+        onExportWebpage={onExportWebpage}
         onExit={requestExit}
         onEdit={(cmd) => editorRef.current?.exec(cmd)}
         onSetTheme={setTheme}
         onToggleView={(key) => setView((v) => ({ ...v, [key]: !v[key] }))}
         onSyntaxRef={onSyntaxRef}
         onAbout={onAbout}
+        onReportIssue={onReportIssue}
         onOpenSettings={onOpenSettings}
         onZoomIn={onZoomIn}
         onZoomOut={onZoomOut}
@@ -392,9 +416,13 @@ export function App({ gateway }: { gateway: FileGateway }) {
           role={notice.tone === 'success' ? 'status' : 'alert'}
         >
           <span className="toolbar-notice-msg">{notice.text}</span>
+          {notice.tone === 'error' && (
+            <button className="toolbar-notice-details" onClick={() => setShowErrorDetails(true)}>查看详情</button>
+          )}
           <button className="toolbar-notice-close" aria-label="关闭提示" onClick={() => setNotice(null)}>×</button>
         </div>
       )}
+      <ErrorDetailsDialog open={showErrorDetails} onClose={() => setShowErrorDetails(false)} />
       <div className="workbench" style={cols}>
         {view.sidebar && (
           <div className="sidebar">

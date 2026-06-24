@@ -20,26 +20,28 @@ export interface NodeInfo {
 const KEYWORD = /^(let|true|false|null|END)$/
 const FUNC = /^(random|shuffle|cycle|seq|once|turns_since|turns)$/
 
-/** 一段「纯文本/表达式」里的行内 token：字符串 / 插值 / 跳转 / 选项括号 / 命令 / 标识符 / 数字。 */
+/** 一段「纯文本/表达式」里的行内 token：内联富文本标签 / 字符串 / 插值 / 跳转 / 选项括号 / 命令 / 标识符 / 数字。 */
 function inlineTokens(s: string): Token[] {
   const out: Token[] = []
+  // 富文本标签放最前、优先匹配：仅当 < 后构成合法标签（§3.6）才识别，否则裸 < 落入正文（如 1 < 2）。
   const re =
-    /("(?:[^"\\]|\\.)*")|(\{[^}]*\})|(->\s*[^\s[\](){}]+)|(\[[^\]]*\])|(@[A-Za-z_]\w*)|([A-Za-z_]\w*)|(\d+(?:\.\d+)?)/g
+    /(<\/?(?:b|i|u|s|color|size)(?:=[^>]*)?>|<br\s*\/?>)|("(?:[^"\\]|\\.)*")|(\{[^}]*\})|(->\s*[^\s[\](){}]+)|(\[[^\]]*\])|(@[A-Za-z_]\w*)|([A-Za-z_]\w*)|(\d+(?:\.\d+)?)/g
   let m: RegExpExecArray | null
   let last = 0
   while ((m = re.exec(s))) {
     if (m.index > last) out.push({ cls: 't-text', text: s.slice(last, m.index) })
-    if (m[1]) out.push({ cls: 't-string', text: m[1] })
-    else if (m[2]) {
+    if (m[1]) out.push({ cls: 't-tag', text: m[1] })
+    else if (m[2]) out.push({ cls: 't-string', text: m[2] })
+    else if (m[3]) {
       out.push({ cls: 't-interp', text: '{' })
-      for (const t of inlineTokens(m[2].slice(1, -1))) out.push(t)
+      for (const t of inlineTokens(m[3].slice(1, -1))) out.push(t)
       out.push({ cls: 't-interp', text: '}' })
-    } else if (m[3]) out.push({ cls: 't-divert', text: m[3] })
-    else if (m[4]) out.push({ cls: 't-bracket', text: m[4] })
-    else if (m[5]) out.push({ cls: 't-command', text: m[5] })
-    else if (m[6])
-      out.push({ cls: KEYWORD.test(m[6]) ? 't-keyword' : FUNC.test(m[6]) ? 't-interp' : 't-text', text: m[6] })
-    else if (m[7]) out.push({ cls: 't-num', text: m[7] })
+    } else if (m[4]) out.push({ cls: 't-divert', text: m[4] })
+    else if (m[5]) out.push({ cls: 't-bracket', text: m[5] })
+    else if (m[6]) out.push({ cls: 't-command', text: m[6] })
+    else if (m[7])
+      out.push({ cls: KEYWORD.test(m[7]) ? 't-keyword' : FUNC.test(m[7]) ? 't-interp' : 't-text', text: m[7] })
+    else if (m[8]) out.push({ cls: 't-num', text: m[8] })
     last = re.lastIndex
   }
   if (last < s.length) out.push({ cls: 't-text', text: s.slice(last) })

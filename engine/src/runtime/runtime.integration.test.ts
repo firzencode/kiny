@@ -1,3 +1,4 @@
+import { plainText } from './spans'
 import { describe, it, expect } from 'vitest'
 import { parse } from '../parser'
 import { analyze } from '../analyze'
@@ -39,11 +40,11 @@ function trace(src: string, script: number[], opts: { start?: string; seed?: num
   for (;;) {
     while (s.canContinue) {
       const e: OutputEvent = s.continue()
-      if (e.kind === 'text') lines.push(`T ${e.text}`)
+      if (e.kind === 'text') lines.push(`T ${plainText(e.spans)}`)
       else lines.push(`C ${e.name}(${e.args.map(String).join(',')})`)
     }
     if (s.currentChoices.length > 0) {
-      lines.push('? ' + s.currentChoices.map((c) => c.text).join(' | '))
+      lines.push('? ' + s.currentChoices.map((c) => plainText(c.spans)).join(' | '))
       if (si >= script.length) break
       s.choose(script[si++]!)
     } else break

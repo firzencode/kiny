@@ -12,3 +12,6 @@ body { margin: 0; font-family: system-ui, "Noto Sans SC", sans-serif; background
 .start-button { padding: 12px 32px; font-size: 1.1rem; color: #0d1117; background: #e8e8e8;
   border: none; border-radius: 8px; cursor: pointer; }
 .start-button:hover { background: #fff; }
+.start-credit { position: absolute; bottom: 20px; font-size: .8rem; letter-spacing: .04em;
+  color: #8b949e; text-decoration: none; opacity: .7; transition: opacity .15s; }
+.start-credit:hover { opacity: 1; text-decoration: underline; }

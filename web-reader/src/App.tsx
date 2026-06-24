@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { Story } from '@kiny/engine'
 import { advance, initialState, type PlayState, type ResolveAsset } from '@kiny/player'
-import { loadDemo, type LoadedStory } from './load/loadDemo'
+import { loadStory, type LoadedStory } from './load/loadStory'
 import { StartGate } from './components/StartGate'
 import { PlayingView } from './components/PlayingView'
 
@@ -16,8 +16,9 @@ export function App() {
 
   useEffect(() => {
     let alive = true
-    loadDemo().then((out) => {
+    loadStory().then((out) => {
       if (!alive) return
+      if (out.ok) document.title = out.value.title // 导出网页 / demo 标签页标题取故事名
       setPhase(out.ok ? { kind: 'ready', loaded: out.value } : { kind: 'error', message: out.message })
     })
     return () => { alive = false }

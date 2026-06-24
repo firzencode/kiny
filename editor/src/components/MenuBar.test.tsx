@@ -25,11 +25,13 @@ function setup(over: Partial<ComponentProps<typeof MenuBar>> = {}) {
     onToggleView: vi.fn(),
     onSyntaxRef: vi.fn(),
     onAbout: vi.fn(),
+    onReportIssue: vi.fn(),
     onOpenSettings: vi.fn(),
     onZoomIn: vi.fn(),
     onZoomOut: vi.fn(),
     onZoomReset: vi.fn(),
     onExportKip: vi.fn(),
+    onExportWebpage: vi.fn(),
     ...over,
   }
   render(<MenuBar {...props} />)
@@ -87,6 +89,13 @@ describe('MenuBar', () => {
     expect(p.onSyntaxRef).toHaveBeenCalled()
   })
 
+  it('帮助菜单：问题反馈 → onReportIssue', async () => {
+    const p = setup()
+    await openMenu('帮助')
+    await userEvent.click(await screen.findByRole('menuitem', { name: /问题反馈/ }))
+    expect(p.onReportIssue).toHaveBeenCalled()
+  })
+
   it('校验通过显示状态胶囊', () => {
     setup({ errorCount: 0, warnCount: 0, hasProgram: true })
     expect(screen.getByText('校验通过')).toBeInTheDocument()
@@ -120,6 +129,13 @@ describe('MenuBar', () => {
     await openMenu('文件')
     await userEvent.click(await screen.findByRole('menuitem', { name: '导出故事包（.kip）...' }))
     expect(p.onExportKip).toHaveBeenCalled()
+  })
+
+  it('导出独立网页：有项目且无错误时可点并回调', async () => {
+    const p = setup({ projectName: '雾港之夜', errorCount: 0 })
+    await openMenu('文件')
+    await userEvent.click(await screen.findByRole('menuitem', { name: '导出独立网页...' }))
+    expect(p.onExportWebpage).toHaveBeenCalled()
   })
 
   it('导出故事包：无项目时禁用', async () => {

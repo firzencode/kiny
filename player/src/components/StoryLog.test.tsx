@@ -6,8 +6,8 @@ import type { LogEntry } from '../driver/storyDriver'
 describe('StoryLog', () => {
   it('按序渲染叙事行', () => {
     const entries: LogEntry[] = [
-      { kind: 'narration', text: '第一行。' },
-      { kind: 'narration', text: '第二行。' },
+      { kind: 'narration', spans: [{ text: '第一行。' }] },
+      { kind: 'narration', spans: [{ text: '第二行。' }] },
     ]
     const { getByText } = render(<StoryLog entries={entries} />)
     expect(getByText('第一行。')).toBeInTheDocument()

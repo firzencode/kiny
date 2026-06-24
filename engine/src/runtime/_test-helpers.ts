@@ -2,6 +2,7 @@ import { parse } from '../parser'
 import { analyze, resolveStart } from '../analyze'
 import { createStory } from './index'
 import type { OutputEvent } from './types'
+import { plainText } from './spans'
 
 /** 建 Story：parse → analyze → createStory（start 默认首 knot 名）。 */
 export function story(src: string, start?: string) {
@@ -27,9 +28,9 @@ export function drain(s: ReturnType<typeof story>): OutputEvent[] {
   return out
 }
 
-/** drain 后取所有 text 事件的字符串。 */
+/** drain 后取所有 text 事件的纯文本字符串。 */
 export function texts(s: ReturnType<typeof story>): string[] {
-  return drain(s).flatMap((e) => (e.kind === 'text' ? [e.text] : []))
+  return drain(s).flatMap((e) => (e.kind === 'text' ? [plainText(e.spans)] : []))
 }
 
 /** 跑到选项点，返回此前文本；按 script 依次 choose；收集全程文本。 */
@@ -40,10 +41,10 @@ export function play(s: ReturnType<typeof story>, script: number[]): { texts: st
   for (;;) {
     while (s.canContinue) {
       const e: OutputEvent = s.continue()
-      if (e.kind === 'text') texts.push(e.text)
+      if (e.kind === 'text') texts.push(plainText(e.spans))
     }
     if (s.currentChoices.length > 0) {
-      choices.push(s.currentChoices.map((c) => c.text))
+      choices.push(s.currentChoices.map((c) => plainText(c.spans)))
       if (si >= script.length) break
       s.choose(script[si++]!)
     } else break

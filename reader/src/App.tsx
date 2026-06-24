@@ -8,6 +8,7 @@ import { subscribeKipDrop } from './library/importDrop'
 import { LibraryView } from './library/LibraryView'
 import { ReadingView } from './reading/ReadingView'
 import type { LibraryItem } from './types'
+import { logErrorEntry, ErrorDetailsDialog, type ErrorSource } from '@kiny/error-report'
 
 type Reading = { story: Story; resolveAsset: ResolveAsset; first: PlayState; title: string }
 type View = { kind: 'library' } | { kind: 'reading'; reading: Reading }
@@ -17,8 +18,16 @@ export function App() {
   const [view, setView] = useState<View>({ kind: 'library' })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [showErrorDetails, setShowErrorDetails] = useState(false)
 
-  const refresh = () => listLibrary().then(setItems).catch((e) => setError(String(e)))
+  /** 设错误提示并记进运行时错误日志（带来源与 stack），便于事后排查。 */
+  const fail = (e: unknown, source: ErrorSource, fallback: string) => {
+    const msg = e instanceof Error ? e.message : fallback
+    logErrorEntry({ source, message: msg, stack: e instanceof Error ? e.stack : undefined })
+    setError(msg)
+  }
+
+  const refresh = () => listLibrary().then(setItems).catch((e) => fail(e, 'operation:listLibrary', '加载书架失败'))
   useEffect(() => { void refresh() }, [])
   useEffect(() => {
     const un = subscribeKipDrop((paths) => { void runImport(paths[0]) })
@@ -35,7 +44,7 @@ export function App() {
       await importKip(path)
       await refresh()
     } catch (e) {
-      setError(e instanceof Error ? e.message : '导入失败')
+      fail(e, 'operation:importKip', '导入失败')
     } finally {
       setBusy(false)
     }
@@ -43,13 +52,13 @@ export function App() {
 
   async function openStory(item: LibraryItem) {
     const out = await loadStory(item.dir)
-    if (!out.ok) { setError(out.message); return }
+    if (!out.ok) { logErrorEntry({ source: 'operation:openStory', message: out.message }); setError(out.message); return }
     try {
       // 在用户手势内算首帧（StrictMode 安全 + 尽量解锁音频）
       const first = advance(out.story, initialState, out.resolveAsset).state
       setView({ kind: 'reading', reading: { story: out.story, resolveAsset: out.resolveAsset, first, title: out.title } })
     } catch (e) {
-      setError(e instanceof Error ? e.message : '打开故事失败')
+      fail(e, 'operation:openStory', '打开故事失败')
     }
   }
 
@@ -60,7 +69,7 @@ export function App() {
       await deleteStory(id)
       await refresh()
     } catch (e) {
-      setError(e instanceof Error ? e.message : '删除失败')
+      fail(e, 'operation:deleteStory', '删除失败')
     }
   }
 
@@ -69,7 +78,13 @@ export function App() {
   }
   return (
     <>
-      {error && <div className="toast-error" onClick={() => setError(null)}>{error}</div>}
+      {error && (
+        <div className="toast-error">
+          <span onClick={() => setError(null)}>{error}</span>
+          <button className="toast-error-details" onClick={() => setShowErrorDetails(true)}>查看详情</button>
+        </div>
+      )}
+      <ErrorDetailsDialog open={showErrorDetails} onClose={() => setShowErrorDetails(false)} />
       <LibraryView items={items} busy={busy} onOpen={openStory} onDelete={removeStory} onImport={() => runImport()} />
     </>
   )

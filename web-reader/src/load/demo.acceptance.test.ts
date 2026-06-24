@@ -2,8 +2,8 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
-import { loadProjectFromFiles, analyze, resolveStart, createStory } from '@kiny/engine'
-import type { Story } from '@kiny/engine'
+import { loadProjectFromFiles, analyze, resolveStart, createStory, plainText } from '@kiny/engine'
+import type { Story, RichSpan } from '@kiny/engine'
 import { initialState, advance, choose, type PlayState, type ResolveAsset } from '@kiny/player'
 
 // 验收：用强制种子驱动内置 demo《雾港之夜》，覆盖设计稿 §7——
@@ -38,12 +38,12 @@ function playthrough(seed: number) {
     },
     /** 当前可见选项文案（按引擎顺序）。 */
     labels() {
-      return state.choices.map((c) => c.text)
+      return state.choices.map((c) => plainText(c.spans))
     },
     /** 按文案子串选中一个选项并推进；找不到即报错。 */
     click(sub: string) {
-      const c = state.choices.find((c) => c.text.includes(sub))
-      if (!c) throw new Error(`无选项含「${sub}」，现有：${state.choices.map((c) => c.text).join(' | ')}`)
+      const c = state.choices.find((c) => plainText(c.spans).includes(sub))
+      if (!c) throw new Error(`无选项含「${sub}」，现有：${state.choices.map((c) => plainText(c.spans)).join(' | ')}`)
       state = choose(story, state, c.index, RESOLVE).state
       expect(state.error, '驱动中不应出错').toBeNull()
       return this
@@ -52,13 +52,13 @@ function playthrough(seed: number) {
     ending() {
       expect(state.ended, '应已抵达结局').toBe(true)
       const narr = state.log.filter((e) => e.kind === 'narration')
-      return (narr[narr.length - 1] as { text: string }).text
+      return plainText((narr[narr.length - 1] as { kind: 'narration'; spans: RichSpan[] }).spans)
     },
     /** 全部叙述拼接（用于检查结局风味句是否出现）。 */
     prose() {
       return state.log
-        .filter((e): e is { kind: 'narration'; text: string } => e.kind === 'narration')
-        .map((e) => e.text)
+        .filter((e) => e.kind === 'narration')
+        .map((e) => plainText((e as { kind: 'narration'; spans: RichSpan[] }).spans))
         .join('\n')
     },
   }

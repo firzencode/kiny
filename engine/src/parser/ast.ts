@@ -1,7 +1,33 @@
-/** 行内片段：字面文本（转义已还原）或 { JS 表达式 } 插值（带变体计数用的稳定 id）。 */
+/** 内联富文本样式：标签栈扁平化后挂在 literal / interp 段上的当前样式快照。无样式时整体省略。 */
+export interface InlineStyle {
+  bold?: boolean
+  italic?: boolean
+  underline?: boolean
+  strike?: boolean
+  /** `#rgb` / `#rrggbb` / 字母构成的 CSS 具名色；非法值不落（诊断另出）。 */
+  color?: string
+  /** 相对正文字号的正数倍数；非法值不落（诊断另出）。 */
+  size?: number
+}
+
+/**
+ * 行内片段：
+ * - `literal` 字面文本（转义已还原），可带富文本 `style`；
+ * - `interp` `{ JS 表达式 }` 插值（带变体计数用的稳定 id），可带富文本 `style`；
+ * - `break` 显式换行 `<br>`（自闭合，无文本）。
+ * 无标签的纯文本不带 `style` 字段——向后兼容既有故事。
+ */
 export type InlineSegment =
-  | { kind: 'literal'; value: string }
-  | { kind: 'interp'; code: string; id: number }
+  | { kind: 'literal'; value: string; style?: InlineStyle }
+  | { kind: 'interp'; code: string; id: number; style?: InlineStyle }
+  | { kind: 'break' }
+
+/** 一处内联富文本问题：未闭合 / 错配标签、非法颜色 / 字号值。由 scanInline 收集、analyze 转诊断。 */
+export interface RichTextIssue {
+  code: 'rich-unclosed' | 'rich-mismatch' | 'rich-bad-color' | 'rich-bad-size'
+  message: string
+  line: number
+}
 
 export interface TextLine {
   kind: 'text'
@@ -101,4 +127,6 @@ export interface ProjectFile {
   path: string
   preamble: ContentElement[]
   knots: Knot[]
+  /** 本文件全部内联富文本问题（文档序），analyze 转 error 级诊断。无问题为空数组。 */
+  richTextIssues: RichTextIssue[]
 }

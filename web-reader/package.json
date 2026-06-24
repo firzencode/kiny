@@ -1,6 +1,6 @@
 {
   "name": "@kiny/web-reader",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,6 +8,7 @@
     "dev": "vite",
     "prebuild": "node ../scripts/stage-sample.mjs ../samples/雾港之夜 public/demo --files-json",
     "build": "tsc --noEmit && vite build",
+    "build:template": "vite build --mode template",
     "preview": "vite preview",
     "pretest": "node ../scripts/stage-sample.mjs ../samples/雾港之夜 public/demo --files-json",
     "test": "vitest run",
@@ -31,6 +32,7 @@
     "jsdom": "^25.0.0",
     "typescript": "^5.7.0",
     "vite": "^5.4.0",
+    "vite-plugin-singlefile": "^2.3.3",
     "vitest": "^2.1.0"
   }
 }

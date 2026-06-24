@@ -10,9 +10,9 @@ beforeEach(() => {
 })
 
 const atChoice: PlayState = {
-  log: [{ kind: 'narration', text: '开场白。' }],
+  log: [{ kind: 'narration', spans: [{ text: '开场白。' }] }],
   host: { bg: null, bgm: null },
-  choices: [{ text: '去左边', index: 0 }, { text: '去右边', index: 1 }],
+  choices: [{ spans: [{ text: '去左边' }], index: 0 }, { spans: [{ text: '去右边' }], index: 1 }],
   ended: false,
   error: null,
 }
@@ -28,7 +28,7 @@ describe('Player（受控）', () => {
 
   it('结束态显示结束标记、不渲染选项', () => {
     const ended: PlayState = {
-      log: [{ kind: 'narration', text: '你往左走。' }, { kind: 'end' }],
+      log: [{ kind: 'narration', spans: [{ text: '你往左走。' }] }, { kind: 'end' }],
       host: { bg: null, bgm: null }, choices: [], ended: true, error: null,
     }
     const onChoose = vi.fn()

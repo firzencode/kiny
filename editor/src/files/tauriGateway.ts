@@ -101,6 +101,13 @@ export const tauriFileGateway: FileGateway = {
   async exportKip(dir, destPath) {
     await invoke('export_kip', { dir, dest: destPath })
   },
+  async pickExportWebpageDir() {
+    const picked = await open({ directory: true, multiple: false })
+    return typeof picked === 'string' ? picked : null
+  },
+  async exportWebpage(projectDir, parentDir, folderName, projectData) {
+    return invoke<string>('export_webpage', { projectDir, parentDir, folderName, projectData })
+  },
   async confirm(message) {
     return ask(message, { title: 'Kiny Editor', kind: 'warning' })
   },

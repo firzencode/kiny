@@ -8,6 +8,7 @@ import { checkIdentifiers } from './checks/identifiers'
 import { checkLabels } from './checks/labels'
 import { checkVariables } from './checks/variables'
 import { checkFallthrough } from './checks/fallthrough'
+import { checkRichText } from './checks/richtext'
 import { addOpeningKnots } from './opening'
 
 export type { Diagnostic, AnalyzeResult, ValidatedProgram } from './types'
@@ -26,6 +27,7 @@ export function analyze(files: ProjectFile[]): AnalyzeResult {
     ...checkLabels(table),
     ...checkVariables(table),
     ...checkFallthrough(files),
+    ...checkRichText(files),
   ]
 
   const hasError = diagnostics.some((d) => d.severity === 'error')

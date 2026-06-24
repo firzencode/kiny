@@ -1,3 +1,4 @@
+import { plainText } from './spans'
 import { describe, it, expect } from 'vitest'
 import { storyFromEntry, drain } from './_test-helpers'
 import { parse } from '../parser'
@@ -5,7 +6,7 @@ import { analyze, resolveStart } from '../analyze'
 import { createStory } from './index'
 
 const texts = (s: ReturnType<typeof storyFromEntry>) =>
-  drain(s).flatMap((e) => (e.kind === 'text' ? [e.text] : []))
+  drain(s).flatMap((e) => (e.kind === 'text' ? [plainText(e.spans)] : []))
 
 describe('runtime 开场 knot —— 全局作用域执行', () => {
   it('开场 knot 内 ~ let 落全局，后续显式 knot 可读', () => {
@@ -28,7 +29,7 @@ describe('runtime 开场 knot —— buildGlobals 不重复执行入口 preamble
     const out: string[] = []
     while (s.canContinue) {
       const e = s.continue()
-      if (e.kind === 'text') out.push(e.text)
+      if (e.kind === 'text') out.push(plainText(e.spans))
     }
     expect(out).toEqual(['条目数1']) // push 只发生一次；若 buildGlobals 预跑入口 preamble 则为 2
   })
@@ -51,14 +52,14 @@ describe('runtime 开场 knot —— 端到端', () => {
     const out: string[] = []
     while (s.canContinue) {
       const e = s.continue()
-      if (e.kind === 'text') out.push(e.text)
+      if (e.kind === 'text') out.push(plainText(e.spans))
     }
     expect(out).toEqual(['选择：'])
-    expect(s.currentChoices.map((c) => c.text)).toEqual(['左', '右'])
+    expect(s.currentChoices.map((c) => plainText(c.spans))).toEqual(['左', '右'])
     s.choose(0)
     while (s.canContinue) {
       const e = s.continue()
-      if (e.kind === 'text') out.push(e.text)
+      if (e.kind === 'text') out.push(plainText(e.spans))
     }
     expect(out).toContain('左。')
   })

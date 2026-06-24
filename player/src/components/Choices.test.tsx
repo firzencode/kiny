@@ -5,8 +5,8 @@ import { Choices } from './Choices'
 import type { ChoiceView } from '@kiny/engine'
 
 const items: ChoiceView[] = [
-  { text: '走向客栈', index: 0 },
-  { text: '沿码头继续走', index: 1 },
+  { spans: [{ text: '走向客栈' }], index: 0 },
+  { spans: [{ text: '沿码头继续走' }], index: 1 },
 ]
 
 describe('Choices', () => {

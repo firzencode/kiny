@@ -38,7 +38,8 @@ function Stepper({ label, unit, bounds, value, onChange }: {
       <div className="settings-label">{label}</div>
       <div className="settings-stepper">
         <button aria-label={`减小${label}`} disabled={value <= min + 1e-9} onClick={() => set(value - step)}>−</button>
-        <span className="settings-stepval">{value.toFixed(dec)}{unit && <span className="settings-unit">{unit}</span>}</span>
+        <span className={'settings-stepval' + (unit ? '' : ' nounit')}>{value.toFixed(dec)}</span>
+        {unit && <span className="settings-unit">{unit}</span>}
         <button aria-label={`增大${label}`} disabled={value >= max - 1e-9} onClick={() => set(value + step)}>+</button>
       </div>
     </div>

@@ -6,7 +6,11 @@
   "permissions": [
     "core:default",
     "dialog:default",
-    { "identifier": "fs:allow-read-text-file", "allow": [{ "path": "$APPDATA/**" }] },
+    "log:default",
+    "opener:default",
+    "clipboard-manager:allow-write-text",
+    { "identifier": "opener:allow-open-path", "allow": [{ "path": "$HOME/**" }] },
+    { "identifier": "fs:allow-read-text-file", "allow": [{ "path": "$APPDATA/**" }, { "path": "$APPLOG/**" }] },
     { "identifier": "fs:allow-read-dir", "allow": [{ "path": "$APPDATA/**" }] },
     { "identifier": "fs:allow-exists", "allow": [{ "path": "$APPDATA/**" }] }
   ]

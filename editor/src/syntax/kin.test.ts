@@ -69,6 +69,36 @@ describe('tokenizeLine —— 语义着色', () => {
   it('空行 → 空 token 列表', () => {
     expect(tokenizeLine('')).toEqual([])
   })
+
+  it('内联富文本标签 <b>…</b> → t-tag，包裹的文字仍是正文', () => {
+    expect(pick('她说：<b>别回头</b>。', 't-tag')).toEqual(['<b>', '</b>'])
+    expect(pick('她说：<b>别回头</b>。', 't-text')).toContain('别回头')
+  })
+
+  it('取值标签 <color=…> / <size=…> 连取值一起 t-tag', () => {
+    expect(pick('<color=#c00>红</color>', 't-tag')).toEqual(['<color=#c00>', '</color>'])
+    expect(pick('这个词<size=1.5>很大</size>。', 't-tag')).toEqual(['<size=1.5>', '</size>'])
+  })
+
+  it('自闭合 <br> → t-tag', () => {
+    expect(pick('第一行<br>第二行', 't-tag')).toEqual(['<br>'])
+  })
+
+  it('其余标签可着色：斜体/下划线/删除线', () => {
+    expect(pick('<i>斜</i><u>下</u><s>删</s>', 't-tag')).toEqual([
+      '<i>', '</i>', '<u>', '</u>', '<s>', '</s>',
+    ])
+  })
+
+  it('非标签的字面 < 不误判为 t-tag', () => {
+    expect(pick('若 1 < 2 则成立', 't-tag')).toEqual([])
+    expect(text('若 1 < 2 则成立')).toBe('若 1 < 2 则成立')
+  })
+
+  it('含标签行整行还原一字不差', () => {
+    const s = '她说：<b>别回头</b>，<color=#c00>消失在<i>雾</i>里</color>。'
+    expect(text(s)).toBe(s)
+  })
 })
 
 describe('parseNodes —— 节点导航', () => {

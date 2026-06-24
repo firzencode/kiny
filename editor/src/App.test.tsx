@@ -692,3 +692,65 @@ describe('App 导出故事包', () => {
     expect(screen.queryByText(/已导出到/)).not.toBeInTheDocument()
   })
 })
+
+function gwExportWeb(over: { webpageDir?: string | null; webpageSink?: { dest: string; projectData: string; files: string[] }[]; confirmResult?: boolean } = {}) {
+  return createMemoryGateway({
+    pickedDir: '/proj',
+    newDir: '/fresh',
+    files: { '/proj/kiny.json': JSON.stringify({ name: '雾港', version: '1.0.0', engine: '0.1.0', entry: 'main.kin' }), '/proj/main.kin': MAIN, '/proj/末.kin': END },
+    webpageDir: 'webpageDir' in over ? over.webpageDir : '/out',
+    webpageSink: over.webpageSink,
+    confirmResult: over.confirmResult,
+  })
+}
+
+describe('App 导出独立网页', () => {
+  it('干净项目：选父目录 → 导出 → notice + 内联数据含 manifest 与 .kin', async () => {
+    const sink: { dest: string; projectData: string; files: string[] }[] = []
+    render(<App gateway={gwExportWeb({ webpageSink: sink })} />)
+    await fileMenu('打开项目...')
+    await fileMenu('导出独立网页...')
+    const ok = await screen.findByRole('status')
+    expect(ok).toHaveTextContent('已导出到 /out/雾港-web')
+    expect(sink.length).toBe(1)
+    const data = JSON.parse(sink[0].projectData) as { manifest: string; files: Record<string, string>; assetBase: string }
+    expect(JSON.parse(data.manifest).name).toBe('雾港')
+    expect(data.files['main.kin']).toContain('开场。')
+    expect(data.assetBase).toBe('')
+  })
+
+  it('用户在目录对话框取消：不导出、不提示', async () => {
+    const sink: { dest: string; projectData: string; files: string[] }[] = []
+    render(<App gateway={gwExportWeb({ webpageDir: null, webpageSink: sink })} />)
+    await fileMenu('打开项目...')
+    await fileMenu('导出独立网页...')
+    await new Promise((r) => setTimeout(r, 0))
+    expect(sink).toEqual([])
+    expect(screen.queryByText(/已导出到/)).not.toBeInTheDocument()
+  })
+
+  it('脏 tab：先确认保存再导出', async () => {
+    const sink: { dest: string; projectData: string; files: string[] }[] = []
+    render(<App gateway={gwExportWeb({ webpageSink: sink })} />)
+    await fileMenu('打开项目...')
+    const ta = await screen.findByRole('textbox')
+    ;(ta as HTMLTextAreaElement).focus()
+    await userEvent.type(ta, 'x')
+    await fileMenu('导出独立网页...')   // memory confirm 默认返 true
+    expect(await screen.findByText('已导出到 /out/雾港-web')).toBeInTheDocument()
+    expect(sink.length).toBe(1)
+    // 已保存：内联数据含改动后的入口源码（确认保存确实先于导出）
+    const data = JSON.parse(sink[0].projectData) as { files: Record<string, string> }
+    expect(data.files['main.kin']).toContain('x')
+  })
+
+  it('导出抛错：notice 导出失败', async () => {
+    const g = gwExportWeb()
+    g.exportWebpage = async () => { throw new Error('磁盘已满') }
+    render(<App gateway={g} />)
+    await fileMenu('打开项目...')
+    await fileMenu('导出独立网页...')
+    const err = await screen.findByRole('alert')
+    expect(err).toHaveTextContent('导出失败：磁盘已满')
+  })
+})

@@ -1,3 +1,4 @@
+import { plainText } from './spans'
 import { describe, it, expect } from 'vitest'
 import { story } from './_test-helpers'
 import { makeVariants } from './variants'
@@ -9,7 +10,7 @@ describe('runtime 3f② —— 变体（循环经过同一 site）', () => {
     const s = story(src)
     const out: string[] = []
     for (;;) {
-      while (s.canContinue) { const e = s.continue(); if (e.kind === 'text') out.push(e.text) }
+      while (s.canContinue) { const e = s.continue(); if (e.kind === 'text') out.push(plainText(e.spans)) }
       if (s.currentChoices.length > 0) s.choose(0); else break
     }
     return out

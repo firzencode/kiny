@@ -18,12 +18,14 @@ export interface MenuBarProps {
   onSave: () => void
   onSaveAll: () => void
   onExportKip: () => void
+  onExportWebpage: () => void
   onExit: () => void
   onEdit: (cmd: EditCmd) => void
   onSetTheme: (t: 'dark' | 'light') => void
   onToggleView: (key: ViewKey) => void
   onSyntaxRef: () => void
   onAbout: () => void
+  onReportIssue: () => void
   onOpenSettings: () => void
   onZoomIn: () => void
   onZoomOut: () => void
@@ -56,6 +58,7 @@ export function MenuBar(p: MenuBarProps) {
         { label: '全部保存', sc: 'Ctrl+Alt+S', disabled: !p.anyDirty, act: p.onSaveAll },
         { sep: true },
         { label: '导出故事包（.kip）...', disabled: !p.projectName || p.errorCount > 0, act: p.onExportKip },
+        { label: '导出独立网页...', disabled: !p.projectName || p.errorCount > 0, act: p.onExportWebpage },
         { sep: true },
         { label: '退出', sc: 'Alt+F4', act: p.onExit },
       ],
@@ -99,6 +102,8 @@ export function MenuBar(p: MenuBarProps) {
       label: '帮助',
       items: [
         { label: 'Kiny 语法参考', sc: 'Ctrl+/', act: p.onSyntaxRef },
+        { sep: true },
+        { label: '问题反馈...', act: p.onReportIssue },
         { sep: true },
         { label: '关于 Kiny Editor', act: p.onAbout },
       ],

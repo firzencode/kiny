@@ -1,3 +1,4 @@
+import { plainText } from './spans'
 import { describe, it, expect } from 'vitest'
 import { parse } from '../parser'
 import { analyze } from '../analyze'
@@ -14,7 +15,7 @@ function drainText(s: Story): string[] {
   const out: string[] = []
   while (s.canContinue) {
     const e = s.continue()
-    if (e.kind === 'text') out.push(e.text)
+    if (e.kind === 'text') out.push(plainText(e.spans))
   }
   return out
 }
@@ -30,14 +31,14 @@ describe('Story 状态快照 —— 往返等价', () => {
     const program = prog(src)
     const s = createStory(program, { start: 'A' })
     drainText(s)
-    expect(s.currentChoices.map((c) => c.text)).toEqual(['选一', '选二'])
+    expect(s.currentChoices.map((c) => plainText(c.spans))).toEqual(['选一', '选二'])
 
     const snap = roundtrip(s)
     const r = restoreStory(program, snap)
     expect(r.ok).toBe(true)
     if (!r.ok) return
     const s2 = r.story
-    expect(s2.currentChoices.map((c) => c.text)).toEqual(['选一', '选二'])
+    expect(s2.currentChoices.map((c) => plainText(c.spans))).toEqual(['选一', '选二'])
 
     s.choose(0)
     s2.choose(0)
@@ -59,15 +60,15 @@ describe('Story 状态快照 —— 往返等价', () => {
     const program = prog(src)
     const s = createStory(program, { start: 'A' })
     drainText(s)
-    expect(s.currentChoices.map((c) => c.text)).toEqual(['外选一', '外选二'])
+    expect(s.currentChoices.map((c) => plainText(c.spans))).toEqual(['外选一', '外选二'])
     s.choose(0) // 进外选一 body
     drainText(s)
-    expect(s.currentChoices.map((c) => c.text)).toEqual(['内选一', '内选二']) // 栈多层
+    expect(s.currentChoices.map((c) => plainText(c.spans))).toEqual(['内选一', '内选二']) // 栈多层
 
     const r = restoreStory(program, roundtrip(s))
     expect(r.ok).toBe(true)
     if (!r.ok) return
-    expect(r.story.currentChoices.map((c) => c.text)).toEqual(['内选一', '内选二'])
+    expect(r.story.currentChoices.map((c) => plainText(c.spans))).toEqual(['内选一', '内选二'])
     s.choose(0)
     r.story.choose(0)
     expect(drainText(r.story)).toEqual(drainText(s))

@@ -45,6 +45,7 @@
   --s-interp: #cba36c;
   --s-string: #cd8e6a;
   --s-keyword: #b98bd3;
+  --s-tag: #6fb0a8;
   --s-text: #cdd2dd;
 }
 [data-theme='light'] {
@@ -74,6 +75,7 @@
   --s-interp: #86631f;
   --s-string: #a85a38;
   --s-keyword: #7b4fae;
+  --s-tag: #2f7d72;
   --s-text: #3a362e;
 }
 * {
@@ -453,6 +455,9 @@ button {
 .t-num {
   color: var(--s-logic);
 }
+.t-tag {
+  color: var(--s-tag);
+}
 .depth-guide {
   color: var(--text-faint);
   opacity: 0.55;
@@ -469,6 +474,7 @@ button {
 .editor-highlight.plain .t-string,
 .editor-highlight.plain .t-keyword,
 .editor-highlight.plain .t-marker,
+.editor-highlight.plain .t-tag,
 .editor-highlight.plain .t-num {
   color: var(--s-text);
   font-style: normal;
@@ -1051,12 +1057,15 @@ button {
 }
 .settings-sel:focus { outline: none; border-color: var(--accent-line); }
 .settings-custom { flex: 0 0 auto; width: 150px; background: var(--bg-1); border: 1px solid var(--accent-line); border-radius: 7px; color: var(--text); font: inherit; font-size: 12.5px; padding: 7px 11px; outline: none; }
-.settings-stepper { display: inline-flex; align-items: center; background: var(--bg-1); border: 1px solid var(--border-2); border-radius: 8px; overflow: hidden; }
-.settings-stepper button { width: 30px; height: 32px; border: none; background: transparent; color: var(--text-dim); font-size: 16px; line-height: 1; cursor: pointer; }
+.settings-stepper { display: inline-flex; align-items: center; background: var(--bg-2); border: 1px solid var(--border-2); border-radius: 8px; overflow: hidden; }
+.settings-stepper button { width: 30px; height: 32px; border: none; background: transparent; color: var(--text-dim); font-size: 16px; line-height: 1; cursor: pointer; transition: background .12s, color .12s; }
 .settings-stepper button:hover { background: var(--accent-soft); color: var(--text); }
 .settings-stepper button:disabled { color: var(--text-faint); cursor: default; background: transparent; }
-.settings-stepval { min-width: 64px; text-align: center; font-family: ui-monospace, monospace; font-size: 12.5px; color: var(--text); border-left: 1px solid var(--border); border-right: 1px solid var(--border); height: 32px; display: inline-flex; align-items: center; justify-content: center; }
-.settings-unit { color: var(--text-faint); margin-left: 2px; font-size: 11px; }
+/* 数值格：等宽 tabular（数字不跳）、左分隔线与 − 键分界；无单位时（行距）右侧也补分隔线。 */
+.settings-stepval { min-width: 52px; text-align: center; font-family: ui-monospace, monospace; font-variant-numeric: tabular-nums; font-size: 12.5px; color: var(--text); border-left: 1px solid var(--border); padding: 0 10px; height: 32px; display: inline-flex; align-items: center; justify-content: center; }
+.settings-stepval.nounit { border-right: 1px solid var(--border); }
+/* 单位独立成格（分格后缀）：细分隔线 + 淡底，位置恒定、不随数字跳动。 */
+.settings-unit { height: 32px; display: inline-flex; align-items: center; padding: 0 9px; border-left: 1px solid var(--border); border-right: 1px solid var(--border); font-size: 11px; letter-spacing: 0.04em; color: var(--text-faint); background: color-mix(in srgb, var(--bg-1) 60%, transparent); }
 .settings-seg { display: inline-flex; background: var(--bg-1); border: 1px solid var(--border-2); border-radius: 8px; padding: 3px; gap: 3px; }
 .settings-seg-btn { padding: 6px 13px; border: none; background: transparent; color: var(--text-dim); border-radius: 6px; font-size: 12.5px; cursor: pointer; }
 .settings-seg-btn.on { background: var(--accent-soft); color: var(--text); }

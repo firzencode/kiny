@@ -10,6 +10,7 @@ describe('scanInline —— 字面与插值', () => {
       segments: [{ kind: 'literal', value: '你好世界' }],
       glue: false,
       nextId: 0,
+      issues: [],
     })
   })
 
@@ -22,6 +23,7 @@ describe('scanInline —— 字面与插值', () => {
       ],
       glue: false,
       nextId: 1,
+      issues: [],
     })
   })
 
@@ -33,6 +35,7 @@ describe('scanInline —— 字面与插值', () => {
       ],
       glue: false,
       nextId: 7,
+      issues: [],
     })
   })
 
@@ -41,11 +44,12 @@ describe('scanInline —— 字面与插值', () => {
       segments: [{ kind: 'interp', code: ' "a}b" ', id: 0 }],
       glue: false,
       nextId: 1,
+      issues: [],
     })
   })
 
   it('空字符串无 segment', () => {
-    expect(scan('')).toEqual({ segments: [], glue: false, nextId: 0 })
+    expect(scan('')).toEqual({ segments: [], glue: false, nextId: 0, issues: [] })
   })
 })
 
@@ -71,6 +75,7 @@ describe('scanInline —— 粘连 <>', () => {
       segments: [{ kind: 'literal', value: '离开' }],
       glue: true,
       nextId: 0,
+      issues: [],
     })
   })
 
@@ -79,6 +84,7 @@ describe('scanInline —— 粘连 <>', () => {
       segments: [{ kind: 'literal', value: 'a<>' }],
       glue: false,
       nextId: 0,
+      issues: [],
     })
   })
 
@@ -92,7 +98,95 @@ describe('scanInline —— 粘连 <>', () => {
       segments: [{ kind: 'literal', value: '离开' }],
       glue: true,
       nextId: 0,
+      issues: [],
     })
+  })
+})
+
+describe('scanInline —— 富文本标签', () => {
+  it('单个 <b> 标签把内部文本标粗，标签外不带样式', () => {
+    expect(scan('普通<b>粗体</b>尾').segments).toEqual([
+      { kind: 'literal', value: '普通' },
+      { kind: 'literal', value: '粗体', style: { bold: true } },
+      { kind: 'literal', value: '尾' },
+    ])
+  })
+
+  it('i / u / s 各映射对应样式键', () => {
+    expect(scan('<i>斜</i><u>下</u><s>删</s>').segments).toEqual([
+      { kind: 'literal', value: '斜', style: { italic: true } },
+      { kind: 'literal', value: '下', style: { underline: true } },
+      { kind: 'literal', value: '删', style: { strike: true } },
+    ])
+  })
+
+  it('嵌套标签扁平化叠加样式', () => {
+    expect(scan('<b>粗<color=red>粗红</color></b>').segments).toEqual([
+      { kind: 'literal', value: '粗', style: { bold: true } },
+      { kind: 'literal', value: '粗红', style: { bold: true, color: 'red' } },
+    ])
+  })
+
+  it('<color> 支持 #rgb / #rrggbb / 具名色', () => {
+    expect(scan('<color=#f00>a</color><color=#ff0000>b</color><color=blue>c</color>').segments).toEqual([
+      { kind: 'literal', value: 'a', style: { color: '#f00' } },
+      { kind: 'literal', value: 'b', style: { color: '#ff0000' } },
+      { kind: 'literal', value: 'c', style: { color: 'blue' } },
+    ])
+  })
+
+  it('<size> 落正数倍数；内层覆盖外层', () => {
+    expect(scan('<size=1.5>大<size=0.8>小</size></size>').segments).toEqual([
+      { kind: 'literal', value: '大', style: { size: 1.5 } },
+      { kind: 'literal', value: '小', style: { size: 0.8 } },
+    ])
+  })
+
+  it('<br> 产出换行段（自闭合，无文本）', () => {
+    expect(scan('上<br>下').segments).toEqual([
+      { kind: 'literal', value: '上' },
+      { kind: 'break' },
+      { kind: 'literal', value: '下' },
+    ])
+  })
+
+  it('插值段承继当前标签样式', () => {
+    expect(scan('<b>{x}</b>').segments).toEqual([
+      { kind: 'interp', code: 'x', id: 0, style: { bold: true } },
+    ])
+  })
+
+  it('未闭合标签：自动闭合到段末（样式照应用）+ 记 rich-unclosed 诊断', () => {
+    const r = scan('<b>粗到底')
+    expect(r.segments).toEqual([{ kind: 'literal', value: '粗到底', style: { bold: true } }])
+    expect(r.issues).toEqual([{ code: 'rich-unclosed', message: '未闭合的标签：「<b>」', line: 1 }])
+  })
+
+  it('错配闭标签：弹到最近同名开标签；孤立闭标签记 rich-mismatch', () => {
+    const r = scan('a</i>b')
+    expect(r.segments).toEqual([{ kind: 'literal', value: 'ab' }])
+    expect(r.issues).toEqual([{ code: 'rich-mismatch', message: '孤立的闭标签：「</i>」', line: 1 }])
+  })
+
+  it('非法颜色值：不应用颜色 + 记 rich-bad-color（标签结构仍成对）', () => {
+    const r = scan('<color=rgb(1,2,3)>x</color>')
+    expect(r.segments).toEqual([{ kind: 'literal', value: 'x' }])
+    expect(r.issues).toEqual([{ code: 'rich-bad-color', message: '非法颜色值：「rgb(1,2,3)」', line: 1 }])
+  })
+
+  it('非法字号值：不应用字号 + 记 rich-bad-size', () => {
+    const r = scan('<size=-1>x</size>')
+    expect(r.segments).toEqual([{ kind: 'literal', value: 'x' }])
+    expect(r.issues).toEqual([{ code: 'rich-bad-size', message: '非法字号倍数：「-1」', line: 1 }])
+  })
+
+  it('未知标签名按字面处理裸 <（兼容历史文本）', () => {
+    expect(scan('a<foo>b').segments).toEqual([{ kind: 'literal', value: 'a<foo>b' }])
+    expect(scan('1 < 2 > 0').segments).toEqual([{ kind: 'literal', value: '1 < 2 > 0' }])
+  })
+
+  it('\\< 转义后不识别为标签', () => {
+    expect(scan('\\<b>x').segments).toEqual([{ kind: 'literal', value: '<b>x' }])
   })
 })
 

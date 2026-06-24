@@ -12,6 +12,8 @@ export interface MemoryGatewayInit {
   confirmResult?: boolean
   saveKipPath?: string | null
   exportSink?: { dest: string; files: string[] }[]
+  webpageDir?: string | null
+  webpageSink?: { dest: string; projectData: string; files: string[] }[]
 }
 
 /** 内存 FileGateway：纯 Map 支撑，前端逻辑可在 jsdom 全单测、不碰 Tauri。 */
@@ -99,6 +101,13 @@ export function createMemoryGateway(init: MemoryGatewayInit): FileGateway {
     exportKip: async (dir, dest) => {
       if (!files.has(`${dir}/kiny.json`)) throw new Error(`缺少 ${dir}/kiny.json`)
       init.exportSink?.push({ dest, files: listAll(dir) })
+    },
+    pickExportWebpageDir: async () => init.webpageDir ?? null,
+    exportWebpage: async (projectDir, parentDir, folderName, projectData) => {
+      if (!files.has(`${projectDir}/kiny.json`)) throw new Error(`缺少 ${projectDir}/kiny.json`)
+      const dest = `${parentDir}/${folderName}`
+      init.webpageSink?.push({ dest, projectData, files: listAll(projectDir) })
+      return dest
     },
     confirm: async () => init.confirmResult ?? true,
     closeWindow: async () => { /* 内存桩：无窗口可关 */ },

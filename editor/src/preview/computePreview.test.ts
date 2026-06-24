@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { loadProjectFromFiles, analyze, resolveStart } from '@kiny/engine'
+import { loadProjectFromFiles, analyze, resolveStart, plainText } from '@kiny/engine'
 import type { ValidatedProgram } from '@kiny/engine'
 import type { ResolveAsset } from '@kiny/player'
 import { computePreview } from './computePreview'
@@ -38,7 +38,7 @@ describe('computePreview', () => {
     const r = computePreview(p, startOf(p), 7, [], RESOLVE, null)
     expect(r.stale).toBe(false)
     expect(r.choiceSeq).toEqual([])
-    expect(r.play!.choices.map((c) => c.text)).toEqual(['A', 'B'])
+    expect(r.play!.choices.map((c) => plainText(c.spans))).toEqual(['A', 'B'])
   })
 
   it('有效路径：完整应用、保位到叶子', () => {
@@ -52,7 +52,7 @@ describe('computePreview', () => {
     const p = prog(TREE)
     const r = computePreview(p, startOf(p), 7, [0, 9], RESOLVE, null)
     expect(r.choiceSeq).toEqual([0])
-    expect(r.play!.choices.map((c) => c.text)).toEqual(['A1', 'A2'])
+    expect(r.play!.choices.map((c) => plainText(c.spans))).toEqual(['A1', 'A2'])
   })
 
   it('program 为 null：冻结上一帧 play、stale=true、choiceSeq 原样保留', () => {

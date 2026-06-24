@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.1.0"
+version = "0.2.0"
 description = "Kiny story reader — a Tauri 2 shell that reads .kip story packages"
 authors = ["firzencode <firzencode@gmail.com>"]
 license = "Apache-2.0"
@@ -23,5 +23,7 @@ tauri = { version = "2.11.2", features = ["protocol-asset"] }
 tauri-plugin-log = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-dialog = "2"
+tauri-plugin-clipboard-manager = "2"
+tauri-plugin-opener = "2"
 zip = "2"
 uuid = { version = "1", features = ["v4"] }

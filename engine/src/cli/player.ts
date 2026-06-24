@@ -1,4 +1,5 @@
 import type { Story } from '../runtime'
+import { plainText } from '../runtime'
 import type { Term } from './term'
 
 const ESC = '\x1b['
@@ -9,7 +10,7 @@ export async function play(story: Story, term: Term): Promise<'ended' | 'quit'> 
   for (;;) {
     while (story.canContinue) {
       const e = story.continue()
-      if (e.kind === 'text') term.write(e.text)
+      if (e.kind === 'text') term.write(plainText(e.spans))
       else term.write(dim(`» ${e.name}(${e.args.map(String).join(', ')})`))
     }
     if (story.hasEnded) {
@@ -18,7 +19,7 @@ export async function play(story: Story, term: Term): Promise<'ended' | 'quit'> 
     }
     const cs = story.currentChoices
     if (cs.length === 0) return 'ended'
-    cs.forEach((c, i) => term.write(`  ${i + 1}) ${c.text}`))
+    cs.forEach((c, i) => term.write(`  ${i + 1}) ${plainText(c.spans)}`))
     for (;;) {
       const ans = (await term.readLine('> ')).trim()
       if (ans === 'q' || ans === 'quit') return 'quit'
