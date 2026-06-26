@@ -1,15 +1,13 @@
-import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react'
-import { tokenizeLine } from '../syntax/kin'
+import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
+import { EditorState } from '@codemirror/state'
+import { EditorView } from '@codemirror/view'
+import { selectAll as cmSelectAll } from '@codemirror/commands'
+import { setDiagnostics } from '@codemirror/lint'
+import type { ValidatedProgram, Diagnostic as KinDiagnostic } from '@kiny/engine'
+import { kinSetup, External, highlightCompartment, highlightExtensionFor } from '../cm/setup'
+import { setKinContext } from '../cm/context'
+import { toCmDiagnostics } from '../cm/lint'
 import { readClipboardText } from '../clipboard'
-
-type EditCmd = 'cut' | 'copy' | 'paste' | 'selectAll'
-
-const CTX_ITEMS: { cmd: EditCmd; label: string }[] = [
-  { cmd: 'cut', label: '剪切' },
-  { cmd: 'copy', label: '复制' },
-  { cmd: 'paste', label: '粘贴' },
-  { cmd: 'selectAll', label: '全选' },
-]
 
 export interface EditorHandle {
   exec(cmd: 'cut' | 'copy' | 'paste' | 'selectAll'): void
@@ -19,169 +17,156 @@ export interface EditorHandle {
 interface EditorPaneProps {
   source: string
   onChange: (next: string) => void
+  /** 外部请求把光标移到某行（Outline / 诊断跳转），1 起；null 不动。一次性：消费后经 onCaretConsumed 清零。 */
   caretLine: number | null
-  activeLine?: number
+  /** caretLine 已被消费（移过光标）后回调，让 App 清回 null——避免切档重挂时旧行号把新文件光标拽走。 */
+  onCaretConsumed?: () => void
   onCaretMove?: (line: number) => void
+  /** 跳转目标在别的文件时，请求 React 开 tab 并定位。 */
+  onGoto?: (file: string, line: number) => void
+  /** 当前文件的 engine 诊断（画成行内波浪线）。 */
+  diagnostics?: readonly KinDiagnostic[]
+  /** 校验产出的符号表（补全 / 跳转用）。 */
+  program?: ValidatedProgram | null
+  /** 当前活动文件路径（补全 / 跳转上下文）。 */
+  activeFile?: string | null
   /** 关闭语义着色（视图菜单）。默认 true。 */
   highlight?: boolean
 }
 
 /**
- * 编辑区：行号栏 + 语义高亮层 + 受控 textarea（文字透明叠在高亮 pre 上）。
- * 外层 .editor-pane 统一滚动；textarea 高度撑满内容。
- * 暴露命令句柄（编辑菜单的剪切/复制/粘贴/全选作用于内部 textarea）。
+ * 编辑区：CodeMirror 6 的薄 host。挂 `EditorView`、做受控接线（外部 value 回灌打 External
+ * 标记斩回环），把 React 侧的诊断 / 符号表 / 活动文件喂进 CM 扩展。语义着色、行内波浪线、
+ * 补全、跳转、折叠、查找替换、多光标、撤销、IME、原生剪贴板均由 CM6 扩展提供。
  */
 export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(function EditorPane(
-  { source, onChange, caretLine, activeLine, onCaretMove, highlight = true },
+  { source, onChange, caretLine, onCaretConsumed, onCaretMove, onGoto, diagnostics, program, activeFile, highlight = true },
   ref,
 ) {
-  const taRef = useRef<HTMLTextAreaElement>(null)
-  const preRef = useRef<HTMLPreElement>(null)
-  const paneRef = useRef<HTMLDivElement>(null)
-  const lines = source.split('\n')
+  const hostRef = useRef<HTMLDivElement>(null)
+  const viewRef = useRef<EditorView | null>(null)
+  // 回调放 ref：扩展只在挂载时装一次，内部经 ref 取最新 handler，避免重建 view。
+  const cbRef = useRef({ onChange, onCaretMove, onGoto })
+  cbRef.current = { onChange, onCaretMove, onGoto }
+  // caretLine 消费回调单独放 ref：caretLine effect 只依赖 [caretLine]，经 ref 取最新避免 stale。
+  const onCaretConsumedRef = useRef(onCaretConsumed)
+  onCaretConsumedRef.current = onCaretConsumed
 
-  // 自定义右键菜单位置（屏蔽了 webview 原生菜单，编辑命令自己做）
-  const [ctx, setCtx] = useState<{ x: number; y: number } | null>(null)
-  // 粘贴/插入后待恢复的光标位置（受控 textarea 改值会令光标跳到末尾）
-  const pendingCaret = useRef<number | null>(null)
+  // 挂载：建 EditorView（仅一次）。
+  useEffect(() => {
+    const view = new EditorView({
+      parent: hostRef.current!,
+      state: EditorState.create({
+        doc: source,
+        extensions: kinSetup(
+          {
+            onChange: (v) => cbRef.current.onChange(v),
+            onCaretLine: (l) => cbRef.current.onCaretMove?.(l),
+            onGoto: (f, l) => cbRef.current.onGoto?.(f, l),
+          },
+          highlight,
+        ),
+      }),
+    })
+    viewRef.current = view
+    return () => {
+      view.destroy()
+      viewRef.current = null
+    }
+    // 仅挂载一次；source/highlight 初值已用，后续变化由下方 effect 同步。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
-  // webview 出于安全禁用 execCommand('paste')，改走 Tauri 剪贴板插件读取后手动插入。
+  // 受控回灌：外部 source 变化 → 用 External 标记的事务同步进 doc（同值不 dispatch）。
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view) return
+    if (view.state.doc.toString() === source) return
+    const sel = view.state.selection
+    const len = source.length
+    const clamp = (n: number) => Math.min(n, len)
+    view.dispatch({
+      changes: { from: 0, to: view.state.doc.length, insert: source },
+      selection: { anchor: clamp(sel.main.anchor), head: clamp(sel.main.head) },
+      annotations: External.of(true),
+    })
+  }, [source])
+
+  // 诊断回灌：当前文件诊断 → CM6 行内波浪线。
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view) return
+    view.dispatch(setDiagnostics(view.state, toCmDiagnostics(diagnostics ?? [], view.state.doc)))
+  }, [diagnostics])
+
+  // 符号表 / 活动文件回灌：补全 / 跳转读取。
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view) return
+    view.dispatch({ effects: setKinContext.of({ program: program ?? null, activeFile: activeFile ?? null }) })
+  }, [program, activeFile])
+
+  // 语义着色开关：热切换 highlight compartment。
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view) return
+    view.dispatch({ effects: highlightCompartment.reconfigure(highlightExtensionFor(highlight)) })
+  }, [highlight])
+
+  // 外部请求移光标到某行（Outline / 诊断跳转）。一次性：消费后通知 App 清回 null，
+  // 否则切档重挂时这个常驻行号会把新文件光标拽到旧行。
+  useEffect(() => {
+    if (caretLine == null) return
+    const view = viewRef.current
+    if (view != null && caretLine >= 1 && caretLine <= view.state.doc.lines) {
+      const line = view.state.doc.line(caretLine)
+      view.focus()
+      view.dispatch({
+        selection: { anchor: line.from, head: line.from },
+        effects: EditorView.scrollIntoView(line.from, { y: 'center' }),
+      })
+    }
+    onCaretConsumedRef.current?.()
+  }, [caretLine])
+
   const pasteFromClipboard = async () => {
-    const ta = taRef.current
-    if (!ta) return
-    ta.focus()
+    const view = viewRef.current
+    if (!view) return
+    view.focus()
     let text = ''
     try {
       text = await readClipboardText()
     } catch {
-      return /* 剪贴板不可读（权限/环境）：忽略，键盘 Ctrl+V 仍可用 */
+      return /* 剪贴板不可读：忽略，键盘 Ctrl+V 仍可用 */
     }
     if (!text) return
-    const start = ta.selectionStart
-    const end = ta.selectionEnd
-    pendingCaret.current = start + text.length
-    onChange(source.slice(0, start) + text + source.slice(end))
-  }
-
-  const runCmd = (cmd: EditCmd) => {
-    const ta = taRef.current
-    if (!ta) return
-    ta.focus()
-    if (cmd === 'selectAll') {
-      ta.select()
-      return
-    }
-    if (cmd === 'paste') {
-      void pasteFromClipboard()
-      return
-    }
-    try {
-      document.execCommand(cmd)
-    } catch {
-      /* 部分环境不支持 execCommand：忽略（键盘快捷键仍可用） */
-    }
+    view.dispatch(view.state.replaceSelection(text))
   }
 
   useImperativeHandle(ref, () => ({
     focus() {
-      taRef.current?.focus()
+      viewRef.current?.focus()
     },
     exec(cmd) {
-      runCmd(cmd)
+      const view = viewRef.current
+      if (!view) return
+      view.focus()
+      if (cmd === 'selectAll') {
+        cmSelectAll(view)
+        return
+      }
+      if (cmd === 'paste') {
+        void pasteFromClipboard()
+        return
+      }
+      // cut / copy：CM6 内容是 contenteditable，execCommand 作用于当前选区。
+      try {
+        document.execCommand(cmd)
+      } catch {
+        /* 部分环境不支持：忽略（键盘快捷键仍可用） */
+      }
     },
   }))
 
-  useLayoutEffect(() => {
-    if (taRef.current && preRef.current) taRef.current.style.height = preRef.current.offsetHeight + 'px'
-    // 粘贴/插入后把光标恢复到插入文本之后（而非受控改值默认跳到的末尾）
-    if (pendingCaret.current !== null && taRef.current) {
-      const pos = pendingCaret.current
-      pendingCaret.current = null
-      taRef.current.setSelectionRange(pos, pos)
-    }
-  }, [source])
-
-  useEffect(() => {
-    if (caretLine === null || !taRef.current) return
-    const offset = lines.slice(0, caretLine - 1).reduce((n, l) => n + l.length + 1, 0)
-    const ta = taRef.current
-    ta.focus()
-    ta.setSelectionRange(offset, offset)
-    const pane = paneRef.current
-    const pre = preRef.current
-    if (pane && pre) {
-      const lh = parseFloat(getComputedStyle(pre).lineHeight) || 22
-      pane.scrollTop = Math.max(0, (caretLine - 3) * lh)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [caretLine])
-
-  const reportCaret = () => {
-    const ta = taRef.current
-    if (!ta || !onCaretMove) return
-    onCaretMove(ta.value.slice(0, ta.selectionStart).split('\n').length)
-  }
-
-  return (
-    <div className="editor-pane" ref={paneRef}>
-      <div className="editor-gutter" aria-hidden>
-        {lines.map((_, i) => (
-          <div key={i} className={'gln' + (i + 1 === activeLine ? ' cur' : '')}>
-            {i + 1}
-          </div>
-        ))}
-      </div>
-      <div className="editor-area">
-        <pre className={'editor-highlight' + (highlight ? '' : ' plain')} aria-hidden ref={preRef}>
-          {lines.map((raw, i) => {
-            const toks = tokenizeLine(raw)
-            return (
-              <div key={i} className={'hl-line' + (i + 1 === activeLine ? ' cur' : '')}>
-                {toks.length === 0
-                  ? ' '
-                  : toks.map((t, j) => (
-                      <span key={j} className={t.cls}>
-                        {t.text}
-                      </span>
-                    ))}
-              </div>
-            )
-          })}
-        </pre>
-        <textarea
-          ref={taRef}
-          className="editor-textarea"
-          value={source}
-          spellCheck={false}
-          onChange={(e) => onChange(e.target.value)}
-          onSelect={reportCaret}
-          onClick={reportCaret}
-          onKeyUp={reportCaret}
-          onContextMenu={(e) => {
-            e.preventDefault()
-            setCtx({ x: e.clientX, y: e.clientY })
-          }}
-        />
-      </div>
-      {ctx && (
-        <>
-          <div
-            className="ctx-backdrop"
-            onClick={() => setCtx(null)}
-            onContextMenu={(e) => { e.preventDefault(); setCtx(null) }}
-            style={{ position: 'fixed', inset: 0, zIndex: 99 }}
-          />
-          <ul
-            className="ctx-menu"
-            style={{ position: 'fixed', left: ctx.x, top: ctx.y, zIndex: 100 }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {CTX_ITEMS.map(({ cmd, label }) => (
-              <li key={cmd} onClick={() => { setCtx(null); runCmd(cmd) }}>{label}</li>
-            ))}
-          </ul>
-        </>
-      )}
-    </div>
-  )
+  return <div className="editor-pane" ref={hostRef} />
 })

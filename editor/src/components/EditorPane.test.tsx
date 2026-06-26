@@ -1,91 +1,100 @@
-import { describe, it, expect, vi } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { render, act } from '@testing-library/react'
 import { createRef, useState } from 'react'
+import { EditorView } from '@codemirror/view'
+import { EditorSelection } from '@codemirror/state'
 import { EditorPane, type EditorHandle } from './EditorPane'
 import { readClipboardText } from '../clipboard'
 
 vi.mock('../clipboard', () => ({ readClipboardText: vi.fn() }))
 
-describe('EditorPane', () => {
-  it('渲染 source 文本与对应行号', () => {
-    render(<EditorPane source={'第一行\n第二行\n第三行'} onChange={vi.fn()} caretLine={null} />)
-    const ta = screen.getByRole('textbox') as HTMLTextAreaElement
-    expect(ta.value).toBe('第一行\n第二行\n第三行')
-    expect(screen.getByText('1')).toBeInTheDocument()
-    expect(screen.getByText('3')).toBeInTheDocument()
+/** 从渲染结果取内部 EditorView。 */
+function getView(container: HTMLElement): EditorView {
+  const el = container.querySelector('.cm-editor') as HTMLElement
+  const view = EditorView.findFromDOM(el)
+  if (!view) throw new Error('未找到 EditorView')
+  return view
+}
+
+describe('EditorPane（CM6 host）', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('渲染 source 文本到编辑器', () => {
+    const { container } = render(<EditorPane source={'第一行\n第二行'} onChange={vi.fn()} caretLine={null} />)
+    expect(getView(container).state.doc.toString()).toBe('第一行\n第二行')
   })
 
-  it('打字回调 onChange 携带新文本', async () => {
+  it('用户编辑（非外部回灌）回调 onChange 一次，携带新文本', () => {
     const onChange = vi.fn()
-    render(<EditorPane source={''} onChange={onChange} caretLine={null} />)
-    await userEvent.type(screen.getByRole('textbox'), 'x')
+    const { container } = render(<EditorPane source={''} onChange={onChange} caretLine={null} />)
+    const view = getView(container)
+    act(() => {
+      view.dispatch({ changes: { from: 0, insert: 'x' } })
+    })
+    expect(onChange).toHaveBeenCalledTimes(1)
     expect(onChange).toHaveBeenCalledWith('x')
   })
 
-  it('highlight=false 时高亮层加 plain 类（关闭语义着色）', () => {
-    const { container } = render(
-      <EditorPane source={'=== 开场 ==='} onChange={vi.fn()} caretLine={null} highlight={false} />,
-    )
-    expect(container.querySelector('.editor-highlight.plain')).toBeTruthy()
+  it('外部 source 回灌不回调 onChange（斩回环），且同步进 doc', () => {
+    const onChange = vi.fn()
+    const { container, rerender } = render(<EditorPane source={'abc'} onChange={onChange} caretLine={null} />)
+    rerender(<EditorPane source={'abcd'} onChange={onChange} caretLine={null} />)
+    expect(onChange).not.toHaveBeenCalled()
+    expect(getView(container).state.doc.toString()).toBe('abcd')
   })
 
-  it('命令句柄 selectAll 选中 textarea 全文', () => {
+  it('同值回灌不产生事务（doc 不变、不回调）', () => {
+    const onChange = vi.fn()
+    const { container, rerender } = render(<EditorPane source={'abc'} onChange={onChange} caretLine={null} />)
+    const before = getView(container).state
+    rerender(<EditorPane source={'abc'} onChange={onChange} caretLine={null} />)
+    expect(getView(container).state).toBe(before) // 未 dispatch → state 引用不变
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it('命令句柄 selectAll 选中全文', () => {
     const ref = createRef<EditorHandle>()
-    render(<EditorPane ref={ref} source={'abc'} onChange={vi.fn()} caretLine={null} />)
-    ref.current!.exec('selectAll')
-    const ta = screen.getByRole('textbox') as HTMLTextAreaElement
-    expect(ta.selectionStart).toBe(0)
-    expect(ta.selectionEnd).toBe(3)
+    const { container } = render(<EditorPane ref={ref} source={'abc'} onChange={vi.fn()} caretLine={null} />)
+    act(() => ref.current!.exec('selectAll'))
+    const sel = getView(container).state.selection.main
+    expect(sel.from).toBe(0)
+    expect(sel.to).toBe(3)
   })
 
-  describe('编辑区自定义右键菜单', () => {
-    it('右键弹出菜单：剪切/复制/粘贴/全选，并阻止原生菜单', () => {
-      render(<EditorPane source={'abc'} onChange={vi.fn()} caretLine={null} />)
-      const ta = screen.getByRole('textbox')
-      const notPrevented = fireEvent.contextMenu(ta)
-      expect(notPrevented).toBe(false) // 默认行为被阻止 → 无原生菜单
-      expect(screen.getByText('剪切')).toBeInTheDocument()
-      expect(screen.getByText('复制')).toBeInTheDocument()
-      expect(screen.getByText('粘贴')).toBeInTheDocument()
-      expect(screen.getByText('全选')).toBeInTheDocument()
+  it('命令句柄 paste 经剪贴板插件读取并插入到选区', async () => {
+    vi.mocked(readClipboardText).mockResolvedValue('XYZ')
+    const ref = createRef<EditorHandle>()
+    function Host() {
+      const [src, setSrc] = useState('abc')
+      return <EditorPane ref={ref} source={src} onChange={setSrc} caretLine={null} />
+    }
+    const { container } = render(<Host />)
+    const view = getView(container)
+    act(() => { view.dispatch({ selection: EditorSelection.cursor(1) }) }) // 光标在 'a' 之后
+    await act(async () => {
+      ref.current!.exec('paste')
+      await Promise.resolve()
     })
+    expect(readClipboardText).toHaveBeenCalled()
+    expect(getView(container).state.doc.toString()).toBe('aXYZbc')
+  })
 
-    it('点「全选」选中全文', () => {
-      render(<EditorPane source={'abc'} onChange={vi.fn()} caretLine={null} />)
-      const ta = screen.getByRole('textbox') as HTMLTextAreaElement
-      fireEvent.contextMenu(ta)
-      fireEvent.click(screen.getByText('全选'))
-      expect(ta.selectionStart).toBe(0)
-      expect(ta.selectionEnd).toBe(3)
-    })
+  it('外部 caretLine 把光标移到该行行首', () => {
+    const { container, rerender } = render(
+      <EditorPane source={'l1\nl2\nl3'} onChange={vi.fn()} caretLine={null} />,
+    )
+    rerender(<EditorPane source={'l1\nl2\nl3'} onChange={vi.fn()} caretLine={3} />)
+    const view = getView(container)
+    expect(view.state.selection.main.head).toBe(view.state.doc.line(3).from)
+  })
 
-    it('点「复制」调用 execCommand("copy")，并关闭菜单', () => {
-      document.execCommand = vi.fn().mockReturnValue(true)
-      render(<EditorPane source={'abc'} onChange={vi.fn()} caretLine={null} />)
-      const ta = screen.getByRole('textbox')
-      fireEvent.contextMenu(ta)
-      fireEvent.click(screen.getByText('复制'))
-      expect(document.execCommand).toHaveBeenCalledWith('copy')
-      expect(screen.queryByText('复制')).toBeNull()
-    })
-
-    it('点「粘贴」经剪贴板插件读取并插入到光标处，光标落在插入文本之后', async () => {
-      vi.mocked(readClipboardText).mockResolvedValue('XYZ')
-      function Host() {
-        const [src, setSrc] = useState('abc')
-        return <EditorPane source={src} onChange={setSrc} caretLine={null} />
-      }
-      render(<Host />)
-      const ta = screen.getByRole('textbox') as HTMLTextAreaElement
-      ta.focus()
-      ta.setSelectionRange(1, 1) // 光标在 'a' 之后
-      fireEvent.contextMenu(ta)
-      fireEvent.click(screen.getByText('粘贴'))
-      await waitFor(() => expect(ta.value).toBe('aXYZbc'))
-      expect(readClipboardText).toHaveBeenCalled()
-      expect(ta.selectionStart).toBe(4)
-      expect(ta.selectionEnd).toBe(4)
-    })
+  it('caretLine 消费后回调 onCaretConsumed（一次性，防切档重挂时旧行号拽光标）', () => {
+    const onCaretConsumed = vi.fn()
+    const { rerender } = render(
+      <EditorPane source={'l1\nl2\nl3'} onChange={vi.fn()} caretLine={null} onCaretConsumed={onCaretConsumed} />,
+    )
+    expect(onCaretConsumed).not.toHaveBeenCalled() // null 不消费
+    rerender(<EditorPane source={'l1\nl2\nl3'} onChange={vi.fn()} caretLine={2} onCaretConsumed={onCaretConsumed} />)
+    expect(onCaretConsumed).toHaveBeenCalledTimes(1)
   })
 })

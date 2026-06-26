@@ -30,7 +30,11 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             kip::import_kip,
             kip::list_library,
-            kip::delete_story
+            kip::delete_story,
+            kip::list_saves,
+            kip::write_save,
+            kip::read_save,
+            kip::delete_save
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,9 +1,30 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor, within, fireEvent } from '@testing-library/react'
+import { render, screen, waitFor, within, fireEvent, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { EditorView } from '@codemirror/view'
+import { EditorSelection } from '@codemirror/state'
 import { App } from './App'
 import { createMemoryGateway } from './files/memoryGateway'
 import { SESSION_KEY } from './state/session'
+
+// 编辑区已是 CodeMirror 6（contenteditable，非 textarea）。这些 helper 经内部 EditorView
+// 读文档 / 模拟用户编辑（dispatch 事务，走 updateListener→onChange→React，等价真实输入）。
+function cmView(): EditorView {
+  const el = document.querySelector('.cm-editor') as HTMLElement | null
+  const view = el && EditorView.findFromDOM(el)
+  if (!view) throw new Error('未找到 EditorView')
+  return view
+}
+function editorValue(): string {
+  return cmView().state.doc.toString()
+}
+async function typeInEditor(text: string, atEnd = false) {
+  const view = cmView()
+  await act(async () => {
+    if (atEnd) view.dispatch({ selection: EditorSelection.cursor(view.state.doc.length) })
+    view.dispatch(view.state.replaceSelection(text))
+  })
+}
 
 beforeEach(() => {
   window.HTMLMediaElement.prototype.play = vi.fn().mockResolvedValue(undefined)
@@ -56,7 +77,7 @@ describe('App 多文件集成', () => {
     expect((await screen.findAllByText('main.kin')).length).toBeGreaterThan(0)
     expect(screen.getAllByText('末.kin').length).toBeGreaterThan(0)
     // 只开入口 tab：编辑区 textarea 是 main.kin 内容
-    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toContain('开场。')
+    expect(editorValue()).toContain('开场。')
     // 预览推进到首个选项
     expect(await screen.findByRole('button', { name: '向左' })).toBeInTheDocument()
   })
@@ -68,7 +89,7 @@ describe('App 多文件集成', () => {
     }))
     render(<App gateway={gw()} />)
     await fileMenu('打开项目...')
-    await waitFor(() => expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toContain('你往右走。'))
+    await waitFor(() => expect(editorValue()).toContain('你往右走。'))
   })
 
   it('会话保存：打开项目后把当前会话写入 localStorage', async () => {
@@ -86,7 +107,7 @@ describe('App 多文件集成', () => {
     await fileMenu('打开项目...')
     const explorer = await screen.findByRole('navigation', { name: '资源管理器' })
     await userEvent.click(within(explorer).getByText('末.kin'))
-    await waitFor(() => expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toContain('你往右走。'))
+    await waitFor(() => expect(editorValue()).toContain('你往右走。'))
   })
 
   it('编辑 → 跨文件校验出诊断（在另一个文件造语法错）', async () => {
@@ -95,10 +116,8 @@ describe('App 多文件集成', () => {
     // 打开 末.kin 并改成无目标 divert
     const explorer2 = await screen.findByRole('navigation', { name: '资源管理器' })
     await userEvent.click(within(explorer2).getByText('末.kin'))
-    const ta = await screen.findByRole('textbox')
-    ;(ta as HTMLTextAreaElement).focus()
-    ;(ta as HTMLTextAreaElement).setSelectionRange((ta as HTMLTextAreaElement).value.length, (ta as HTMLTextAreaElement).value.length)
-    await userEvent.keyboard('\n-> ')
+    await waitFor(() => expect(editorValue()).toContain('你往右走。')) // 等切到 末.kin
+    await typeInEditor('\n-> ', true) // 末尾追加无目标 divert
     // 防抖落地后诊断出现，且 file 指向 末.kin
     await screen.findByText((_, el) => el?.classList.contains('diagnostic-error') ?? false)
     expect(document.querySelectorAll('.diagnostic-error').length).toBeGreaterThan(0)
@@ -112,7 +131,7 @@ describe('App 多文件集成', () => {
     ;(document.activeElement as HTMLElement | null)?.blur()
     await userEvent.click(item)
     // 切到 末.kin：编辑区显示其内容并聚焦
-    await waitFor(() => expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toContain('=== 右 ==='))
+    await waitFor(() => expect(editorValue()).toContain('=== 右 ==='))
     await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('textbox')))
   })
 
@@ -132,7 +151,7 @@ describe('App 多文件集成', () => {
     render(<App gateway={gateway} />)
     await fileMenu('打开项目...')
     await screen.findAllByText('雾港')
-    await userEvent.type(screen.getByRole('textbox'), ' ')
+    await typeInEditor(' ')
     expect(screen.getByText('● 未保存')).toBeInTheDocument()
     await fileMenu('保存')
     await waitFor(() => expect(writeSpy).toHaveBeenCalled())
@@ -147,7 +166,7 @@ describe('App 多文件集成', () => {
     render(<App gateway={gateway} />)
     await fileMenu('打开项目...')
     await screen.findAllByText('雾港')
-    await userEvent.type(screen.getByRole('textbox'), ' ')
+    await typeInEditor(' ')
     expect(screen.getByText('● 未保存')).toBeInTheDocument()
     fireEvent.keyDown(window, { key: 's', ctrlKey: true })
     await waitFor(() => expect(writeSpy).toHaveBeenCalledWith('/proj', 'main.kin', expect.any(String)))
@@ -184,7 +203,7 @@ describe('App 多文件集成', () => {
     await fileMenu('新建文件...')
     await userEvent.type(screen.getByPlaceholderText('文件名（可含子目录）...'), '盘问{Enter}')
     expect((await screen.findAllByText('盘问.kin')).length).toBeGreaterThan(0)
-    await waitFor(() => expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toContain('=== 新节点 ==='))
+    await waitFor(() => expect(editorValue()).toContain('=== 新节点 ==='))
   })
 
   it('预览里点选项 → 叙事增长（保位）；切 tab 不影响预览', async () => {
@@ -221,7 +240,7 @@ describe('App 多文件集成', () => {
     render(<App gateway={gateway} />)
     await fileMenu('新建项目...')
     expect((await screen.findAllByText('未命名项目')).length).toBeGreaterThan(0)
-    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toContain('=== 开场 ===')
+    expect(editorValue()).toContain('=== 开场 ===')
   })
 
   it('打开含子目录的项目 → 树展开后可打开子目录 .kin', async () => {
@@ -242,7 +261,7 @@ describe('App 多文件集成', () => {
     // c.kin 进入编辑区（其首节点名出现在大纲/编辑区），且无错误诊断
     expect(within(explorer).getByText('c.kin')).toBeInTheDocument()
     await waitFor(() =>
-      expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toContain('子节点'),
+      expect(editorValue()).toContain('子节点'),
     )
   })
 
@@ -374,7 +393,7 @@ describe('App 多文件集成', () => {
     render(<App gateway={gateway} />)
     await fileMenu('打开项目...')
     await screen.findAllByText('雾港')
-    await userEvent.type(screen.getByRole('textbox'), ' ')
+    await typeInEditor(' ')
     await userEvent.click(screen.getByRole('button', { name: '关闭 main.kin' }))
     expect(await screen.findByRole('dialog', { name: '关闭未保存的文件' })).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: '保存' }))
@@ -388,7 +407,7 @@ describe('App 多文件集成', () => {
     render(<App gateway={gateway} />)
     await fileMenu('打开项目...')
     await screen.findAllByText('雾港')
-    await userEvent.type(screen.getByRole('textbox'), ' ')
+    await typeInEditor(' ')
     await userEvent.click(screen.getByRole('button', { name: '关闭 main.kin' }))
     await userEvent.click(await screen.findByRole('button', { name: '不保存' }))
     await waitFor(() => expect(screen.getByText('未打开文件')).toBeInTheDocument())
@@ -399,26 +418,26 @@ describe('App 多文件集成', () => {
     render(<App gateway={gw()} />)
     await fileMenu('打开项目...')
     await screen.findAllByText('雾港')
-    const original = (screen.getByRole('textbox') as HTMLTextAreaElement).value
-    await userEvent.type(screen.getByRole('textbox'), 'ZZZ')
+    const original = editorValue()
+    await typeInEditor('ZZZ')
     await userEvent.click(screen.getByRole('button', { name: '关闭 main.kin' }))
     await userEvent.click(await screen.findByRole('button', { name: '不保存' }))
     await waitFor(() => expect(screen.getByText('未打开文件')).toBeInTheDocument())
     // 重新打开 main.kin：内容应回到磁盘版本，未保存的 ZZZ 不在
     const explorer = await screen.findByRole('navigation', { name: '资源管理器' })
     await userEvent.click(within(explorer).getByText('main.kin'))
-    await waitFor(() => expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe(original))
-    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).not.toContain('ZZZ')
+    await waitFor(() => expect(editorValue()).toBe(original))
+    expect(editorValue()).not.toContain('ZZZ')
   })
 
   it('关闭有改动的 tab → 选取消 → tab 保留、改动仍在', async () => {
     render(<App gateway={gw()} />)
     await fileMenu('打开项目...')
     await screen.findAllByText('雾港')
-    await userEvent.type(screen.getByRole('textbox'), 'X')
+    await typeInEditor('X')
     await userEvent.click(screen.getByRole('button', { name: '关闭 main.kin' }))
     await userEvent.click(await screen.findByRole('button', { name: '取消' }))
-    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toContain('X')
+    expect(editorValue()).toContain('X')
     expect(screen.getByText('● 未保存')).toBeInTheDocument()
   })
 
@@ -438,7 +457,7 @@ describe('App 多文件集成', () => {
     await fileMenu('打开项目...')
     const explorer = await screen.findByRole('navigation', { name: '资源管理器' })
     await userEvent.click(within(explorer).getByText('末.kin')) // 开并激活 末.kin
-    await userEvent.type(screen.getByRole('textbox'), ' ')       // 改脏 末.kin
+    await typeInEditor(' ')       // 改脏 末.kin
     const tabbar = screen.getByRole('tablist')
     await userEvent.click(within(tabbar).getByText('main.kin'))   // 切回 main.kin
     await userEvent.click(screen.getByRole('button', { name: '关闭 末.kin' }))
@@ -452,7 +471,7 @@ describe('App 多文件集成', () => {
     render(<App gateway={gateway} />)
     await fileMenu('打开项目...')
     await screen.findAllByText('雾港')
-    await userEvent.type(screen.getByRole('textbox'), ' ')
+    await typeInEditor(' ')
     await userEvent.click(screen.getByRole('button', { name: '关闭 main.kin' }))
     await userEvent.click(await screen.findByRole('button', { name: '保存' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('磁盘炸了')
@@ -464,7 +483,7 @@ describe('App 多文件集成', () => {
     render(<App gateway={gw()} />)
     await fileMenu('打开项目...')
     await screen.findAllByText('雾港')
-    await userEvent.type(screen.getByRole('textbox'), ' ')
+    await typeInEditor(' ')
     await fileMenu('退出')
     expect(await screen.findByRole('dialog', { name: '退出 Kiny Editor' })).toBeInTheDocument()
   })
@@ -476,7 +495,7 @@ describe('App 多文件集成', () => {
     render(<App gateway={gateway} />)
     await fileMenu('打开项目...')
     await screen.findAllByText('雾港')
-    await userEvent.type(screen.getByRole('textbox'), ' ')
+    await typeInEditor(' ')
     await fileMenu('退出')
     await userEvent.click(await screen.findByRole('button', { name: '全部保存' }))
     await waitFor(() => expect(writeSpy).toHaveBeenCalled())
@@ -490,7 +509,7 @@ describe('App 多文件集成', () => {
     render(<App gateway={gateway} />)
     await fileMenu('打开项目...')
     await screen.findAllByText('雾港')
-    await userEvent.type(screen.getByRole('textbox'), ' ')
+    await typeInEditor(' ')
     await fileMenu('退出')
     await userEvent.click(await screen.findByRole('button', { name: '不保存并退出' }))
     await waitFor(() => expect(closeSpy).toHaveBeenCalled())
@@ -503,7 +522,7 @@ describe('App 多文件集成', () => {
     render(<App gateway={gateway} />)
     await fileMenu('打开项目...')
     await screen.findAllByText('雾港')
-    await userEvent.type(screen.getByRole('textbox'), ' ')
+    await typeInEditor(' ')
     await fileMenu('退出')
     await userEvent.click(await screen.findByRole('button', { name: '取消' }))
     expect(closeSpy).not.toHaveBeenCalled()
@@ -528,7 +547,7 @@ describe('App 多文件集成', () => {
     render(<App gateway={gateway} />)
     await fileMenu('打开项目...')
     await screen.findAllByText('雾港')
-    await userEvent.type(screen.getByRole('textbox'), ' ')
+    await typeInEditor(' ')
     await fileMenu('退出')
     await userEvent.click(await screen.findByRole('button', { name: '全部保存' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('磁盘炸了')
@@ -656,9 +675,7 @@ describe('App 导出故事包', () => {
     render(<App gateway={gwExport({ exportSink: sink })} />)
     await fileMenu('打开项目...')
     // 改动入口 tab 使其变脏
-    const ta = await screen.findByRole('textbox')
-    ;(ta as HTMLTextAreaElement).focus()
-    await userEvent.type(ta, 'x')
+    await typeInEditor('x')
     await fileMenu('导出故事包（.kip）...')   // memory confirm 默认返 true
     expect(await screen.findByText('已导出到 /out/雾港.kip')).toBeInTheDocument()
     // 已保存：导出后入口内容含改动（确认保存确实先发生——不强断言文件内容，notice 出现即证明走通保存→导出）
@@ -682,9 +699,7 @@ describe('App 导出故事包', () => {
     render(<App gateway={gwExport({ exportSink: sink, confirmResult: false })} />)
     await fileMenu('打开项目...')
     // 改动入口 tab 使其变脏
-    const ta = await screen.findByRole('textbox')
-    ;(ta as HTMLTextAreaElement).focus()
-    await userEvent.type(ta, 'x')
+    await typeInEditor('x')
     await fileMenu('导出故事包（.kip）...')   // confirm 返 false → 取消
     // 给异步链一拍
     await new Promise((r) => setTimeout(r, 0))
@@ -733,9 +748,7 @@ describe('App 导出独立网页', () => {
     const sink: { dest: string; projectData: string; files: string[] }[] = []
     render(<App gateway={gwExportWeb({ webpageSink: sink })} />)
     await fileMenu('打开项目...')
-    const ta = await screen.findByRole('textbox')
-    ;(ta as HTMLTextAreaElement).focus()
-    await userEvent.type(ta, 'x')
+    await typeInEditor('x')
     await fileMenu('导出独立网页...')   // memory confirm 默认返 true
     expect(await screen.findByText('已导出到 /out/雾港-web')).toBeInTheDocument()
     expect(sink.length).toBe(1)

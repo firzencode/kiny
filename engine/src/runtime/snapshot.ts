@@ -1,6 +1,23 @@
 import type { Choice, ContentBlock, Knot } from '../parser/ast'
 import type { ValidatedProgram } from '../analyze/types'
+import { openingKnotName } from '../analyze'
 import type { Frame } from './frames'
+
+/**
+ * program 的全部 knot（**含合成开场 knot**），确定性顺序：文件按 path 字典序，每文件先开场 knot
+ * 后具名 knot（声明序）。开场 knot 在 `program.knots` Map 里、不在 `file.knots`，故枚举 / 建路径 /
+ * 指纹都须经此辅助一并覆盖——否则顶层开场（首个 `===` 前）的选项点 serialize 会「栈帧 block 无路径」。
+ */
+function orderedKnots(program: ValidatedProgram): Knot[] {
+  const files = [...program.files].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+  const out: Knot[] = []
+  for (const f of files) {
+    const opening = program.knots.get(openingKnotName(f.path))
+    if (opening) out.push(opening)
+    for (const k of f.knots) out.push(k)
+  }
+  return out
+}
 
 /** 运行时状态快照：纯 JSON-able 数据，可落盘往返。 */
 export interface StorySnapshot {
@@ -56,11 +73,9 @@ export function buildBlockPaths(program: ValidatedProgram): Map<ContentBlock, Bl
       }
     })
   }
-  for (const f of program.files) {
-    for (const k of f.knots) {
-      visit(k.body, { root: { knot: k.name }, steps: [] })
-      for (const s of k.stitches) visit(s.body, { root: { knot: k.name, stitch: s.name }, steps: [] })
-    }
+  for (const k of orderedKnots(program)) {
+    visit(k.body, { root: { knot: k.name }, steps: [] })
+    for (const s of k.stitches) visit(s.body, { root: { knot: k.name, stitch: s.name }, steps: [] })
   }
   return map
 }
@@ -117,12 +132,9 @@ export function enumerateChoices(program: ValidatedProgram): {
       }
     }
   }
-  const files = [...program.files].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
-  for (const f of files) {
-    for (const k of f.knots) {
-      walk(k.body)
-      for (const s of k.stitches) walk(s.body)
-    }
+  for (const k of orderedKnots(program)) {
+    walk(k.body)
+    for (const s of k.stitches) walk(s.body)
   }
   const index = new Map<Choice, number>()
   list.forEach((c, i) => index.set(c, i))

@@ -1,8 +1,9 @@
 import { loadProjectFromFiles, analyze, resolveStart, createStory } from '@kiny/engine'
-import type { Story } from '@kiny/engine'
+import type { Story, ValidatedProgram } from '@kiny/engine'
 
 export type AssembleOutcome =
-  | { ok: true; story: Story; title: string }
+  // program 一并返回：读档时 restoreStory(program, snapshot) 需从同一份 .kin 重装的 program。
+  | { ok: true; story: Story; title: string; program: ValidatedProgram }
   | { ok: false; message: string }
 
 /**
@@ -26,5 +27,5 @@ export function assembleStory(
   if (start === null) return { ok: false, message: '无可运行入口' }
 
   const story = createStory(program, { start, seed })
-  return { ok: true, story, title: res.meta.name }
+  return { ok: true, story, title: res.meta.name, program }
 }

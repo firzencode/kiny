@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.2.0"
+version = "0.3.0"
 description = "Kiny desktop story editor — a Tauri 2 shell for the Ink-inspired Kiny interactive-fiction DSL"
 authors = ["firzencode <firzencode@gmail.com>"]
 license = "Apache-2.0"

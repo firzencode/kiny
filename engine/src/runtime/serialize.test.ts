@@ -126,6 +126,23 @@ describe('Story 状态快照 —— 往返等价', () => {
     expect(r.reason).toBe('fingerprint-mismatch')
   })
 
+  it('顶层开场选项（首个 === 前）：serialize → restore 往返等价（合成开场 knot）', () => {
+    // 选项在 preamble（顶层开场），落进合成 ' opening:main.kin' knot——回归 buildBlockPaths/enumerateChoices 漏 opening 致「栈帧 block 无路径」。
+    const src = ['开场正文', '* 选一 -> B', '* 选二 -> C', '=== B ===', 'B正文', '-> END', '=== C ===', 'C正文', '-> END'].join('\n')
+    const program = prog(src)
+    const s = createStory(program, { start: ' opening:main.kin' })
+    drainText(s)
+    expect(s.currentChoices.map((c) => plainText(c.spans))).toEqual(['选一', '选二'])
+
+    const r = restoreStory(program, roundtrip(s))
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.story.currentChoices.map((c) => plainText(c.spans))).toEqual(['选一', '选二'])
+    s.choose(1)
+    r.story.choose(1)
+    expect(drainText(r.story)).toEqual(drainText(s))
+  })
+
   it('非稳定边界 serialize 抛错', () => {
     const src = ['=== A ===', '第一行', '第二行', '-> END'].join('\n')
     const s = createStory(prog(src), { start: 'A' })

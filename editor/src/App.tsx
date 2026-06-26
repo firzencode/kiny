@@ -55,6 +55,8 @@ function loadView(): ViewPrefs {
 
 export function App({ gateway }: { gateway: FileGateway }) {
   const [state, dispatch] = useReducer(editorReducer, initialEditorState)
+  // 校验产出的符号表（补全 / 跳转用），随 onValidated 更新；与 programRef 并存（ref 供热路径、state 供 EditorPane 反应式回灌）。
+  const [program, setProgram] = useState<ValidatedProgram | null>(null)
   const [play, setPlay] = useState<PlayState | null>(null)
   const [stale, setStale] = useState(false)
   const [sfxQueue, setSfxQueue] = useState<string[]>([]) // 预览待播一次性音效；仅点选项时更新（编辑重算不出声）
@@ -109,6 +111,11 @@ export function App({ gateway }: { gateway: FileGateway }) {
   // 派生量
   const active = activeBuffer(state)
   const nodes = useMemo(() => (active ? parseNodes(active.source) : []), [active])
+  // 当前文件诊断（喂 EditorPane 画行内波浪线）；跨文件总览仍走 DiagnosticsList。
+  const currentDiags = useMemo(
+    () => (active ? state.diagnostics.filter((d) => d.file === active.path) : []),
+    [state.diagnostics, active],
+  )
   const errorCount = state.diagnostics.filter((d) => d.severity === 'error').length
   const warnCount = state.diagnostics.filter((d) => d.severity === 'warning').length
 
@@ -137,6 +144,7 @@ export function App({ gateway }: { gateway: FileGateway }) {
       dispatch({ type: 'validated', runId: r.runId, diagnostics: r.diagnostics })
       if (r.runId !== runIdRef.current) return
       programRef.current = r.program
+      setProgram(r.program)
       recompute(r.program, choiceSeqRef.current, resolveRef.current, playRef.current)
     },
     [recompute],
@@ -159,7 +167,7 @@ export function App({ gateway }: { gateway: FileGateway }) {
       resolveRef.current = gateway.makeResolveAsset(dir)
       choiceSeqRef.current = []
       playRef.current = null; setPlay(null)
-      programRef.current = null
+      programRef.current = null; setProgram(null)
       setStale(false); setCaretLine(null); setActiveLine(1); setNotice(null)
       // 会话恢复：用上次记住的 tab，对当前磁盘文件校验降级（删/改名跳过）
       const validPaths = new Set(proj.files.map((f) => f.path))
@@ -467,12 +475,19 @@ export function App({ gateway }: { gateway: FileGateway }) {
           />
           {active ? (
             <EditorPane
+              // 每个文件一个独立 EditorView：切档重挂，撤销历史天然隔离，
+              // 避免在文件 B 里 Ctrl+Z 撤回成文件 A 内容、doc 与 React state 串档。
+              key={state.activeFile ?? ''}
               ref={editorRef}
               source={active.source}
               onChange={(s) => dispatch({ type: 'source_changed', path: active.path, source: s })}
               caretLine={caretLine}
-              activeLine={activeLine}
+              onCaretConsumed={() => setCaretLine(null)}
               onCaretMove={setActiveLine}
+              onGoto={onJumpDiagnostic}
+              diagnostics={currentDiags}
+              program={program}
+              activeFile={state.activeFile}
               highlight={view.highlight}
             />
           ) : (

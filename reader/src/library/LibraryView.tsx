@@ -1,5 +1,8 @@
 import type { LibraryItem } from '../types'
 
+/** 打开方式：从头开始 / 从自动续读存档继续。 */
+export type OpenMode = 'start' | 'continue'
+
 function EmptyShelf() {
   return (
     <div className="empty">
@@ -15,11 +18,13 @@ function EmptyShelf() {
 }
 
 export function LibraryView({
-  items, busy, onOpen, onDelete, onImport,
+  items, resumable, busy, onOpen, onDelete, onImport,
 }: {
   items: LibraryItem[]
+  /** 有自动续读存档的书 id：显示「继续 / 重新开始」，否则「开始」。 */
+  resumable: Set<string>
   busy: boolean
-  onOpen: (item: LibraryItem) => void
+  onOpen: (item: LibraryItem, mode: OpenMode) => void
   onDelete: (id: string) => void
   onImport: () => void
 }) {
@@ -35,24 +40,36 @@ export function LibraryView({
       ) : (
         <div className="shelf">
           <div className="ed-list">
-            {items.map((s) => (
-              <div className="ed-row" key={s.id} onClick={() => onOpen(s)}>
-                {s.coverUrl ? (
-                  <div className="ed-cover"><img src={s.coverUrl} alt="" /></div>
-                ) : (
-                  <div className="ed-cover ph"><span>{[...s.name][0]}</span></div>
-                )}
-                <div className="ed-body">
-                  <div className="ed-top">
-                    <span className="ed-title">{s.name}</span>
-                    {s.author && <span className="ed-author">{s.author}</span>}
+            {items.map((s) => {
+              const canResume = resumable.has(s.id)
+              // 行点击：有续读存档 → 继续；否则从头开始。
+              const openDefault = () => onOpen(s, canResume ? 'continue' : 'start')
+              return (
+                <div className="ed-row" key={s.id} onClick={openDefault}>
+                  {s.coverUrl ? (
+                    <div className="ed-cover"><img src={s.coverUrl} alt="" /></div>
+                  ) : (
+                    <div className="ed-cover ph"><span>{[...s.name][0]}</span></div>
+                  )}
+                  <div className="ed-body">
+                    <div className="ed-top">
+                      <span className="ed-title">{s.name}</span>
+                      {s.author && <span className="ed-author">{s.author}</span>}
+                    </div>
+                    {s.description && <p className="ed-desc">{s.description}</p>}
                   </div>
-                  {s.description && <p className="ed-desc">{s.description}</p>}
+                  {canResume ? (
+                    <>
+                      <button className="ed-go" onClick={(e) => { e.stopPropagation(); onOpen(s, 'continue') }}>▸ 继续</button>
+                      <button className="ed-restart" onClick={(e) => { e.stopPropagation(); onOpen(s, 'start') }}>重新开始</button>
+                    </>
+                  ) : (
+                    <button className="ed-go" onClick={(e) => { e.stopPropagation(); onOpen(s, 'start') }}>▸ 开始</button>
+                  )}
+                  <button className="ed-del" title="删除" onClick={(e) => { e.stopPropagation(); onDelete(s.id) }}>🗑</button>
                 </div>
-                <button className="ed-go" onClick={(e) => { e.stopPropagation(); onOpen(s) }}>▸ 阅读</button>
-                <button className="ed-del" title="删除" onClick={(e) => { e.stopPropagation(); onDelete(s.id) }}>🗑</button>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </div>
       )}

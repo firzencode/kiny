@@ -1,16 +1,16 @@
 {
   "name": "@kiny/web-reader",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "predev": "node ../scripts/stage-sample.mjs ../samples/雾港之夜 public/demo --files-json",
+    "predev": "node ../scripts/public/stage-sample.mjs ../samples/雾港之夜 public/demo --files-json",
     "dev": "vite",
-    "prebuild": "node ../scripts/stage-sample.mjs ../samples/雾港之夜 public/demo --files-json",
+    "prebuild": "node ../scripts/public/stage-sample.mjs ../samples/雾港之夜 public/demo --files-json",
     "build": "tsc --noEmit && vite build",
     "build:template": "vite build --mode template",
     "preview": "vite preview",
-    "pretest": "node ../scripts/stage-sample.mjs ../samples/雾港之夜 public/demo --files-json",
+    "pretest": "node ../scripts/public/stage-sample.mjs ../samples/雾港之夜 public/demo --files-json",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"

@@ -336,82 +336,20 @@ button {
   color: var(--text-faint);
 }
 
-/* ---------- 编辑区（行号 + 高亮层 + 透明 textarea） ---------- */
+/* ---------- 编辑区（CodeMirror 6 host） ---------- */
+/* .editor-pane 只是 CM 的挂载容器；行号 / 滚动 / 光标 / 选区 / 高亮全由 CM6 接管。
+   语义着色经 cm/highlight.ts 的 HighlightStyle 映射到下方 .t-* 类（色值仍走 --s-* 变量，
+   双主题零改动复用）；主题其余部分见 cm/theme.ts。 */
 .editor-pane {
   flex: 1;
   min-height: 0;
-  overflow: auto;
-  display: grid;
-  grid-template-columns: auto 1fr;
-  background: var(--bg-0);
-}
-.editor-gutter {
-  user-select: none;
-  text-align: right;
-  color: var(--text-faint);
-  background: var(--bg-0);
-  font-family: var(--code-font);
-  font-size: var(--code-size);
-  line-height: var(--code-lh);
-  padding: 14px 12px 40vh 16px;
-  position: sticky;
-  left: 0;
-  z-index: 1;
-}
-.gln {
-  height: calc(var(--code-size) * var(--code-lh));
-}
-.gln.cur {
-  color: var(--text);
-}
-.editor-area {
-  position: relative;
-  min-width: 0;
-}
-.editor-highlight,
-.editor-textarea {
-  margin: 0;
-  font-family: var(--code-font);
-  font-size: var(--code-size);
-  line-height: var(--code-lh);
-  padding: 14px 16px 40vh 8px;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  tab-size: 2;
-  /* 关编程连字：=== / -> / => 等不连写成一个字形（否则与下方 textarea 字形宽度不齐、光标错位）。 */
-  font-variant-ligatures: none;
-  font-feature-settings: 'liga' 0, 'calt' 0;
-}
-.editor-highlight {
-  color: var(--s-text);
-  pointer-events: none;
-  user-select: none;
-}
-.hl-line {
-  min-height: calc(var(--code-size) * var(--code-lh));
-}
-.hl-line.cur {
-  background: var(--bg-2);
-  box-shadow: inset 2px 0 0 var(--accent-line);
-  margin: 0 -16px 0 -8px;
-  padding: 0 16px 0 8px;
-}
-.editor-textarea {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  resize: none;
-  border: none;
-  outline: none;
-  background: transparent;
-  color: transparent;
-  caret-color: var(--accent);
   overflow: hidden;
+  background: var(--bg-0);
 }
-.editor-textarea::selection {
-  background: color-mix(in srgb, var(--accent) 28%, transparent);
+.editor-pane .cm-editor {
+  height: 100%;
 }
-/* 语义着色 token */
+/* 语义着色 token（CM6 HighlightStyle 按这些类名上色） */
 .t-comment {
   color: var(--s-comment);
   /* 不用斜体：Windows 无中文等宽斜体，合成倾斜会把中文注释拉糊、看不清 */
@@ -461,24 +399,6 @@ button {
 .depth-guide {
   color: var(--text-faint);
   opacity: 0.55;
-}
-
-/* 关闭语义着色：所有 token 退回普通正文色 */
-.editor-highlight.plain .t-comment,
-.editor-highlight.plain .t-node,
-.editor-highlight.plain .t-node-d,
-.editor-highlight.plain .t-command,
-.editor-highlight.plain .t-logic,
-.editor-highlight.plain .t-divert,
-.editor-highlight.plain .t-interp,
-.editor-highlight.plain .t-string,
-.editor-highlight.plain .t-keyword,
-.editor-highlight.plain .t-marker,
-.editor-highlight.plain .t-tag,
-.editor-highlight.plain .t-num {
-  color: var(--s-text);
-  font-style: normal;
-  font-weight: 400;
 }
 
 /* ---------- 诊断条 ---------- */

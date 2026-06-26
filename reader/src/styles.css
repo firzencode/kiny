@@ -61,3 +61,53 @@ body { overflow:hidden; background:var(--bg1); color:var(--text);
   border:1px solid rgba(255,255,255,.14); border-radius:9px; padding:7px 13px; }
 .reading-bar .back:hover { background:rgba(20,24,32,.8); }
 .reading-bar .title-chip { font-size:12.5px; color:#9aa1b2; letter-spacing:.06em; }
+/* margin-right 给 player 的右上角静音键（.audio-toggle: right 16px + 宽 ~42px）让位，避免两个右上控件重叠。 */
+.reading-bar .saves-btn { pointer-events:auto; margin-left:auto; margin-right:52px; font:inherit; font-size:13px; cursor:pointer; color:#d8dbe2;
+  background:rgba(8,11,16,.5); border:1px solid rgba(255,255,255,.14); border-radius:9px; padding:7px 13px; }
+.reading-bar .saves-btn:hover { background:rgba(20,24,32,.8); }
+/* 覆盖 player 静音键的纵向位置：reading-bar 内容垂直居中于 y≈26px（52px 的一半），
+   把静音键的中心也钉到 26px，使它与「书架/标题/存档读档」在同一行同心（不依赖其高度）。 */
+.audio-toggle { top:26px; transform:translateY(-50%); }
+
+/* 书架「重新开始」按钮（与「▸ 继续」并排）*/
+.ed-restart { flex:none; font:inherit; font-size:12.5px; cursor:pointer; color:var(--dim); background:transparent;
+  border:1px solid var(--border2); border-radius:8px; padding:7px 11px; }
+.ed-restart:hover { color:var(--text); background:var(--bg2); }
+
+/* 存档 / 读档面板 */
+.saves-overlay { position:fixed; inset:0; z-index:20; background:rgba(6,8,12,.55); display:grid; place-items:center; }
+.saves-panel { width:min(440px,92vw); max-height:80vh; overflow:auto; background:var(--bg1); border:1px solid var(--border2);
+  border-radius:14px; box-shadow:var(--shadow); padding:18px 20px; }
+.saves-head { display:flex; align-items:center; margin-bottom:12px; }
+.saves-head h2 { margin:0; font-size:16px; font-weight:600; }
+.saves-close { margin-left:auto; width:30px; height:30px; border-radius:8px; border:1px solid var(--border2); background:transparent;
+  color:var(--dim); font-size:18px; line-height:1; cursor:pointer; }
+.saves-close:hover { color:var(--text); background:var(--bg2); }
+.saves-new { width:100%; font:inherit; font-size:13px; cursor:pointer; color:var(--accent); background:var(--accent-soft);
+  border:1px solid var(--accent-line); border-radius:9px; padding:9px; margin-bottom:14px; }
+.saves-new:hover { background:rgba(210,162,76,.24); }
+.saves-empty { color:var(--faint); font-size:13px; text-align:center; padding:18px 0; }
+.saves-list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px; }
+.saves-row { display:flex; align-items:center; gap:10px; padding:10px 12px; background:var(--bg2); border:1px solid var(--border); border-radius:10px; }
+.saves-meta { min-width:0; flex:1; display:flex; flex-direction:column; gap:3px; }
+.saves-label { font-size:13.5px; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.saves-tag { font-size:11px; color:var(--accent); background:var(--accent-soft); border-radius:5px; padding:1px 6px; margin-right:7px; }
+.saves-time { font-size:11.5px; color:var(--faint); }
+.saves-load { flex:none; font:inherit; font-size:12.5px; cursor:pointer; color:var(--accent); background:transparent;
+  border:1px solid var(--accent-line); border-radius:8px; padding:6px 12px; }
+.saves-load:hover:not(:disabled) { background:var(--accent-soft); }
+.saves-load:disabled { opacity:.4; cursor:default; }
+.saves-del { flex:none; width:30px; height:30px; border-radius:8px; border:1px solid var(--border2); background:transparent;
+  display:grid; place-items:center; cursor:pointer; }
+.saves-del:hover { background:#c8443a; border-color:#c8443a; }
+/* 删除的行内二次确认态：危险色，点一次才真正删。 */
+.saves-del-confirm { flex:none; font:inherit; font-size:12px; cursor:pointer; color:#fff; background:#c8443a;
+  border:1px solid #c8443a; border-radius:8px; padding:7px 10px; white-space:nowrap; }
+.saves-del-confirm:hover { background:#d8554b; }
+.saves-notice { margin:12px 0 0; font-size:12.5px; color:#ffb4ac; }
+
+/* 轻量 toast：底部居中、一闪而过，不打断阅读。 */
+.reading-toast { position:fixed; left:50%; bottom:34px; transform:translateX(-50%); z-index:30;
+  background:rgba(8,11,16,.88); color:#e7eaf0; border:1px solid rgba(255,255,255,.14); border-radius:10px;
+  padding:9px 18px; font-size:13px; pointer-events:none; animation:toast-in .16s ease-out; }
+@keyframes toast-in { from { opacity:0; transform:translate(-50%,6px); } to { opacity:1; transform:translate(-50%,0); } }

@@ -123,7 +123,114 @@ pub fn delete_story(app: tauri::AppHandle, id: String) -> Result<(), String> {
     if dir.is_dir() {
         fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;
     }
+    // 连带删该书全部存档（spec §6：删书连带删存档）。
+    let saves = app_saves_root(&app)?.join(&id);
+    if saves.is_dir() {
+        let _ = fs::remove_dir_all(&saves);
+    }
     Ok(())
+}
+
+// ---------- 存档（save / load） ----------
+// 存档独立于 library，落 <appData>/saves/<storyId>/<saveId>.json，按 story id 归档。
+// 引擎 / player 的快照与渲染态对 Rust 是不透明 JSON，Rust 只认 save 的 id 当文件名。
+
+/// 合法 save id：自动续读那条恒为 "auto"，手动存档为非空全 ASCII 十六进制（杜绝目录穿越）。
+pub(crate) fn is_valid_save_id(id: &str) -> bool {
+    id == "auto" || (!id.is_empty() && id.chars().all(|c| c.is_ascii_hexdigit()))
+}
+
+/// <appData>/saves，确保存在。
+fn app_saves_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let base = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let root = base.join("saves");
+    fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+    Ok(root)
+}
+
+/// <appData>/saves/<storyId>，校验 id 后确保存在。
+fn saves_dir(app: &tauri::AppHandle, story_id: &str) -> Result<PathBuf, String> {
+    if !is_valid_story_id(story_id) {
+        return Err("非法 story id".to_string());
+    }
+    let dir = app_saves_root(app)?.join(story_id);
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
+// 纯 IO 助手（不依赖 AppHandle，可单测）：
+
+/// 写一条存档到 dir/<id>.json（id 取自 save["id"]，须合法）。
+pub(crate) fn write_save_in(dir: &Path, save: &serde_json::Value) -> Result<(), String> {
+    let id = save.get("id").and_then(|v| v.as_str()).ok_or("save 缺 id 字段")?;
+    if !is_valid_save_id(id) {
+        return Err("非法 save id".to_string());
+    }
+    let text = serde_json::to_string(save).map_err(|e| e.to_string())?;
+    fs::write(dir.join(format!("{id}.json")), text).map_err(|e| e.to_string())
+}
+
+/// 列 dir 下全部 .json 存档（解析失败的跳过）。
+pub(crate) fn list_saves_in(dir: &Path) -> Vec<serde_json::Value> {
+    let mut out = Vec::new();
+    let Ok(rd) = fs::read_dir(dir) else { return out };
+    for ent in rd {
+        let Ok(ent) = ent else { continue };
+        let p = ent.path();
+        if p.extension().and_then(|x| x.to_str()) == Some("json") {
+            if let Ok(text) = fs::read_to_string(&p) {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
+                    out.push(v);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// 读 dir/<saveId>.json；不存在 → None。
+pub(crate) fn read_save_in(dir: &Path, save_id: &str) -> Result<Option<serde_json::Value>, String> {
+    if !is_valid_save_id(save_id) {
+        return Err("非法 save id".to_string());
+    }
+    let path = dir.join(format!("{save_id}.json"));
+    if !path.is_file() {
+        return Ok(None);
+    }
+    let text = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    serde_json::from_str(&text).map(Some).map_err(|e| e.to_string())
+}
+
+/// 删 dir/<saveId>.json（不存在视作成功）。
+pub(crate) fn delete_save_in(dir: &Path, save_id: &str) -> Result<(), String> {
+    if !is_valid_save_id(save_id) {
+        return Err("非法 save id".to_string());
+    }
+    let path = dir.join(format!("{save_id}.json"));
+    if path.is_file() {
+        fs::remove_file(&path).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn list_saves(app: tauri::AppHandle, story_id: String) -> Result<Vec<serde_json::Value>, String> {
+    Ok(list_saves_in(&saves_dir(&app, &story_id)?))
+}
+
+#[tauri::command]
+pub fn write_save(app: tauri::AppHandle, story_id: String, save: serde_json::Value) -> Result<(), String> {
+    write_save_in(&saves_dir(&app, &story_id)?, &save)
+}
+
+#[tauri::command]
+pub fn read_save(app: tauri::AppHandle, story_id: String, save_id: String) -> Result<Option<serde_json::Value>, String> {
+    read_save_in(&saves_dir(&app, &story_id)?, &save_id)
+}
+
+#[tauri::command]
+pub fn delete_save(app: tauri::AppHandle, story_id: String, save_id: String) -> Result<(), String> {
+    delete_save_in(&saves_dir(&app, &story_id)?, &save_id)
 }
 
 #[cfg(test)]
@@ -230,5 +337,39 @@ mod tests {
         assert!(!super::is_valid_story_id(".."));
         assert!(!super::is_valid_story_id("a/b"));
         assert!(!super::is_valid_story_id("..\\x"));
+    }
+
+    #[test]
+    fn save_id_guard() {
+        assert!(super::is_valid_save_id("auto"));
+        assert!(super::is_valid_save_id("deadbeef0a1b2c3d"));
+        assert!(!super::is_valid_save_id(""));
+        assert!(!super::is_valid_save_id("../x"));
+        assert!(!super::is_valid_save_id("a b"));
+        assert!(!super::is_valid_save_id("auto2")); // 非 hex、又不等于 "auto"
+    }
+
+    #[test]
+    fn save_write_list_read_delete_roundtrip() {
+        let dir = tmp();
+        let auto = serde_json::json!({"id":"auto","kind":"auto","snapshot":{"fingerprint":"fp"},"play":{},"meta":{"timestamp":1,"label":"开场"}});
+        let manual = serde_json::json!({"id":"deadbeef","kind":"manual","snapshot":{},"play":{},"meta":{"timestamp":2,"label":"码头"}});
+        super::write_save_in(&dir, &auto).unwrap();
+        super::write_save_in(&dir, &manual).unwrap();
+        assert_eq!(super::list_saves_in(&dir).len(), 2);
+        let got = super::read_save_in(&dir, "auto").unwrap().unwrap();
+        assert_eq!(got["meta"]["label"], "开场");
+        super::delete_save_in(&dir, "auto").unwrap();
+        assert!(super::read_save_in(&dir, "auto").unwrap().is_none());
+        assert_eq!(super::list_saves_in(&dir).len(), 1);
+    }
+
+    #[test]
+    fn write_save_rejects_bad_id() {
+        let dir = tmp();
+        let bad = serde_json::json!({"id":"../evil","kind":"manual"});
+        assert!(super::write_save_in(&dir, &bad).is_err());
+        // 缺 id 字段也拒。
+        assert!(super::write_save_in(&dir, &serde_json::json!({"kind":"manual"})).is_err());
     }
 }

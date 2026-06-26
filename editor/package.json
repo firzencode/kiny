@@ -1,11 +1,12 @@
 {
   "name": "@kiny/editor",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "scripts": {
+    "predev": "node ../scripts/public/build-export-template.mjs --if-missing",
     "dev": "vite",
-    "prebuild": "node ../scripts/build-export-template.mjs",
+    "prebuild": "node ../scripts/public/build-export-template.mjs",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest run",
@@ -14,9 +15,17 @@
     "tauri": "tauri"
   },
   "dependencies": {
+    "@codemirror/autocomplete": "^6.20.3",
+    "@codemirror/commands": "^6.10.4",
+    "@codemirror/language": "^6.12.3",
+    "@codemirror/lint": "^6.9.7",
+    "@codemirror/search": "^6.7.1",
+    "@codemirror/state": "^6.7.0",
+    "@codemirror/view": "^6.43.2",
     "@kiny/engine": "file:../engine",
     "@kiny/error-report": "file:../error-report",
     "@kiny/player": "file:../player",
+    "@lezer/highlight": "^1.2.3",
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-clipboard-manager": "^2.3.2",
     "@tauri-apps/plugin-dialog": "^2.7.1",
