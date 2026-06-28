@@ -19,6 +19,7 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_http::init())
         .invoke_handler(tauri::generate_handler![kip::export_kip, webpage::export_webpage])
         .setup(|_app| {
             // 启动行：定位版本 / 平台；Rust 端 panic 也经 log 插件落同一文件。

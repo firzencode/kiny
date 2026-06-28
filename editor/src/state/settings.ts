@@ -5,6 +5,8 @@ export interface Settings {
   proseFont: string
   proseSize: number
   proseLh: number
+  /** 自动恢复草稿（spec §6）：脏缓冲后台写草稿、崩溃后重开检测恢复。默认开。 */
+  autosaveRecovery: boolean
 }
 
 export const SETTINGS_KEY = 'kiny-editor-settings'
@@ -20,6 +22,7 @@ export const DEFAULT_SETTINGS: Settings = {
   proseFont: `'Songti SC', ${PROSE_FONT_FALLBACK}`,
   proseSize: 16.5,
   proseLh: 1.95,
+  autosaveRecovery: true,
 }
 
 export const SETTINGS_BOUNDS = {
@@ -53,6 +56,7 @@ export function clampSettings(s: Settings): Settings {
     codeLh: clampNum(s.codeLh, SETTINGS_BOUNDS.codeLh, DEFAULT_SETTINGS.codeLh),
     proseSize: clampNum(s.proseSize, SETTINGS_BOUNDS.proseSize, DEFAULT_SETTINGS.proseSize),
     proseLh: clampNum(s.proseLh, SETTINGS_BOUNDS.proseLh, DEFAULT_SETTINGS.proseLh),
+    autosaveRecovery: typeof s.autosaveRecovery === 'boolean' ? s.autosaveRecovery : DEFAULT_SETTINGS.autosaveRecovery,
   }
 }
 

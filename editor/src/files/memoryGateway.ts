@@ -3,6 +3,7 @@ import {
   type FileGateway, type LoadedProject, type Manifest, type ProjectFileEntry,
   STARTER_MAIN_KIN, STARTER_NEW_FILE, normalizeKinName, starterManifest, assertSafeRelPath,
 } from './gateway'
+import { type DraftStore, emptyDraftStore } from '../state/drafts'
 
 export interface MemoryGatewayInit {
   pickedDir?: string | null
@@ -14,12 +15,14 @@ export interface MemoryGatewayInit {
   exportSink?: { dest: string; files: string[] }[]
   webpageDir?: string | null
   webpageSink?: { dest: string; projectData: string; files: string[] }[]
+  draftStore?: DraftStore
 }
 
 /** 内存 FileGateway：纯 Map 支撑，前端逻辑可在 jsdom 全单测、不碰 Tauri。 */
 export function createMemoryGateway(init: MemoryGatewayInit): FileGateway {
   const files = new Map(Object.entries(init.files))
   const emptyDirs = new Map(Object.entries(init.emptyDirs ?? {}))
+  let draftStore: DraftStore = init.draftStore ?? emptyDraftStore()
 
   /** 列 dir 下全部文件（递归，排除 kiny.json），返回相对路径升序。 */
   const listAll = (dir: string): string[] => {
@@ -112,5 +115,7 @@ export function createMemoryGateway(init: MemoryGatewayInit): FileGateway {
     confirm: async () => init.confirmResult ?? true,
     closeWindow: async () => { /* 内存桩：无窗口可关 */ },
     onWindowCloseRequest: async () => () => { /* 内存桩：永不回调 */ },
+    readDraftStore: async () => structuredClone(draftStore),
+    writeDraftStore: async (store) => { draftStore = structuredClone(store) },
   }
 }

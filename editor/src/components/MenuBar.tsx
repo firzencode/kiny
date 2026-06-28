@@ -1,7 +1,7 @@
 import { useState } from 'react'
 
 type EditCmd = 'cut' | 'copy' | 'paste' | 'selectAll'
-type ViewKey = 'sidebar' | 'preview' | 'highlight'
+type ViewKey = 'sidebar' | 'preview' | 'highlight' | 'ai'
 
 export interface MenuBarProps {
   projectName: string | null
@@ -11,7 +11,7 @@ export interface MenuBarProps {
   hasProgram: boolean
   canSave: boolean
   theme: 'dark' | 'light'
-  view: { sidebar: boolean; preview: boolean; highlight: boolean }
+  view: { sidebar: boolean; preview: boolean; highlight: boolean; ai: boolean }
   onNewProject: () => void
   onOpenProject: () => void
   onNewFile: () => void
@@ -91,6 +91,7 @@ export function MenuBar(p: MenuBarProps) {
         { label: '节点导航 / 资源管理器', check: p.view.sidebar, act: () => p.onToggleView('sidebar') },
         { label: '预览面板', check: p.view.preview, act: () => p.onToggleView('preview') },
         { label: '语义着色', check: p.view.highlight, act: () => p.onToggleView('highlight') },
+        { label: 'AI 面板', check: p.view.ai, act: () => p.onToggleView('ai') },
         { sep: true },
         { label: '放大', sc: 'Ctrl+=', act: p.onZoomIn },
         { label: '缩小', sc: 'Ctrl+-', act: p.onZoomOut },

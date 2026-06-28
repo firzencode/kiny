@@ -13,7 +13,7 @@ function setup(over: Partial<ComponentProps<typeof MenuBar>> = {}) {
     hasProgram: true,
     canSave: true,
     theme: 'dark' as const,
-    view: { sidebar: true, preview: true, highlight: true },
+    view: { sidebar: true, preview: true, highlight: true, ai: false },
     onNewProject: vi.fn(),
     onOpenProject: vi.fn(),
     onNewFile: vi.fn(),
@@ -148,5 +148,12 @@ describe('MenuBar', () => {
     setup({ projectName: '雾港之夜', errorCount: 2 })
     await openMenu('文件')
     expect(await screen.findByRole('menuitem', { name: '导出故事包（.kip）...' })).toHaveAttribute('aria-disabled', 'true')
+  })
+
+  it('视图菜单含「AI 面板」开关，点击 toggle ai', async () => {
+    const p = setup()
+    await openMenu('视图')
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'AI 面板' }))
+    expect(p.onToggleView).toHaveBeenCalledWith('ai')
   })
 })

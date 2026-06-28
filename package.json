@@ -1,6 +1,6 @@
 {
   "name": "kiny",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "description": "Kiny — 受 Ink 启发的互动叙事 DSL 生态（engine / player / web-reader / editor）。子项目各自自包含构建，本文件只做跨子项目的顺序编排，不使用 npm workspaces。",
   "scripts": {

@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.3.0"
+version = "0.4.0"
 description = "Kiny desktop story editor — a Tauri 2 shell for the Ink-inspired Kiny interactive-fiction DSL"
 authors = ["firzencode <firzencode@gmail.com>"]
 license = "Apache-2.0"
@@ -27,4 +27,5 @@ tauri-plugin-fs = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-opener = "2"
+tauri-plugin-http = "2"
 zip = "2"

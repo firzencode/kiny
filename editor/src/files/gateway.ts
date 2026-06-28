@@ -1,4 +1,5 @@
 import type { ResolveAsset } from '@kiny/player'
+import type { DraftStore } from '../state/drafts'
 
 /** 项目清单（kiny.json）。entry 为入口文件名（如 'main.kin'）。 */
 export interface Manifest {
@@ -62,6 +63,10 @@ export interface FileGateway {
   closeWindow(): Promise<void>
   /** 订阅 OS 窗口关闭请求；回调里已 preventDefault。返回退订函数。 */
   onWindowCloseRequest(handler: () => void): Promise<() => void>
+  /** 读全部自动保存草稿（落 app-data，与项目目录隔离）；无 / 损坏 → 空 store。 */
+  readDraftStore(): Promise<DraftStore>
+  /** 写全部自动保存草稿；失败静默（背景安全网，同 settings/session 持久化惯例）。 */
+  writeDraftStore(store: DraftStore): Promise<void>
 }
 
 /** 起始 main.kin 脚手架内容（newProject 用）。 */

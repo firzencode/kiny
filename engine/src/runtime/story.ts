@@ -23,7 +23,10 @@ import { makeTextSpan, mergeSpans } from './spans'
 import { buildBlockPaths, enumerateChoices, fingerprint } from './snapshot'
 import type { StorySnapshot, RestoreData } from './snapshot'
 
-const STEP_BUDGET = 100_000
+// 无玩家交互的累计自动推进步数上限（仅 choose() 清零）。取值是「尽早报错」与
+// 「不误伤合法长自动段」的折中：互动小说两次交互间极少处理上万个内容元素，
+// 故 1 万足够安全，同时让无停顿环远早于 reader 堆积海量日志前就抛错。
+const STEP_BUDGET = 10_000
 const DEFAULT_SEED = 0x9e3779b9
 
 export class Story {
@@ -45,6 +48,7 @@ export class Story {
   private pendingChoices: { view: ChoiceView; choice: Choice }[] = []
   private pendingDivert: { target: string; args: string[]; line: number } | null = null // 点击正文产出后待消费的跳转
   private turns = 0
+  private autoSteps = 0 // 自上次玩家交互(choose)起的累计自动推进步数；死循环兜底用
   private readonly visitedAt = new Map<string, number>() // knot 名 → 最近访问回合
   private readonly start: string // 入口起点 knot 名（buildGlobals 据此跳过入口开场 preamble）
 
@@ -254,6 +258,7 @@ export class Story {
     const entry = this.pendingChoices[index]!
     this.pendingChoices = []
     this.turns++
+    this.autoSteps = 0 // 玩家交互 = 取得进展，重置死循环计数器
     const ev = this.takeChoice(entry.choice)
     // 点击正文追加进 buffer（与文本缓冲统一），成行（非 glue）下次 continue flush。
     if (ev && ev.kind === 'text') this.appendSpans(ev.spans, false)
@@ -285,9 +290,13 @@ export class Story {
    * 无产出元素（divert/logic 等）就地执行。
    */
   private advanceToEvent(): void {
-    let steps = 0
     for (;;) {
-      if (++steps > STEP_BUDGET) throw new RuntimeError('疑似死循环：步数超预算')
+      if (++this.autoSteps > STEP_BUDGET) {
+        throw new RuntimeError(
+          `疑似死循环：在节点「${this.currentKnot?.name ?? '?'}」处无玩家交互地自动推进超过 ${STEP_BUDGET} 步`,
+          this.currentFile,
+        )
+      }
       if (this.ended) {
         // 显式 -> END/DONE 到达时若仍有缓冲（含末段 glue 文本），先定型成行
         // 交 continue() flush，绝不静默丢弃；缓冲为空时定型为 no-op，照常退出。

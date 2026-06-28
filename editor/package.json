@@ -1,14 +1,15 @@
 {
   "name": "@kiny/editor",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "predev": "node ../scripts/public/build-export-template.mjs --if-missing",
+    "predev": "node ../scripts/public/build-export-template.mjs --if-missing && node ../scripts/public/stage-kin-spec.mjs",
     "dev": "vite",
-    "prebuild": "node ../scripts/public/build-export-template.mjs",
+    "prebuild": "node ../scripts/public/build-export-template.mjs && node ../scripts/public/stage-kin-spec.mjs",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
+    "pretest": "node ../scripts/public/stage-kin-spec.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
@@ -30,9 +31,12 @@
     "@tauri-apps/plugin-clipboard-manager": "^2.3.2",
     "@tauri-apps/plugin-dialog": "^2.7.1",
     "@tauri-apps/plugin-fs": "^2.5.1",
+    "@tauri-apps/plugin-http": "^2.0.0",
     "@tauri-apps/plugin-opener": "^2.0.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "react-markdown": "^9.1.0",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0",

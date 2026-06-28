@@ -4,6 +4,7 @@ import {
   CODE_FONTS, PROSE_FONTS, CODE_FONT_FALLBACK, PROSE_FONT_FALLBACK,
   type FontPreset, sanitizeFontName,
 } from '../state/settings'
+import { type AiConfig, DEFAULT_AI_CONFIG } from '../ai/aiConfig'
 
 type Theme = 'dark' | 'light'
 
@@ -11,13 +12,15 @@ export interface SettingsDialogProps {
   open: boolean
   settings: Settings
   theme: Theme
-  onSave: (next: Settings, theme: Theme) => void
+  aiConfig: AiConfig
+  onSave: (next: Settings, theme: Theme, aiConfig: AiConfig) => void
   onCancel: () => void
 }
 
 const eqSettings = (a: Settings, b: Settings) =>
   a.codeFont === b.codeFont && a.codeSize === b.codeSize && a.codeLh === b.codeLh &&
-  a.proseFont === b.proseFont && a.proseSize === b.proseSize && a.proseLh === b.proseLh
+  a.proseFont === b.proseFont && a.proseSize === b.proseSize && a.proseLh === b.proseLh &&
+  a.autosaveRecovery === b.autosaveRecovery
 
 const decimals = (step: number) => (step.toString().split('.')[1] || '').length
 
@@ -72,12 +75,14 @@ function FontRow({ label, value, presets, fallback, onChange }: {
   )
 }
 
-export function SettingsDialog({ open, settings, theme, onSave, onCancel }: SettingsDialogProps) {
+export function SettingsDialog({ open, settings, theme, aiConfig, onSave, onCancel }: SettingsDialogProps) {
   const [draft, setDraft] = useState<Settings>(settings)
   const [draftTheme, setDraftTheme] = useState<Theme>(theme)
+  const [draftAi, setDraftAi] = useState<AiConfig>(aiConfig)
+  const [showKey, setShowKey] = useState(false)
 
   // 打开时从当前已提交值初始化草稿
-  useEffect(() => { if (open) { setDraft(settings); setDraftTheme(theme) } }, [open, settings, theme])
+  useEffect(() => { if (open) { setDraft(settings); setDraftTheme(theme); setDraftAi(aiConfig); setShowKey(false) } }, [open, settings, theme, aiConfig])
 
   // Esc = 取消（仅打开时挂）
   useEffect(() => {
@@ -88,7 +93,8 @@ export function SettingsDialog({ open, settings, theme, onSave, onCancel }: Sett
   }, [open, onCancel])
 
   if (!open) return null
-  const dirty = !eqSettings(draft, settings) || draftTheme !== theme
+  const aiEq = draftAi.endpoint === aiConfig.endpoint && draftAi.model === aiConfig.model && draftAi.apiKey === aiConfig.apiKey
+  const dirty = !eqSettings(draft, settings) || draftTheme !== theme || !aiEq
 
   return (
     <div className="settings-scrim" onClick={onCancel}>
@@ -144,13 +150,62 @@ export function SettingsDialog({ open, settings, theme, onSave, onCancel }: Sett
               </div>
             </div>
           </div>
+
+          <div className="settings-cat">编辑器</div>
+          <div className="settings-grp">
+            <div className="settings-row">
+              <span className="settings-label">自动恢复草稿</span>
+              <button
+                className={'settings-toggle' + (draft.autosaveRecovery ? ' on' : '')}
+                role="switch" aria-checked={draft.autosaveRecovery} aria-label="自动恢复草稿"
+                onClick={() => setDraft({ ...draft, autosaveRecovery: !draft.autosaveRecovery })}
+              >
+                <span className="settings-toggle-knob" />
+              </button>
+            </div>
+            <div className="settings-help">开启后，未保存改动会在后台写入恢复草稿（不碰真文件）；崩溃或强制退出后重开项目，会提示恢复。关闭则不写草稿、不做恢复检测。</div>
+          </div>
+
+          <div className="settings-cat">AI</div>
+          <div className="settings-grp">
+            <div className="settings-row">
+              <span className="settings-label">供应商</span>
+              <div className="settings-seg" role="group" aria-label="供应商">
+                <button className="settings-seg-btn on" aria-pressed="true">OpenAI 兼容</button>
+                <button className="settings-seg-btn" disabled style={{ opacity: 0.4, cursor: 'default' }}>Anthropic（暂未支持）</button>
+              </div>
+            </div>
+            <div className="settings-row">
+              <span className="settings-label">Base URL</span>
+              <input className="settings-input" aria-label="Base URL" placeholder="https://api.deepseek.com/v1"
+                value={draftAi.endpoint} onChange={(e) => setDraftAi({ ...draftAi, endpoint: e.target.value })} />
+            </div>
+            <div className="settings-help">填供应商的 Base URL，会自动补 <code>/chat/completions</code>。例：DeepSeek <code>https://api.deepseek.com/v1</code>、OpenAI <code>https://api.openai.com/v1</code>、智谱 GLM <code>https://open.bigmodel.cn/api/coding/paas/v4</code>、本地 Ollama <code>http://localhost:11434/v1</code>。</div>
+            <div className="settings-row">
+              <span className="settings-label">模型</span>
+              <input className="settings-input" aria-label="模型" placeholder="deepseek-chat"
+                value={draftAi.model} onChange={(e) => setDraftAi({ ...draftAi, model: e.target.value })} />
+            </div>
+            <div className="settings-row">
+              <span className="settings-label">API Key</span>
+              <div className="key-wrap">
+                <input className="settings-input" aria-label="API Key" type={showKey ? 'text' : 'password'}
+                  value={draftAi.apiKey} onChange={(e) => setDraftAi({ ...draftAi, apiKey: e.target.value })} />
+                <button className="key-toggle" type="button" onClick={() => setShowKey((v) => !v)}>{showKey ? '隐藏' : '显示'}</button>
+              </div>
+            </div>
+            <div className="settings-trust">
+              <span className="lock">🔒</span>
+              <div>API key 与每一次请求都只在本机，<b>直连你配置的 endpoint</b>，不经 Kiny 任何服务器中转或托管。你用的是自己的 key、自己的额度。</div>
+            </div>
+          </div>
         </div>
 
         <div className="settings-foot">
-          <button className="settings-btn" onClick={() => { setDraft(DEFAULT_SETTINGS); setDraftTheme('dark') }}>恢复默认</button>
+          <button className="settings-btn" onClick={() => { setDraft(DEFAULT_SETTINGS); setDraftTheme('dark'); setDraftAi(DEFAULT_AI_CONFIG) }}>恢复默认</button>
           <span className="settings-foot-spacer" />
           <button className="settings-btn" onClick={onCancel}>取消</button>
-          <button className="settings-btn primary" disabled={!dirty} onClick={() => onSave(draft, draftTheme)}>保存</button>
+          <button className="settings-btn primary" disabled={!dirty} onClick={() => onSave(draft, draftTheme, draftAi)}>保存</button>
         </div>
       </div>
     </div>

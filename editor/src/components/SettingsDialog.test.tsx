@@ -3,10 +3,11 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { SettingsDialog } from './SettingsDialog'
 import { DEFAULT_SETTINGS } from '../state/settings'
+import { DEFAULT_AI_CONFIG } from '../ai/aiConfig'
 
 const base = {
   open: true, settings: DEFAULT_SETTINGS, theme: 'dark' as const,
-  onSave: vi.fn(), onCancel: vi.fn(),
+  aiConfig: DEFAULT_AI_CONFIG, onSave: vi.fn(), onCancel: vi.fn(),
 }
 
 beforeEach(() => { document.documentElement.removeAttribute('style') })
@@ -47,7 +48,7 @@ describe('SettingsDialog', () => {
     render(<SettingsDialog {...base} onSave={onSave} />)
     await userEvent.click(screen.getByRole('button', { name: '增大代码字号' }))
     await userEvent.click(screen.getByRole('button', { name: '保存' }))
-    expect(onSave).toHaveBeenCalledWith({ ...DEFAULT_SETTINGS, codeSize: 14 }, 'dark')
+    expect(onSave).toHaveBeenCalledWith({ ...DEFAULT_SETTINGS, codeSize: 14 }, 'dark', DEFAULT_AI_CONFIG)
   })
 
   it('步进器在上限夹紧（无变化、保存仍禁用）', async () => {
@@ -85,5 +86,43 @@ describe('SettingsDialog', () => {
     render(<SettingsDialog {...base} />)
     await userEvent.selectOptions(screen.getByRole('combobox', { name: '代码字体' }), '自定义...')
     expect(screen.getByPlaceholderText(/字体名/)).toBeInTheDocument()
+  })
+
+  it('自动恢复草稿开关：默认开，可切换并回传', async () => {
+    const onSave = vi.fn()
+    render(<SettingsDialog {...base} onSave={onSave} />)
+    const sw = screen.getByRole('switch', { name: '自动恢复草稿' })
+    expect(sw).toBeChecked()
+    await userEvent.click(sw)
+    expect(sw).not.toBeChecked()
+    await userEvent.click(screen.getByRole('button', { name: '保存' }))
+    expect(onSave).toHaveBeenCalledWith({ ...DEFAULT_SETTINGS, autosaveRecovery: false }, 'dark', DEFAULT_AI_CONFIG)
+  })
+})
+
+describe('SettingsDialog · AI 节', () => {
+  const baseProps = {
+    open: true, settings: DEFAULT_SETTINGS, theme: 'dark' as const,
+    aiConfig: DEFAULT_AI_CONFIG, onSave: vi.fn(), onCancel: vi.fn(),
+  }
+
+  it('改 endpoint/model/key 后保存，回传新 aiConfig', () => {
+    const onSave = vi.fn()
+    render(<SettingsDialog {...baseProps} onSave={onSave} />)
+    fireEvent.change(screen.getByLabelText('Base URL'), { target: { value: 'https://api.deepseek.com/v1' } })
+    fireEvent.change(screen.getByLabelText('模型'), { target: { value: 'deepseek-chat' } })
+    fireEvent.change(screen.getByLabelText('API Key'), { target: { value: 'sk-abc' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    expect(onSave).toHaveBeenCalledWith(DEFAULT_SETTINGS, 'dark', expect.objectContaining({
+      endpoint: 'https://api.deepseek.com/v1', model: 'deepseek-chat', apiKey: 'sk-abc',
+    }))
+  })
+
+  it('key 默认 password，点显示切明文', () => {
+    render(<SettingsDialog {...baseProps} aiConfig={{ ...DEFAULT_AI_CONFIG, apiKey: 'sk-x' }} />)
+    const key = screen.getByLabelText('API Key') as HTMLInputElement
+    expect(key.type).toBe('password')
+    fireEvent.click(screen.getByRole('button', { name: '显示' }))
+    expect(key.type).toBe('text')
   })
 })

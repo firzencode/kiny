@@ -17,10 +17,18 @@ import { EditorPane, type EditorHandle } from './components/EditorPane'
 import { DiagnosticsList } from './components/DiagnosticsList'
 import { PreviewPane } from './components/PreviewPane'
 import { SidebarResizer } from './components/SidebarResizer'
+import { ColResizer } from './components/ColResizer'
 import { HelpDialog, type HelpScreen } from './components/HelpDialog'
 import { ConfirmCloseDialog, type CloseIntent } from './components/ConfirmCloseDialog'
+import { RecoveryDialog } from './components/RecoveryDialog'
 import { SettingsDialog } from './components/SettingsDialog'
+import { useAutosave } from './hooks/useAutosave'
+import { detectRecoverable, type RecoverableItem } from './state/drafts'
 import { loadSettings, saveSettings, applySettingsVars, clampSettings, DEFAULT_SETTINGS, SETTINGS_BOUNDS, type Settings } from './state/settings'
+import { AiPanel } from './components/ai/AiPanel'
+import { useAiSession } from './ai/useAiSession'
+import { loadAiConfig, saveAiConfig, isConfigured, type AiConfig } from './ai/aiConfig'
+import type { PreviewPort, PreviewSnapshot } from './ai/actions'
 import { loadSession, saveSession, resolveSession } from './state/session'
 import { logErrorEntry, ErrorDetailsDialog } from '@kiny/error-report'
 
@@ -32,18 +40,25 @@ const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(
 
 type Theme = 'dark' | 'light'
 interface ViewPrefs {
-  sidebar: boolean; preview: boolean; highlight: boolean
+  sidebar: boolean; preview: boolean; highlight: boolean; ai: boolean
   /** 三个面板各自的折叠态（头部 ▾ 控制）。 */
   explorerCollapsed: boolean
   outlineCollapsed: boolean
   diagnosticsCollapsed: boolean
   /** Explorer 面板像素高度（拖拽分隔条设定）；0 表示用 CSS 默认 52%。 */
   explorerHeight: number
+  /** 侧栏（资源管理器）列宽 px（横向拖拽设定）。 */
+  sidebarWidth: number
+  /** AI 面板列宽 px（横向拖拽设定）。 */
+  aiWidth: number
+  /** 中间区里编辑列占比 0..1（其余给预览列）；拖中线设定，默认 0.5。 */
+  editorRatio: number
 }
 const DEFAULT_VIEW: ViewPrefs = {
-  sidebar: true, preview: true, highlight: true,
+  sidebar: true, preview: true, highlight: true, ai: false,
   explorerCollapsed: false, outlineCollapsed: false, diagnosticsCollapsed: false,
   explorerHeight: 0,
+  sidebarWidth: 232, aiWidth: 360, editorRatio: 0.5,
 }
 
 function loadTheme(): Theme {
@@ -73,10 +88,14 @@ export function App({ gateway }: { gateway: FileGateway }) {
   const [theme, setTheme] = useState<Theme>(loadTheme)
   const [view, setView] = useState<ViewPrefs>(loadView)
   const [settings, setSettings] = useState<Settings>(loadSettings)
+  const [aiConfig, setAiConfig] = useState<AiConfig>(loadAiConfig)
+  useEffect(() => { saveAiConfig(aiConfig) }, [aiConfig])
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [newFileToken, setNewFileToken] = useState(0)
   const [help, setHelp] = useState<HelpScreen | null>(null)
   const [pendingClose, setPendingClose] = useState<CloseIntent | null>(null)
+  // 崩溃恢复提示：重开项目检测到残留草稿（草稿 ≠ 磁盘）时弹出。
+  const [recovery, setRecovery] = useState<{ projectDir: string; items: RecoverableItem[] } | null>(null)
 
   const editorRef = useRef<EditorHandle>(null)
 
@@ -93,6 +112,9 @@ export function App({ gateway }: { gateway: FileGateway }) {
   useEffect(() => { runIdRef.current = state.runId }, [state.runId])
   useEffect(() => { filesRef.current = state.files }, [state.files])
   useEffect(() => { entryRef.current = state.entry }, [state.entry])
+  const committedStateRef = useRef(state)
+  useEffect(() => { committedStateRef.current = state }, [state])
+  const staleRef = useRef(false)
 
   // 主题 / 视图持久化
   useEffect(() => {
@@ -121,16 +143,49 @@ export function App({ gateway }: { gateway: FileGateway }) {
 
   // 保位重算
   const recompute = useCallback(
-    (prog: ValidatedProgram | null, seq: number[], resolve: ResolveAsset, prev: PlayState | null, emitSfx = false) => {
+    (prog: ValidatedProgram | null, seq: number[], resolve: ResolveAsset, prev: PlayState | null, emitSfx = false): PreviewSnapshot => {
       const start = prog && entryRef.current ? resolveStart(prog, entryRef.current) : null
       const snap = computePreview(prog, start, SESSION_SEED, seq, resolve, prev)
       setPlay(snap.play); playRef.current = snap.play
       choiceSeqRef.current = snap.choiceSeq
-      setStale(snap.stale)
+      setStale(snap.stale); staleRef.current = snap.stale
       if (emitSfx) setSfxQueue(snap.sfx) // 仅点选项路径出声；编辑重算不碰队列（保持引用→不重播）
+      return snap
     },
     [],
   )
+
+  const previewPort = useMemo<PreviewPort>(() => ({
+    snapshot: () => ({ play: playRef.current, stale: staleRef.current, choiceSeq: choiceSeqRef.current }),
+    choose: (pos: number) => recompute(programRef.current, [...choiceSeqRef.current, pos], resolveRef.current, playRef.current, true),
+    restart: () => recompute(programRef.current, [], resolveRef.current, playRef.current),
+  }), [recompute])
+
+  const ai = useAiSession({
+    committedStateRef,
+    dispatch,
+    gateway,
+    validator: validatorRef.current,
+    preview: previewPort,
+    config: aiConfig,
+    setNotice,
+  })
+
+  // 自动保存恢复草稿：脏缓冲后台写独立草稿（落 app-data，不碰真文件）。
+  const draftBuffers = useMemo(() => Object.values(state.files), [state.files])
+  const draftSignature = useMemo(
+    () => JSON.stringify(draftBuffers.filter((f) => f.dirty).map((f) => [f.path, f.source])),
+    [draftBuffers],
+  )
+  const autosave = useAutosave({
+    enabled: settings.autosaveRecovery,
+    gateway,
+    projectDir: state.projectDir,
+    buffers: draftBuffers,
+    signature: draftSignature,
+    // 恢复对话框待决期间暂停：否则后台对账会把磁盘上待恢复的草稿（缓冲此时全非脏）抹掉。
+    paused: recovery !== null,
+  })
 
   // 防抖校验：跑全部缓冲
   const run = useCallback((rid: number): ValidationOutcome => {
@@ -173,6 +228,13 @@ export function App({ gateway }: { gateway: FileGateway }) {
       const validPaths = new Set(proj.files.map((f) => f.path))
       const restore = resolveSession(loadSession(dir), validPaths, proj.manifest.entry)
       dispatch({ type: 'project_loaded', project: proj, restore })
+      // 崩溃恢复：会话恢复后检测残留草稿（草稿 ≠ 磁盘）→ 弹恢复提示。
+      if (settings.autosaveRecovery) {
+        const store = await gateway.readDraftStore()
+        const diskKin = proj.files.filter((f) => f.isKin).map((f) => ({ path: f.path, source: f.source ?? '' }))
+        const items = detectRecoverable(store, dir, diskKin)
+        setRecovery(items.length ? { projectDir: dir, items } : null)
+      }
     } catch (e) {
       setNotice(`打开项目失败：${errMsg(e)}`)
     }
@@ -235,7 +297,11 @@ export function App({ gateway }: { gateway: FileGateway }) {
     else dispatch({ type: 'close_tab', path })
   }
   // 真正关闭窗口。destroy 不再触发 onCloseRequested。失败（如缺权限）弹 notice，不静默吞。
+  // 干净退出（走守卫保存/丢弃后）清空本项目草稿，下次开不误报恢复；清草稿失败不阻断退出。
   const doExit = async () => {
+    if (settings.autosaveRecovery && state.projectDir) {
+      try { await autosave.clearProjectDrafts(state.projectDir) } catch { /* 清草稿失败不阻断退出 */ }
+    }
     try { await gateway.closeWindow() }
     catch (e) { setNotice(`退出失败：${errMsg(e)}`) }
   }
@@ -261,6 +327,23 @@ export function App({ gateway }: { gateway: FileGateway }) {
     else await doExit()
   }
   const onCloseDialogCancel = () => setPendingClose(null)
+
+  // 恢复提示三态：恢复（载回草稿、标脏，回到正常保存/丢弃流程）/ 丢弃（删草稿、按磁盘打开）。
+  const onRecover = () => {
+    const r = recovery
+    setRecovery(null)
+    if (!r) return
+    for (const item of r.items) {
+      if (item.status === 'missing') continue // 文件已删/改名：降级跳过、不报错
+      dispatch({ type: 'open_tab', path: item.path })
+      dispatch({ type: 'source_changed', path: item.path, source: item.source })
+    }
+  }
+  const onDiscardRecovery = () => {
+    const r = recovery
+    setRecovery(null)
+    if (r) void autosave.clearProjectDrafts(r.projectDir)
+  }
 
   const dirtyCount = useMemo(() => Object.values(state.files).filter((f) => f.dirty).length, [state.files])
 
@@ -321,7 +404,12 @@ export function App({ gateway }: { gateway: FileGateway }) {
   const onSyntaxRef = () => setHelp('syntax')
   const onReportIssue = () => setShowErrorDetails(true)
   const onOpenSettings = () => setSettingsOpen(true)
-  const onSaveSettings = (next: Settings, th: Theme) => { setSettings(clampSettings(next)); setTheme(th); setSettingsOpen(false) }
+  const onSaveSettings = (next: Settings, nextTheme: Theme, nextAi: AiConfig) => {
+    setSettings(clampSettings(next))
+    setTheme(nextTheme)
+    setAiConfig(nextAi)
+    setSettingsOpen(false)
+  }
   const onCancelSettings = () => setSettingsOpen(false)
   const bumpCodeSize = (delta: number) =>
     setSettings((s) => clampSettings({ ...s, codeSize: s.codeSize + delta }))
@@ -372,8 +460,33 @@ export function App({ gateway }: { gateway: FileGateway }) {
   }, [state.files])
 
   const cols: React.CSSProperties = {
-    ['--col-sidebar' as string]: view.sidebar ? '232px' : '0px',
-    ['--col-preview' as string]: view.preview ? 'minmax(360px, 42%)' : '0px',
+    ['--col-sidebar' as string]: view.sidebar ? `${view.sidebarWidth}px` : '0px',
+    ['--col-editor' as string]: `${view.editorRatio}fr`,
+    ['--col-preview' as string]: view.preview ? `${1 - view.editorRatio}fr` : '0px',
+    ['--col-ai' as string]: view.ai ? `${view.aiWidth}px` : '0px',
+  }
+
+  // 横向拖拽列宽：从指针 clientX 相对 workbench 边缘换算，夹紧到合理区间。
+  const onResizeSidebar = (clientX: number) => {
+    const wb = document.querySelector('.workbench')?.getBoundingClientRect()
+    if (!wb) return
+    setView((v) => ({ ...v, sidebarWidth: Math.max(160, Math.min(480, Math.round(clientX - wb.left))) }))
+  }
+  const onResizeAi = (clientX: number) => {
+    const wb = document.querySelector('.workbench')?.getBoundingClientRect()
+    if (!wb) return
+    setView((v) => ({ ...v, aiWidth: Math.max(260, Math.min(640, Math.round(wb.right - clientX))) }))
+  }
+  // 拖编辑/预览中线：在「中间区」（去掉左右栏后）按指针位置定编辑占比，夹在 [0.2, 0.8]。
+  const onResizeEditorPreview = (clientX: number) => {
+    const wb = document.querySelector('.workbench')?.getBoundingClientRect()
+    if (!wb) return
+    const midLeft = wb.left + (view.sidebar ? view.sidebarWidth : 0)
+    const midRight = wb.right - (view.ai ? view.aiWidth : 0)
+    const span = midRight - midLeft
+    if (span <= 0) return
+    const r = (clientX - midLeft) / span
+    setView((v) => ({ ...v, editorRatio: Math.max(0.2, Math.min(0.8, r)) }))
   }
 
   // 拖拽分隔条：设定 Explorer 像素高度，夹在 [130, sidebarH - 105]（CSS 双保险同值）
@@ -463,6 +576,7 @@ export function App({ gateway }: { gateway: FileGateway }) {
               collapsed={view.outlineCollapsed}
               onToggleCollapse={() => setView((v) => ({ ...v, outlineCollapsed: !v.outlineCollapsed }))}
             />
+            <ColResizer edge="right" onResize={onResizeSidebar} ariaLabel="调整资源管理器宽度" />
           </div>
         )}
         <div className="editor-col">
@@ -499,14 +613,30 @@ export function App({ gateway }: { gateway: FileGateway }) {
             collapsed={view.diagnosticsCollapsed}
             onToggleCollapse={() => setView((v) => ({ ...v, diagnosticsCollapsed: !v.diagnosticsCollapsed }))}
           />
+          {view.preview && <ColResizer edge="right" onResize={onResizeEditorPreview} ariaLabel="调整编辑区与预览占比" />}
         </div>
         {view.preview && <PreviewPane play={play} stale={stale} sfx={sfxQueue} onChoose={onChoosePreview} onRestart={onRestart} />}
+        {view.ai && (
+          <AiPanel
+            configured={isConfigured(aiConfig)}
+            model={aiConfig.model}
+            turns={ai.turns}
+            running={ai.running}
+            onSend={ai.send}
+            onStop={ai.stop}
+            onNewConversation={ai.newConversation}
+            onClose={() => setView((v) => ({ ...v, ai: false }))}
+            onOpenSettings={() => { setView((v) => ({ ...v, ai: true })); onOpenSettings() }}
+            onResize={onResizeAi}
+          />
+        )}
       </div>
       <HelpDialog screen={help} onClose={() => setHelp(null)} />
       <SettingsDialog
         open={settingsOpen}
         settings={settings}
         theme={theme}
+        aiConfig={aiConfig}
         onSave={onSaveSettings}
         onCancel={onCancelSettings}
       />
@@ -516,6 +646,11 @@ export function App({ gateway }: { gateway: FileGateway }) {
         onSave={onCloseDialogSave}
         onDiscard={onCloseDialogDiscard}
         onCancel={onCloseDialogCancel}
+      />
+      <RecoveryDialog
+        items={recovery?.items ?? null}
+        onRecover={onRecover}
+        onDiscard={onDiscardRecovery}
       />
     </div>
   )

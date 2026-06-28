@@ -1,5 +1,5 @@
 import { open, ask, save } from '@tauri-apps/plugin-dialog'
-import { readTextFile, writeTextFile, readDir, mkdir, exists, rename, remove } from '@tauri-apps/plugin-fs'
+import { readTextFile, writeTextFile, readDir, mkdir, exists, rename, remove, BaseDirectory } from '@tauri-apps/plugin-fs'
 import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { join } from '@tauri-apps/api/path'
@@ -8,6 +8,11 @@ import {
   type FileGateway, type LoadedProject, type Manifest, type ProjectFileEntry,
   STARTER_MAIN_KIN, STARTER_NEW_FILE, normalizeKinName, starterManifest, assertSafeRelPath,
 } from './gateway'
+import { type DraftStore, parseDraftStore, emptyDraftStore } from '../state/drafts'
+
+// 自动保存草稿落 app-data（与项目目录隔离，不污染 git）；单文件存全部项目草稿。
+const DRAFTS_DIR = 'autosave'
+const DRAFTS_PATH = `${DRAFTS_DIR}/drafts.json`
 
 async function pickDir(): Promise<string | null> {
   const picked = await open({ directory: true, multiple: false })
@@ -120,5 +125,21 @@ export const tauriFileGateway: FileGateway = {
       e.preventDefault()
       handler()
     })
+  },
+  async readDraftStore(): Promise<DraftStore> {
+    try {
+      if (!(await exists(DRAFTS_PATH, { baseDir: BaseDirectory.AppData }))) return emptyDraftStore()
+      return parseDraftStore(await readTextFile(DRAFTS_PATH, { baseDir: BaseDirectory.AppData }))
+    } catch {
+      return emptyDraftStore()
+    }
+  },
+  async writeDraftStore(store): Promise<void> {
+    try {
+      await mkdir(DRAFTS_DIR, { baseDir: BaseDirectory.AppData, recursive: true })
+      await writeTextFile(DRAFTS_PATH, JSON.stringify(store), { baseDir: BaseDirectory.AppData })
+    } catch {
+      /* 背景安全网：存储不可用时静默，不打断编辑 */
+    }
   },
 }

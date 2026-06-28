@@ -9,6 +9,7 @@ import { checkLabels } from './checks/labels'
 import { checkVariables } from './checks/variables'
 import { checkFallthrough } from './checks/fallthrough'
 import { checkRichText } from './checks/richtext'
+import { checkMissingChoiceMarker } from './checks/missing-choice-marker'
 import { addOpeningKnots } from './opening'
 
 export type { Diagnostic, AnalyzeResult, ValidatedProgram } from './types'
@@ -28,6 +29,7 @@ export function analyze(files: ProjectFile[]): AnalyzeResult {
     ...checkVariables(table),
     ...checkFallthrough(files),
     ...checkRichText(files),
+    ...checkMissingChoiceMarker(files),
   ]
 
   const hasError = diagnostics.some((d) => d.severity === 'error')
