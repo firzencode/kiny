@@ -22,8 +22,9 @@ export function buildStory(
   files: Map<string, string>,
   assetBase: string,
   seed: number,
+  manifestName = 'kiny.json',
 ): LoadOutcome {
-  const res = loadProjectFromFiles(manifestText, files)
+  const res = loadProjectFromFiles(manifestText, files, manifestName)
   if (!res.ok) return { ok: false, message: res.errors.map((e) => e.message).join('; ') }
 
   const { program, diagnostics } = analyze(res.files)

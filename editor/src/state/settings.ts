@@ -7,6 +7,10 @@ export interface Settings {
   proseLh: number
   /** 自动恢复草稿（spec §6）：脏缓冲后台写草稿、崩溃后重开检测恢复。默认开。 */
   autosaveRecovery: boolean
+  /** 预览随机种子：开启后每次「重开预览」（↺）换新随机种子；关则恒用固定种子（确定性）。默认关。 */
+  previewRandomSeed: boolean
+  /** AI 对话记录自动清理阈值（天）：距今超此天数无新增的对话在启动时删除。null = 关闭（永久保留）。默认 30。 */
+  aiChatRetentionDays: number | null
 }
 
 export const SETTINGS_KEY = 'kiny-editor-settings'
@@ -23,7 +27,12 @@ export const DEFAULT_SETTINGS: Settings = {
   proseSize: 16.5,
   proseLh: 1.95,
   autosaveRecovery: true,
+  previewRandomSeed: false,
+  aiChatRetentionDays: 30,
 }
+
+/** AI 对话保留天数边界（自动清理开启时可调范围）。 */
+export const AI_CHAT_RETENTION_BOUNDS = { min: 1, max: 365 } as const
 
 export const SETTINGS_BOUNDS = {
   codeSize: { min: 12, max: 20, step: 1 },
@@ -57,7 +66,18 @@ export function clampSettings(s: Settings): Settings {
     proseSize: clampNum(s.proseSize, SETTINGS_BOUNDS.proseSize, DEFAULT_SETTINGS.proseSize),
     proseLh: clampNum(s.proseLh, SETTINGS_BOUNDS.proseLh, DEFAULT_SETTINGS.proseLh),
     autosaveRecovery: typeof s.autosaveRecovery === 'boolean' ? s.autosaveRecovery : DEFAULT_SETTINGS.autosaveRecovery,
+    previewRandomSeed: typeof s.previewRandomSeed === 'boolean' ? s.previewRandomSeed : DEFAULT_SETTINGS.previewRandomSeed,
+    aiChatRetentionDays: clampRetention(s.aiChatRetentionDays),
   }
+}
+
+/** 清洗保留天数：null（关闭）保留；有效正整数夹紧到边界；其余回默认。 */
+function clampRetention(v: unknown): number | null {
+  if (v === null) return null
+  if (typeof v === 'number' && Number.isFinite(v) && v >= 1) {
+    return Math.min(AI_CHAT_RETENTION_BOUNDS.max, Math.max(AI_CHAT_RETENTION_BOUNDS.min, Math.floor(v)))
+  }
+  return DEFAULT_SETTINGS.aiChatRetentionDays
 }
 
 export function loadSettings(): Settings {

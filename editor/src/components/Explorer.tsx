@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { buildTree, moveTarget, type TreeNode } from '../files/tree'
+import { buildTree, collectDirs, moveTarget, type TreeNode } from '../files/tree'
+import { resolveImportDir } from '../files/importAssets'
 import type { ProjectFileEntry } from '../files/gateway'
 
 const FileIcon = () => (
@@ -18,7 +19,7 @@ interface CtxMenu {
 export function Explorer({
   projectName, entries, emptyDirs, dirtyMap, activeFile, entry,
   onOpenFile, onCreateFile, newFileFocusToken,
-  onRename, onDelete, onCreateFolder, onMove,
+  onRename, onDelete, onCreateFolder, onMove, onImportAssets,
   collapsed, onToggleCollapse, style,
 }: {
   projectName: string | null
@@ -34,13 +35,16 @@ export function Explorer({
   onDelete: (path: string) => void
   onCreateFolder: (path: string) => void
   onMove: (from: string, toDir: string) => void
+  /** 导入资源到 targetDir（项目根相对，'' = 根）。 */
+  onImportAssets: (targetDir: string) => void
   collapsed?: boolean
   onToggleCollapse?: () => void
   style?: React.CSSProperties
 }) {
   const [creating, setCreating] = useState(false)
-  const [dropTarget, setDropTarget] = useState<string | null>(null)
   const [name, setName] = useState('')
+  // 「移动到…」点击式选择器：打开时取右键菜单坐标定位（position:fixed），复用 ctx-menu 样式。
+  const [movePicker, setMovePicker] = useState<{ from: string; x: number; y: number } | null>(null)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
 
   // Context menu state
@@ -124,23 +128,11 @@ export function Explorer({
     if (n.kind === 'dir') {
       const open = expanded[n.path] === true
       const isCreatingSubfolder = creatingFolderUnder === n.path
-      const isDropTarget = dropTarget === n.path
       return (
         <li key={n.path}>
           <div
-            className={'frow afolder' + (isDropTarget ? ' drop-target' : '')}
+            className="frow afolder"
             style={pad}
-            draggable
-            onDragStart={(e) => e.dataTransfer.setData('text/plain', n.path)}
-            onDragOver={(e) => { e.preventDefault(); setDropTarget(n.path) }}
-            onDragEnter={(e) => { e.preventDefault(); setDropTarget(n.path) }}
-            onDragLeave={() => setDropTarget(null)}
-            onDrop={(e) => {
-              e.preventDefault()
-              e.stopPropagation()
-              setDropTarget(null)
-              tryMove(e.dataTransfer.getData('text/plain'), n.path)
-            }}
             onClick={() => setExpanded((e) => ({ ...e, [n.path]: !open }))}
             onContextMenu={(e) => handleCtxMenu(e, n.path, 'dir')}
           >
@@ -178,8 +170,6 @@ export function Explorer({
         key={n.path}
         className={'frow' + (n.path === activeFile ? ' active' : '') + (n.isKin ? '' : ' frow-other')}
         style={pad}
-        draggable
-        onDragStart={(e) => e.dataTransfer.setData('text/plain', n.path)}
         onClick={() => { if (!isRenaming && n.isKin) onOpenFile(n.path) }}
         onContextMenu={(e) => handleCtxMenu(e, n.path, 'file')}
       >
@@ -230,6 +220,12 @@ export function Explorer({
                   setRenameValue(fileName)
                 }}>重命名</li>
                 <li onClick={() => {
+                  const { path, x, y } = ctxMenu
+                  closeCtx()
+                  resetInlineModes()
+                  setMovePicker({ from: path, x, y })
+                }}>移动到…</li>
+                <li onClick={() => {
                   const path = ctxMenu.path
                   closeCtx()
                   onDelete(path)
@@ -256,9 +252,42 @@ export function Explorer({
                 }}>新建文件</li>
               </>
             )}
+            <li onClick={() => {
+              const target = resolveImportDir(ctxMenu.kind, ctxMenu.path)
+              closeCtx()
+              onImportAssets(target)
+            }}>导入资源…</li>
           </ul>
         </>
       )}
+
+      {/* 「移动到…」选择器：候选 = 根目录 + 全部文件夹，经 moveTarget 过滤（排除自身/子孙/原位）。 */}
+      {movePicker && (() => {
+        const candidates = [{ path: '', name: '根目录', depth: 0 }, ...collectDirs(tree).map((d) => ({ ...d, depth: d.depth + 1 }))]
+          .filter((c) => moveTarget(movePicker.from, c.path) !== null)
+        return (
+          <>
+            <div className="ctx-backdrop" onClick={() => setMovePicker(null)} style={{ position: 'fixed', inset: 0, zIndex: 99 }} />
+            <ul
+              className="ctx-menu move-picker"
+              style={{ position: 'fixed', left: movePicker.x, top: movePicker.y, zIndex: 100 }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {candidates.length === 0 ? (
+                <li className="ctx-disabled" aria-disabled>无可移动到的位置</li>
+              ) : (
+                candidates.map((c) => (
+                  <li
+                    key={c.path || '<root>'}
+                    style={{ paddingLeft: `${10 + c.depth * 12}px` }}
+                    onClick={() => { tryMove(movePicker.from, c.path); setMovePicker(null) }}
+                  >{c.name}</li>
+                ))
+              )}
+            </ul>
+          </>
+        )
+      })()}
 
       <div className="explorer-head">
         <button
@@ -277,12 +306,6 @@ export function Explorer({
         onContextMenu={(e) => {
           e.preventDefault()
           setCtxMenu({ path: '', kind: 'root', x: e.clientX, y: e.clientY })
-        }}
-        onDragOver={(e) => e.preventDefault()}
-        onDrop={(e) => {
-          e.preventDefault()
-          setDropTarget(null)
-          tryMove(e.dataTransfer.getData('text/plain'), '')
         }}
       >
         {tree.map((n) => renderNode(n, 0))}

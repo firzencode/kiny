@@ -30,6 +30,11 @@ export interface MenuBarProps {
   onZoomIn: () => void
   onZoomOut: () => void
   onZoomReset: () => void
+  /** 是否已存过「我的布局」快照——决定「恢复我的布局」是否渲染。 */
+  hasSavedLayout: boolean
+  onSaveLayout: () => void
+  onRestoreMyLayout: () => void
+  onRestoreDefaultLayout: () => void
 }
 
 interface Item {
@@ -96,6 +101,11 @@ export function MenuBar(p: MenuBarProps) {
         { label: '放大', sc: 'Ctrl+=', act: p.onZoomIn },
         { label: '缩小', sc: 'Ctrl+-', act: p.onZoomOut },
         { label: '重置字号', sc: 'Ctrl+0', act: p.onZoomReset },
+        { sep: true },
+        { label: '保存当前布局', act: p.onSaveLayout },
+        // 未存过快照时整项不渲染（隐藏而非置灰，消除无法点的死项）。
+        ...(p.hasSavedLayout ? [{ label: '恢复我的布局', act: p.onRestoreMyLayout }] : []),
+        { label: '恢复默认布局', act: p.onRestoreDefaultLayout },
       ],
     },
     {

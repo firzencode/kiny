@@ -5,7 +5,7 @@ use zip::write::FileOptions;
 use zip::ZipWriter;
 
 /// 把 src 目录递归打包成 .kip（zip）写到 dest。
-/// 文件以「相对 src、'/' 分隔」的路径入 zip——kiny.json 自然落在根部，满足 reader 契约。
+/// 文件以「相对 src、'/' 分隔」的路径入 zip——manifest（`<名>.kiw` 或旧 kiny.json）自然落在根部，满足 reader 契约。
 /// 跳过以 '.' 开头的隐藏项与扩展名为 kip 的文件（防把上次导出的包打进新包）。
 fn zip_dir(src: &Path, dest: &Path) -> Result<(), String> {
     let file = fs::File::create(dest).map_err(|e| e.to_string())?;
@@ -106,5 +106,29 @@ mod tests {
         let mut buf = Vec::new();
         e.read_to_end(&mut buf).unwrap();
         assert_eq!(buf, vec![0u8, 1, 2, 255]);
+    }
+
+    #[test]
+    fn export_packs_kiw_manifest_at_zip_root() {
+        let src = tmp();
+        fs::write(
+            src.join("雾港之夜.kiw"),
+            r#"{"name":"雾港之夜","version":"1.0.0","engine":"0.4.0","entry":"main.kin"}"#,
+        )
+        .unwrap();
+        fs::write(src.join("main.kin"), "=== 开场\n你好").unwrap();
+
+        let dest = tmp().join("out.kip");
+        export_kip(
+            src.to_string_lossy().into_owned(),
+            dest.to_string_lossy().into_owned(),
+        )
+        .unwrap();
+
+        let f = fs::File::open(&dest).unwrap();
+        let mut zip = zip::ZipArchive::new(f).unwrap();
+        let names: Vec<String> = (0..zip.len()).map(|i| zip.by_index(i).unwrap().name().to_string()).collect();
+        // manifest .kiw 落在 zip 根部（无外层目录），reader 解包端 locate_manifest 才挑得到。
+        assert!(names.contains(&"雾港之夜.kiw".to_string()));
     }
 }

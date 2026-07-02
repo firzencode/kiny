@@ -16,6 +16,18 @@ export interface TreeNode {
   children?: TreeNode[] // dir 才有
 }
 
+/** 递归收集树中所有目录节点（供「移动到…」选择器列目标）；depth 供缩进显示。顺序沿用 tree 顺序（文件夹排前、同级升序）。 */
+export function collectDirs(nodes: TreeNode[], depth = 0): { path: string; name: string; depth: number }[] {
+  const out: { path: string; name: string; depth: number }[] = []
+  for (const n of nodes) {
+    if (n.kind === 'dir') {
+      out.push({ path: n.path, name: n.name, depth })
+      if (n.children) out.push(...collectDirs(n.children, depth + 1))
+    }
+  }
+  return out
+}
+
 /** 从扁平文件列表 + 空目录列表现算多层树；文件夹排前、同级名升序。 */
 export function buildTree(
   files: { path: string; isKin: boolean }[],

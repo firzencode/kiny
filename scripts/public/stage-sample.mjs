@@ -14,9 +14,15 @@ export function stageSample(srcDir, destDir, opts = {}) {
   rmSync(destDir, { recursive: true, force: true })
   cpSync(srcDir, destDir, { recursive: true })
   if (opts.filesJson) {
-    // 只列顶层 .kin（样例项目约定 .kin 平铺在根，assets 等子目录不含源文件）。
-    const kins = readdirSync(destDir).filter((f) => f.endsWith('.kin')).sort()
-    writeFileSync(join(destDir, 'files.json'), JSON.stringify(kins) + '\n', 'utf8')
+    // 浏览器无法枚举目录，故 files.json 显式列出根部需 fetch 的文件：manifest（`<名>.kiw` 或旧
+    // kiny.json）+ 顶层 .kin（样例约定 .kin 平铺在根，assets 等子目录不含源文件）。web-reader
+    // loadDemo 用 findManifest 从这份索引挑 manifest、其余作故事文件。
+    const roots = readdirSync(destDir)
+    const kins = roots.filter((f) => f.endsWith('.kin')).sort()
+    // 选名规则与 engine findManifest 等价（自包含内联，不引 engine dist）：.kiw 优先，回退 kiny.json。
+    const manifest = roots.find((f) => f.endsWith('.kiw')) ?? (roots.includes('kiny.json') ? 'kiny.json' : undefined)
+    const list = manifest ? [manifest, ...kins] : kins
+    writeFileSync(join(destDir, 'files.json'), JSON.stringify(list) + '\n', 'utf8')
   }
 }
 

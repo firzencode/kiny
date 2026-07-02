@@ -32,6 +32,10 @@ function setup(over: Partial<ComponentProps<typeof MenuBar>> = {}) {
     onZoomReset: vi.fn(),
     onExportKip: vi.fn(),
     onExportWebpage: vi.fn(),
+    hasSavedLayout: false,
+    onSaveLayout: vi.fn(),
+    onRestoreMyLayout: vi.fn(),
+    onRestoreDefaultLayout: vi.fn(),
     ...over,
   }
   render(<MenuBar {...props} />)
@@ -155,5 +159,34 @@ describe('MenuBar', () => {
     await openMenu('视图')
     await userEvent.click(await screen.findByRole('menuitem', { name: 'AI 面板' }))
     expect(p.onToggleView).toHaveBeenCalledWith('ai')
+  })
+
+  it('视图菜单：保存当前布局 → onSaveLayout', async () => {
+    const p = setup()
+    await openMenu('视图')
+    await userEvent.click(await screen.findByRole('menuitem', { name: '保存当前布局' }))
+    expect(p.onSaveLayout).toHaveBeenCalled()
+  })
+
+  it('视图菜单：恢复默认布局 → onRestoreDefaultLayout', async () => {
+    const p = setup()
+    await openMenu('视图')
+    await userEvent.click(await screen.findByRole('menuitem', { name: '恢复默认布局' }))
+    expect(p.onRestoreDefaultLayout).toHaveBeenCalled()
+  })
+
+  it('无快照时不渲染「恢复我的布局」', async () => {
+    setup({ hasSavedLayout: false })
+    await openMenu('视图')
+    // 先确认菜单已展开（其它项在场），再断言目标项缺席
+    expect(await screen.findByRole('menuitem', { name: '保存当前布局' })).toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: '恢复我的布局' })).not.toBeInTheDocument()
+  })
+
+  it('有快照时渲染「恢复我的布局」并回调', async () => {
+    const p = setup({ hasSavedLayout: true })
+    await openMenu('视图')
+    await userEvent.click(await screen.findByRole('menuitem', { name: '恢复我的布局' }))
+    expect(p.onRestoreMyLayout).toHaveBeenCalled()
   })
 })

@@ -600,12 +600,17 @@ button {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
-  max-width: 560px;
-  margin: 0 auto;
+  /* 滚动容器占满整宽，让滚动条贴预览区右缘；阅读列宽改由内容子元素约束（下方规则）。 */
   padding: 48px 28px 96px;
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 16px;
+}
+/* 居中的阅读列：504 = 原 560 容器扣去两侧 28 内边距，视觉列宽不变。 */
+.preview-stage .player-content > * {
+  width: 100%;
+  max-width: 504px;
 }
 .preview-stage .audio-toggle {
   position: absolute;
@@ -786,13 +791,14 @@ button {
 }
 .ctx-menu li:hover { background: var(--accent-soft); }
 
-/* 拖拽悬停高亮 */
-.frow.drop-target,
-.afolder.drop-target {
-  background: var(--accent-soft);
-  outline: 1px solid var(--accent-line);
-  outline-offset: -1px;
+/* 「移动到…」选择器：可滚动、禁用占位不可点 */
+.move-picker { max-height: 320px; overflow-y: auto; }
+.ctx-menu li.ctx-disabled {
+  color: var(--text-dim);
+  cursor: default;
+  font-style: italic;
 }
+.ctx-menu li.ctx-disabled:hover { background: none; }
 
 /* 入口文件标记 */
 .frow-entry {
@@ -803,13 +809,9 @@ button {
   margin-left: 2px;
 }
 
-/* 非 .kin 文件行：变暗，不可点击光标 */
-.frow.frow-other {
-  opacity: 0.45;
-  cursor: default;
-  color: var(--text-faint);
-}
-.frow.frow-other:hover { background: transparent; color: var(--text-faint); }
+/* 非 .kin 资源文件行：正常显示（不置灰），仅光标非可点态——左键不打开编辑器
+   （Explorer onClick 仅对 .kin 开 tab），但仍可右键（导入/移动/重命名等）。 */
+.frow.frow-other { cursor: default; }
 
 /* ---------- TabBar ---------- */
 .tabbar { flex: 0 0 auto; height: 38px; display: flex; align-items: stretch; background: var(--bg-1); border-bottom: 1px solid var(--border); overflow-x: auto; }
@@ -938,6 +940,11 @@ button {
 .recovery-item.missing { color: var(--text-faint); }
 .recovery-path { font-family: ui-monospace, monospace; overflow-wrap: anywhere; }
 .recovery-note { font-size: 11px; color: var(--text-faint); }
+/* 导入冲突三选：「应用到其余」勾选行 */
+.confirm-checkbox {
+  display: flex; align-items: center; gap: 7px;
+  margin: 0 0 18px; font-size: 12.5px; color: var(--text-dim); cursor: pointer;
+}
 .confirm-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .confirm-btn {
   padding: 7px 16px; font-size: 13px; border-radius: 8px; cursor: pointer;
@@ -1095,8 +1102,82 @@ button {
   font-size: 14px;
 }
 .ai-iconbtn:hover { background: var(--bg-2); color: var(--text); }
+.ai-iconbtn.on { background: var(--bg-2); color: var(--text); }
 .ai-iconbtn:disabled { opacity: .4; cursor: default; }
 .ai-iconbtn:disabled:hover { background: transparent; color: var(--text-dim); }
+
+/* ---------- 对话历史列表 ---------- */
+.ai-history {
+  flex: 0 0 auto;
+  max-height: 40%;
+  overflow: auto;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-0);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ai-history-empty {
+  padding: 14px 10px;
+  text-align: center;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+.ai-history-item {
+  display: flex;
+  align-items: stretch;
+  border-radius: 7px;
+}
+.ai-history-item:hover { background: var(--bg-2); }
+.ai-history-item.on { background: var(--bg-2); }
+.ai-history-pick {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 7px 8px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text);
+}
+.ai-history-pick:disabled { cursor: default; }
+.ai-history-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+}
+.ai-history-item.on .ai-history-title { font-weight: 600; }
+.ai-history-time {
+  flex: 0 0 auto;
+  font-size: 10.5px;
+  color: var(--text-faint);
+}
+.ai-history-del {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  padding: 0 8px;
+  border-radius: 7px;
+  font-size: 12px;
+  opacity: 0;
+}
+.ai-history-item:hover .ai-history-del { opacity: 1; }
+.ai-history-del:hover { color: var(--text); background: var(--bg-3); }
+.ai-history-del:disabled { cursor: default; opacity: 0; }
+
+/* ---------- 设置：AI 对话保留天数 ---------- */
+.settings-retention { display: inline-flex; align-items: center; gap: 12px; }
+.settings-retention-days { display: inline-flex; align-items: center; gap: 6px; }
+.settings-num { width: 68px; text-align: right; }
 
 /* ---------- AI 对话区 ---------- */
 .ai-convo {

@@ -5,6 +5,7 @@ import type { LoadedProject } from '../files/gateway'
 const project: LoadedProject = {
   dir: '/p',
   manifest: { name: '雾港', version: '1.0.0', engine: '0.1.0', entry: 'main.kin' },
+  manifestFile: 'kiny.json',
   files: [
     { path: 'main.kin', isKin: true, source: '-> 开场' },
     { path: '末.kin', isKin: true, source: '=== 末 ===' },
@@ -18,6 +19,7 @@ describe('editorReducer 多文件', () => {
     const proj: LoadedProject = {
       dir: '/p',
       manifest: { name: 'P', version: '1', engine: '0.1.0', entry: 'main.kin' },
+      manifestFile: 'kiny.json',
       files: [
         { path: 'main.kin', isKin: true, source: '=== a ===\n' },
         { path: 'assets/x.jpg', isKin: false },
@@ -160,7 +162,7 @@ describe('editorReducer 多文件', () => {
 
 describe('path_renamed', () => {
   const loaded = () => editorReducer(initialEditorState, { type: 'project_loaded', project: {
-    dir: '/p', manifest: { name: 'P', version: '1', engine: '0.1.0', entry: 'main.kin' },
+    dir: '/p', manifest: { name: 'P', version: '1', engine: '0.1.0', entry: 'main.kin' }, manifestFile: 'kiny.json',
     files: [{ path: 'main.kin', isKin: true, source: 'M' }, { path: 'a.kin', isKin: true, source: 'A' }],
     emptyDirs: [],
   } })
@@ -185,7 +187,7 @@ describe('path_renamed', () => {
 
   it('目录改名：前缀批量迁移', () => {
     let s = editorReducer(initialEditorState, { type: 'project_loaded', project: {
-      dir: '/p', manifest: { name: 'P', version: '1', engine: '0.1.0', entry: 'main.kin' },
+      dir: '/p', manifest: { name: 'P', version: '1', engine: '0.1.0', entry: 'main.kin' }, manifestFile: 'kiny.json',
       files: [{ path: 'main.kin', isKin: true, source: 'M' }, { path: 'ch/a.kin', isKin: true, source: 'A' }],
       emptyDirs: [],
     } })
@@ -204,7 +206,7 @@ describe('path_renamed', () => {
 
   it('目录改名：emptyDirs 同步', () => {
     let s = editorReducer(initialEditorState, { type: 'project_loaded', project: {
-      dir: '/p', manifest: { name: 'P', version: '1', engine: '0.1.0', entry: 'main.kin' },
+      dir: '/p', manifest: { name: 'P', version: '1', engine: '0.1.0', entry: 'main.kin' }, manifestFile: 'kiny.json',
       files: [{ path: 'main.kin', isKin: true, source: 'M' }],
       emptyDirs: ['art'],
     } })
@@ -215,7 +217,7 @@ describe('path_renamed', () => {
 
 describe('path_deleted / folder_created', () => {
   const loaded = () => editorReducer(initialEditorState, { type: 'project_loaded', project: {
-    dir: '/p', manifest: { name: 'P', version: '1', engine: '0.1.0', entry: 'main.kin' },
+    dir: '/p', manifest: { name: 'P', version: '1', engine: '0.1.0', entry: 'main.kin' }, manifestFile: 'kiny.json',
     files: [{ path: 'main.kin', isKin: true, source: 'M' }, { path: 'a.kin', isKin: true, source: 'A' }, { path: 'ch/b.kin', isKin: true, source: 'B' }],
     emptyDirs: [],
   } })
@@ -259,7 +261,7 @@ describe('path_deleted / folder_created', () => {
 
   it('删目录：活动 tab 左右都有存活 → 选左邻居（非旧索引）', () => {
     let s = editorReducer(initialEditorState, { type: 'project_loaded', project: {
-      dir: '/p', manifest: { name: 'P', version: '1', engine: '0.1.0', entry: 'main.kin' },
+      dir: '/p', manifest: { name: 'P', version: '1', engine: '0.1.0', entry: 'main.kin' }, manifestFile: 'kiny.json',
       files: [{ path: 'main.kin', isKin: true, source: 'M' }, { path: 'ch/x.kin', isKin: true, source: 'X' }, { path: 'z.kin', isKin: true, source: 'Z' }],
       emptyDirs: [],
     } })

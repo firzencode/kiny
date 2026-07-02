@@ -18,8 +18,8 @@ function stubFetch(files: Record<string, string>) {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('loadDemo', () => {
-  it('收集文本 → 建出可玩 Story', async () => {
-    stubFetch({ 'kiny.json': MANIFEST, 'files.json': '["main.kin"]', 'main.kin': MAIN })
+  it('.kiw 索引：从 files.json 挑 <名>.kiw 建出可玩 Story', async () => {
+    stubFetch({ '小样.kiw': MANIFEST, 'files.json': '["小样.kiw","main.kin"]', 'main.kin': MAIN })
     const out = await loadDemo()
     expect(out.ok).toBe(true)
     if (out.ok) {
@@ -29,8 +29,22 @@ describe('loadDemo', () => {
     }
   })
 
+  it('旧 kiny.json 索引：fallback 定位 kiny.json', async () => {
+    stubFetch({ 'kiny.json': MANIFEST, 'files.json': '["kiny.json","main.kin"]', 'main.kin': MAIN })
+    const out = await loadDemo()
+    expect(out.ok).toBe(true)
+    if (out.ok) expect(out.value.title).toBe('小样')
+  })
+
+  it('索引缺 manifest（无 .kiw 无 kiny.json）→ ok:false', async () => {
+    stubFetch({ 'files.json': '["main.kin"]', 'main.kin': MAIN })
+    const out = await loadDemo()
+    expect(out.ok).toBe(false)
+    if (!out.ok) expect(out.message).toContain('.kiw')
+  })
+
   it('manifest 非法 → 返回 ok:false 带消息', async () => {
-    stubFetch({ 'kiny.json': 'not json', 'files.json': '[]' })
+    stubFetch({ 'kiny.json': 'not json', 'files.json': '["kiny.json"]' })
     const out = await loadDemo()
     expect(out.ok).toBe(false)
     if (!out.ok) expect(out.message).toMatch(/JSON/)

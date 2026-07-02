@@ -12,12 +12,14 @@ export function PreviewPane({
   play,
   stale,
   sfx,
+  seed,
   onChoose,
   onRestart,
 }: {
   play: PlayState | null
   stale: boolean
   sfx?: string[]
+  seed: number
   onChoose: (pos: number) => void
   onRestart: () => void
 }) {
@@ -35,7 +37,7 @@ export function PreviewPane({
         <span className="preview-label">预览</span>
         {stale && <span className="preview-stale">基于上一个有效版本</span>}
         <span className="preview-spacer" />
-        <span className="preview-seed">种子 #5eed</span>
+        <span className="preview-seed">种子 #{seed.toString(16)}</span>
         <button className="preview-restart" onClick={onRestart}>
           ↺ 重开预览
         </button>

@@ -1,6 +1,6 @@
 {
   "name": "@kiny/reader",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,7 +10,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "tauri:android": "tauri android dev",
+    "tauri:android:build": "tauri android build --apk --debug"
   },
   "dependencies": {
     "@kiny/engine": "file:../engine",

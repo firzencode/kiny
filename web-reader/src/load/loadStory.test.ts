@@ -57,7 +57,7 @@ describe('loadStory', () => {
   })
 
   it('无内联数据 → 回退 fetch demo（assetBase demo/）', async () => {
-    stubFetch({ 'kiny.json': MANIFEST, 'files.json': '["main.kin"]', 'main.kin': MAIN })
+    stubFetch({ 'kiny.json': MANIFEST, 'files.json': '["kiny.json","main.kin"]', 'main.kin': MAIN })
     const out = await loadStory(1)
     expect(out.ok).toBe(true)
     if (out.ok) expect(out.value.assetBase).toBe('demo/')
@@ -65,7 +65,7 @@ describe('loadStory', () => {
 
   it('占位字符串（导出模板未注入数据）→ 当作无内联，回退 fetch', async () => {
     ;(window as unknown as { __KINY_PROJECT__?: unknown }).__KINY_PROJECT__ = '__KINY_PROJECT_DATA__'
-    stubFetch({ 'kiny.json': MANIFEST, 'files.json': '["main.kin"]', 'main.kin': MAIN })
+    stubFetch({ 'kiny.json': MANIFEST, 'files.json': '["kiny.json","main.kin"]', 'main.kin': MAIN })
     const out = await loadStory(1)
     expect(out.ok).toBe(true)
     if (out.ok) expect(out.value.assetBase).toBe('demo/')

@@ -177,10 +177,10 @@ export async function runCommand<C extends ActionCommand>(
       const before = ctx.getState()
       await ctx.gateway.renamePath(dir, cmd.from, cmd.to)
       ctx.dispatch({ type: 'path_renamed', from: cmd.from, to: cmd.to })
-      // 入口文件被改名/移动 → 同步 kiny.json 的 entry
-      if (before.manifest && before.entry && underPath(before.entry, cmd.from)) {
+      // 入口文件被改名/移动 → 同步 manifest 的 entry
+      if (before.manifest && before.manifestFile && before.entry && underPath(before.entry, cmd.from)) {
         const newEntry = before.entry === cmd.from ? cmd.to : cmd.to + before.entry.slice(cmd.from.length)
-        await ctx.gateway.writeManifest(dir, { ...before.manifest, entry: newEntry })
+        await ctx.gateway.writeManifest(dir, { ...before.manifest, entry: newEntry }, before.manifestFile)
       }
       return { from: cmd.from, to: cmd.to } as ResultFor<C['name']>
     }

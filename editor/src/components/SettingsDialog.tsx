@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import {
-  type Settings, DEFAULT_SETTINGS, SETTINGS_BOUNDS,
+  type Settings, DEFAULT_SETTINGS, SETTINGS_BOUNDS, AI_CHAT_RETENTION_BOUNDS,
   CODE_FONTS, PROSE_FONTS, CODE_FONT_FALLBACK, PROSE_FONT_FALLBACK,
   type FontPreset, sanitizeFontName,
 } from '../state/settings'
@@ -20,7 +20,8 @@ export interface SettingsDialogProps {
 const eqSettings = (a: Settings, b: Settings) =>
   a.codeFont === b.codeFont && a.codeSize === b.codeSize && a.codeLh === b.codeLh &&
   a.proseFont === b.proseFont && a.proseSize === b.proseSize && a.proseLh === b.proseLh &&
-  a.autosaveRecovery === b.autosaveRecovery
+  a.autosaveRecovery === b.autosaveRecovery && a.previewRandomSeed === b.previewRandomSeed &&
+  a.aiChatRetentionDays === b.aiChatRetentionDays
 
 const decimals = (step: number) => (step.toString().split('.')[1] || '').length
 
@@ -164,6 +165,17 @@ export function SettingsDialog({ open, settings, theme, aiConfig, onSave, onCanc
               </button>
             </div>
             <div className="settings-help">开启后，未保存改动会在后台写入恢复草稿（不碰真文件）；崩溃或强制退出后重开项目，会提示恢复。关闭则不写草稿、不做恢复检测。</div>
+            <div className="settings-row">
+              <span className="settings-label">预览随机种子</span>
+              <button
+                className={'settings-toggle' + (draft.previewRandomSeed ? ' on' : '')}
+                role="switch" aria-checked={draft.previewRandomSeed} aria-label="预览随机种子"
+                onClick={() => setDraft({ ...draft, previewRandomSeed: !draft.previewRandomSeed })}
+              >
+                <span className="settings-toggle-knob" />
+              </button>
+            </div>
+            <div className="settings-help">开启后，每次「重开预览」（↺）都换一枚新随机种子，便于查看 random / shuffle 的多样性。关闭则恒用固定种子，预览可复现（默认）。</div>
           </div>
 
           <div className="settings-cat">AI</div>
@@ -198,6 +210,35 @@ export function SettingsDialog({ open, settings, theme, aiConfig, onSave, onCanc
               <span className="lock">🔒</span>
               <div>API key 与每一次请求都只在本机，<b>直连你配置的 endpoint</b>，不经 Kiny 任何服务器中转或托管。你用的是自己的 key、自己的额度。</div>
             </div>
+            <div className="settings-row">
+              <span className="settings-label">自动清理对话记录</span>
+              <div className="settings-retention">
+                <button
+                  className={'settings-toggle' + (draft.aiChatRetentionDays !== null ? ' on' : '')}
+                  role="switch" aria-checked={draft.aiChatRetentionDays !== null} aria-label="自动清理 AI 对话记录"
+                  onClick={() => setDraft({ ...draft, aiChatRetentionDays: draft.aiChatRetentionDays === null ? DEFAULT_SETTINGS.aiChatRetentionDays : null })}
+                >
+                  <span className="settings-toggle-knob" />
+                </button>
+                {draft.aiChatRetentionDays !== null && (
+                  <span className="settings-retention-days">
+                    <input
+                      className="settings-input settings-num" type="number" aria-label="保留天数"
+                      min={AI_CHAT_RETENTION_BOUNDS.min} max={AI_CHAT_RETENTION_BOUNDS.max}
+                      value={draft.aiChatRetentionDays}
+                      onChange={(e) => {
+                        const n = Math.floor(Number(e.target.value))
+                        if (Number.isFinite(n) && n >= AI_CHAT_RETENTION_BOUNDS.min) {
+                          setDraft({ ...draft, aiChatRetentionDays: Math.min(AI_CHAT_RETENTION_BOUNDS.max, n) })
+                        }
+                      }}
+                    />
+                    <span className="settings-unit">天</span>
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="settings-help">距今超过设定天数没有新增内容的 AI 对话，会在下次启动时自动删除；关闭则永久保留。对话历史仅存本机（app 数据目录），含 key 的请求不入库。</div>
           </div>
         </div>
 

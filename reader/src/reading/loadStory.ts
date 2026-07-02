@@ -2,7 +2,7 @@ import { readTextFile, readDir } from '@tauri-apps/plugin-fs'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { join } from '@tauri-apps/api/path'
 import type { ResolveAsset } from '@kiny/player'
-import type { Story, ValidatedProgram } from '@kiny/engine'
+import { findManifest, type Story, type ValidatedProgram } from '@kiny/engine'
 import { assembleStory } from './assembleStory'
 
 export type LoadOutcome =
@@ -27,13 +27,18 @@ async function collectKin(dir: string): Promise<Map<string, string>> {
 export async function loadStory(dir: string, seed?: number): Promise<LoadOutcome> {
   let manifestText: string
   let files: Map<string, string>
+  let manifestName: string
   try {
-    manifestText = await readTextFile(await join(dir, 'kiny.json'))
+    const rootNames = (await readDir(dir)).filter((e) => e.isFile).map((e) => e.name)
+    const found = findManifest(rootNames)
+    if (!found.ok) return { ok: false, message: found.message }
+    manifestName = found.name
+    manifestText = await readTextFile(await join(dir, manifestName))
     files = await collectKin(dir)
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : '读取故事失败' }
   }
-  const res = assembleStory(manifestText, files, seed)
+  const res = assembleStory(manifestText, files, seed, manifestName)
   if (!res.ok) return res
   const resolveAsset: ResolveAsset = (name) => convertFileSrc(`${dir}/${name}`)
   return { ok: true, story: res.story, resolveAsset, title: res.title, program: res.program }

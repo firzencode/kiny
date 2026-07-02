@@ -5,6 +5,7 @@ import { AiPanel, type AiPanelProps } from './AiPanel'
 const base: AiPanelProps = {
   configured: true, model: 'deepseek-chat', turns: [], running: false,
   onSend: vi.fn(), onStop: vi.fn(), onNewConversation: vi.fn(), onClose: vi.fn(), onOpenSettings: vi.fn(),
+  conversations: [], currentId: null, onSelectConversation: vi.fn(), onDeleteConversation: vi.fn(),
 }
 
 describe('AiPanel', () => {
@@ -55,6 +56,32 @@ describe('AiPanel', () => {
     expect(screen.getByText('先看看现有结构')).toBeInTheDocument()
     expect(screen.getByText('已加好。')).toBeInTheDocument()
     expect(screen.getByText('createFile')).toBeInTheDocument()
+  })
+
+  it('对话历史：⟲ 展开列表，点条目切换、点 🗑 删除', () => {
+    const onSelect = vi.fn()
+    const onDelete = vi.fn()
+    const convs = [
+      { id: 'b', title: '较新的对话', lastActivityAt: 200 },
+      { id: 'a', title: '较旧的对话', lastActivityAt: 100 },
+    ]
+    render(<AiPanel {...base} conversations={convs} currentId="b" onSelectConversation={onSelect} onDeleteConversation={onDelete} />)
+    // 默认不显示历史
+    expect(screen.queryByText('较旧的对话')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '对话历史' }))
+    expect(screen.getByText('较新的对话')).toBeInTheDocument()
+    fireEvent.click(screen.getByTitle('较旧的对话'))
+    expect(onSelect).toHaveBeenCalledWith('a')
+    // 重新展开后删除
+    fireEvent.click(screen.getByRole('button', { name: '对话历史' }))
+    fireEvent.click(screen.getByRole('button', { name: '删除对话 较新的对话' }))
+    expect(onDelete).toHaveBeenCalledWith('b')
+  })
+
+  it('对话历史：空列表显示占位文案', () => {
+    render(<AiPanel {...base} conversations={[]} />)
+    fireEvent.click(screen.getByRole('button', { name: '对话历史' }))
+    expect(screen.getByText('暂无历史对话')).toBeInTheDocument()
   })
 
   it('say 片段按 Markdown 渲染（加粗 / 列表）', () => {

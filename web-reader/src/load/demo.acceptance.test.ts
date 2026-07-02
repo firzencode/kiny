@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
-import { loadProjectFromFiles, analyze, resolveStart, createStory, plainText } from '@kiny/engine'
+import { loadProjectFromFiles, findManifest, analyze, resolveStart, createStory, plainText } from '@kiny/engine'
 import type { Story, RichSpan } from '@kiny/engine'
 import { initialState, advance, choose, type PlayState, type ResolveAsset } from '@kiny/player'
 
@@ -16,10 +16,12 @@ const demoDir = join(dirname(fileURLToPath(import.meta.url)), '../../public/demo
 const RESOLVE: ResolveAsset = (name) => 'demo/' + name
 
 function build(seed: number): Story {
-  const manifest = readFileSync(join(demoDir, 'kiny.json'), 'utf8')
   const index = JSON.parse(readFileSync(join(demoDir, 'files.json'), 'utf8')) as string[]
-  const files = new Map(index.map((p) => [p, readFileSync(join(demoDir, p), 'utf8')]))
-  const res = loadProjectFromFiles(manifest, files)
+  const found = findManifest(index)
+  if (!found.ok) throw new Error('locate manifest: ' + found.message)
+  const manifest = readFileSync(join(demoDir, found.name), 'utf8')
+  const files = new Map(index.filter((p) => p !== found.name).map((p) => [p, readFileSync(join(demoDir, p), 'utf8')]))
+  const res = loadProjectFromFiles(manifest, files, found.name)
   if (!res.ok) throw new Error('load: ' + res.errors.map((e) => e.message).join(';'))
   const { program } = analyze(res.files)
   if (!program) throw new Error('analyze failed')

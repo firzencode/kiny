@@ -5,21 +5,39 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { stageSample } from './stage-sample.mjs'
 
-test('stageSample 拷贝目录并按需生成 files.json', () => {
+test('stageSample 拷贝目录并生成 files.json（含 <名>.kiw manifest + 顶层 .kin）', () => {
   const root = mkdtempSync(join(tmpdir(), 'stage-'))
   try {
     const src = join(root, 'src')
     const dest = join(root, 'dest')
     mkdirSync(join(src, 'assets'), { recursive: true })
     writeFileSync(join(src, 'main.kin'), 'hello\n')
-    writeFileSync(join(src, 'kiny.json'), '{}\n')
+    writeFileSync(join(src, '雾港之夜.kiw'), '{}\n')
     writeFileSync(join(src, 'assets', 'a.jpg'), 'binary')
 
     stageSample(src, dest, { filesJson: true })
 
     assert.equal(readFileSync(join(dest, 'main.kin'), 'utf8'), 'hello\n')
     assert.ok(existsSync(join(dest, 'assets', 'a.jpg')))
-    assert.deepEqual(JSON.parse(readFileSync(join(dest, 'files.json'), 'utf8')), ['main.kin'])
+    // files.json 索引：manifest 在前、顶层 .kin 随后（assets 不登记）。
+    assert.deepEqual(JSON.parse(readFileSync(join(dest, 'files.json'), 'utf8')), ['雾港之夜.kiw', 'main.kin'])
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('stageSample 生成 files.json：旧 kiny.json 项目 fallback', () => {
+  const root = mkdtempSync(join(tmpdir(), 'stage-'))
+  try {
+    const src = join(root, 'src')
+    const dest = join(root, 'dest')
+    mkdirSync(src, { recursive: true })
+    writeFileSync(join(src, 'main.kin'), 'hello\n')
+    writeFileSync(join(src, 'kiny.json'), '{}\n')
+
+    stageSample(src, dest, { filesJson: true })
+
+    assert.deepEqual(JSON.parse(readFileSync(join(dest, 'files.json'), 'utf8')), ['kiny.json', 'main.kin'])
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

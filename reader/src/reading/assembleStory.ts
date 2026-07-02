@@ -15,8 +15,9 @@ export function assembleStory(
   manifestText: string,
   files: Map<string, string>,
   seed = Math.floor(Math.random() * 0x1_0000_0000),
+  manifestName = 'kiny.json',
 ): AssembleOutcome {
-  const res = loadProjectFromFiles(manifestText, files)
+  const res = loadProjectFromFiles(manifestText, files, manifestName)
   if (!res.ok) return { ok: false, message: res.errors.map((e) => e.message).join('; ') }
 
   const { program, diagnostics } = analyze(res.files)

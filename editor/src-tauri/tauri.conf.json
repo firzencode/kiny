@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "kiny-editor",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "identifier": "com.kiny.editor",
   "build": {
     "frontendDist": "../dist",
@@ -33,6 +33,14 @@
     "active": true,
     "targets": "all",
     "resources": ["resources/export-template/index.html"],
+    "fileAssociations": [
+      {
+        "ext": ["kiw"],
+        "name": "Kiny 项目",
+        "description": "Kiny 项目文件",
+        "role": "Editor"
+      }
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -42,6 +50,11 @@
     ],
     "android": {
       "debugApplicationIdSuffix": ".debug"
+    },
+    "windows": {
+      "wix": {
+        "language": ["zh-CN"]
+      }
     }
   }
 }

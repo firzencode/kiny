@@ -22,6 +22,7 @@
     { "identifier": "fs:allow-exists", "allow": [{ "path": "$HOME/**" }, { "path": "$APPDATA/**" }] },
     { "identifier": "fs:allow-rename", "allow": [{ "path": "$HOME/**" }] },
     { "identifier": "fs:allow-remove", "allow": [{ "path": "$HOME/**" }] },
+    { "identifier": "fs:allow-copy-file", "allow": [{ "path": "$HOME/**" }, { "path": "$APPDATA/**" }] },
     {
       "identifier": "http:default",
       "allow": [{ "url": "https://**" }, { "url": "http://**" }]

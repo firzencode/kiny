@@ -15,4 +15,5 @@ export type { OutputEvent, ChoiceView, StoryOptions, StorySnapshot, RichSpan } f
 export { validateManifest } from './project/manifest'
 export { assembleProject } from './project/assemble'
 export { loadProjectFromFiles } from './project/memory'
+export { findManifest } from './project/locate'
 export type { KinyMeta, LoadResult, ProjectError } from './project/types'

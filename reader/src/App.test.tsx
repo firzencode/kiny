@@ -12,6 +12,8 @@ const readSave = vi.fn()
 const writeSave = vi.fn()
 const listSaves = vi.fn()
 const deleteSave = vi.fn()
+const getOpenedUris = vi.fn()
+const subscribeOpened = vi.fn()
 
 vi.mock('./library/store', () => ({
   listLibrary: (...a: unknown[]) => listLibrary(...a),
@@ -21,6 +23,10 @@ vi.mock('./library/store', () => ({
 }))
 vi.mock('./reading/loadStory', () => ({ loadStory: (...a: unknown[]) => loadStory(...a) }))
 vi.mock('./library/importDrop', () => ({ subscribeKipDrop: () => Promise.resolve(() => {}) }))
+vi.mock('./library/openedIntent', () => ({
+  getOpenedUris: (...a: unknown[]) => getOpenedUris(...a),
+  subscribeOpened: (...a: unknown[]) => subscribeOpened(...a),
+}))
 vi.mock('@tauri-apps/plugin-dialog', () => ({ ask: (...a: unknown[]) => ask(...a) }))
 vi.mock('./saves/store', () => ({
   readSave: (...a: unknown[]) => readSave(...a),
@@ -42,11 +48,13 @@ const MANIFEST = JSON.stringify({ name: '雾港之夜', version: '1', engine: '0
 const resolve: ResolveAsset = (n) => n
 
 beforeEach(() => {
-  [listLibrary, importKip, deleteStory, pickKipFile, loadStory, ask, readSave, writeSave, listSaves, deleteSave].forEach((m) => m.mockReset())
+  [listLibrary, importKip, deleteStory, pickKipFile, loadStory, ask, readSave, writeSave, listSaves, deleteSave, getOpenedUris, subscribeOpened].forEach((m) => m.mockReset())
   readSave.mockResolvedValue(null) // 默认无续读存档
   writeSave.mockResolvedValue(undefined)
   listSaves.mockResolvedValue([])
   deleteSave.mockResolvedValue(undefined)
+  getOpenedUris.mockResolvedValue([]) // 默认无「打开 .kip」意图
+  subscribeOpened.mockResolvedValue(() => {})
 })
 
 describe('App', () => {
@@ -74,6 +82,47 @@ describe('App', () => {
     render(<App />)
     await userEvent.click(await screen.findByRole('button', { name: /导入故事/ }))
     await waitFor(() => expect(importKip).toHaveBeenCalledWith('/d/x.kip'))
+    expect(await screen.findByText('雾港之夜')).toBeInTheDocument()
+  })
+
+  it('冷启动被「打开 .kip」意图拉起 → 导入并入库', async () => {
+    listLibrary.mockResolvedValueOnce([]).mockResolvedValueOnce([ITEM])
+    getOpenedUris.mockResolvedValue(['content://kip/1'])
+    importKip.mockResolvedValue(ITEM)
+    render(<App />)
+    await waitFor(() => expect(importKip).toHaveBeenCalledWith('content://kip/1'))
+    expect(await screen.findByText('雾港之夜')).toBeInTheDocument()
+  })
+
+  it('一批意图 URI 中某个失败 → 其余照样导入、错误提示出现', async () => {
+    const ITEM2 = { id: 'b', dir: '/l/b', name: '灯塔守望', author: '某人' }
+    listLibrary.mockResolvedValueOnce([]).mockResolvedValueOnce([ITEM, ITEM2])
+    getOpenedUris.mockResolvedValue(['content://ok/1', 'content://bad/2', 'content://ok/3'])
+    importKip
+      .mockResolvedValueOnce(ITEM) // 1 成功
+      .mockRejectedValueOnce(new Error('坏包')) // 2 失败
+      .mockResolvedValueOnce(ITEM2) // 3 仍尝试并成功
+    render(<App />)
+    await waitFor(() => expect(importKip).toHaveBeenCalledTimes(3))
+    expect(importKip).toHaveBeenNthCalledWith(1, 'content://ok/1')
+    expect(importKip).toHaveBeenNthCalledWith(2, 'content://bad/2')
+    expect(importKip).toHaveBeenNthCalledWith(3, 'content://ok/3')
+    expect(await screen.findByText('灯塔守望')).toBeInTheDocument() // 成功的入库
+    expect(screen.getByText('坏包')).toBeInTheDocument() // 失败提示
+  })
+
+  it('运行中收到「分享 .kip」意图 → 导入并入库', async () => {
+    listLibrary.mockResolvedValueOnce([]).mockResolvedValueOnce([ITEM])
+    importKip.mockResolvedValue(ITEM)
+    let emit: ((uris: string[]) => void) | undefined
+    subscribeOpened.mockImplementation((cb: (uris: string[]) => void) => {
+      emit = cb
+      return Promise.resolve(() => {})
+    })
+    render(<App />)
+    await waitFor(() => expect(emit).toBeDefined())
+    emit!(['content://kip/2'])
+    await waitFor(() => expect(importKip).toHaveBeenCalledWith('content://kip/2'))
     expect(await screen.findByText('雾港之夜')).toBeInTheDocument()
   })
 

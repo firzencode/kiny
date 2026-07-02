@@ -1,8 +1,8 @@
 import type { KinyMeta } from './types'
 
-/** 校验 kiny.json：四字段须为非空字符串；合法返回 KinyMeta，否则返回错误消息数组（一次报全）。 */
-export function validateManifest(raw: unknown): KinyMeta | string[] {
-  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return ['kiny.json 不是 JSON 对象']
+/** 校验 manifest（`<项目名>.kiw` 或旧 kiny.json）：四字段须为非空字符串；合法返回 KinyMeta，否则返回错误消息数组（一次报全）。manifestName 供错误消息定位。 */
+export function validateManifest(raw: unknown, manifestName = 'kiny.json'): KinyMeta | string[] {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return [`${manifestName} 不是 JSON 对象`]
   const o = raw as Record<string, unknown>
   const errs: string[] = []
   const need = (k: keyof KinyMeta) => {

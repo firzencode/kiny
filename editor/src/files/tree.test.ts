@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildTree, moveTarget } from './tree'
+import { buildTree, collectDirs, moveTarget } from './tree'
 
 describe('buildTree', () => {
   it('扁平文件 → 文件节点，按名升序', () => {
@@ -37,4 +37,22 @@ describe('moveTarget', () => {
   it('原位返回 null', () => { expect(moveTarget('chapters/a.kin', 'chapters')).toBeNull() })
   it('移入自身子树返回 null', () => { expect(moveTarget('ch', 'ch/sub')).toBeNull() })
   it('空源返回 null', () => { expect(moveTarget('', 'x')).toBeNull() })
+})
+
+describe('collectDirs', () => {
+  it('递归收集全部目录并带层级深度，顺序沿用 tree（文件夹排前、同级升序）', () => {
+    const tree = buildTree(
+      [{ path: 'main.kin', isKin: true }, { path: 'ch/a.kin', isKin: true }, { path: 'ch/sub/b.kin', isKin: true }],
+      ['art'],
+    )
+    expect(collectDirs(tree)).toEqual([
+      { path: 'art', name: 'art', depth: 0 },
+      { path: 'ch', name: 'ch', depth: 0 },
+      { path: 'ch/sub', name: 'sub', depth: 1 },
+    ])
+  })
+
+  it('无目录时返回空', () => {
+    expect(collectDirs(buildTree([{ path: 'a.kin', isKin: true }], []))).toEqual([])
+  })
 })

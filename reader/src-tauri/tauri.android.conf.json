@@ -1,0 +1,13 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "bundle": {
+    "fileAssociations": [
+      {
+        "ext": ["kip"],
+        "name": "Kiny 故事包",
+        "mimeType": "application/octet-stream",
+        "androidIntentActionFilters": ["view", "send", "sendMultiple"]
+      }
+    ]
+  }
+}

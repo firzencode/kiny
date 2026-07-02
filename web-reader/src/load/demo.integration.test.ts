@@ -2,17 +2,21 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync, existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
-import { loadProjectFromFiles, analyze, resolveStart, createStory } from '@kiny/engine'
+import { loadProjectFromFiles, findManifest, analyze, resolveStart, createStory } from '@kiny/engine'
 
 const demoDir = join(dirname(fileURLToPath(import.meta.url)), '../../public/demo')
 
 describe('内置 demo 项目', () => {
   it('analyze 零 error 且能建出 Story', () => {
-    const manifest = readFileSync(join(demoDir, 'kiny.json'), 'utf8')
     const index = JSON.parse(readFileSync(join(demoDir, 'files.json'), 'utf8')) as string[]
-    const files = new Map(index.map((p) => [p, readFileSync(join(demoDir, p), 'utf8')]))
+    const found = findManifest(index)
+    expect(found.ok).toBe(true)
+    if (!found.ok) return
+    const manifest = readFileSync(join(demoDir, found.name), 'utf8')
+    // manifest 从故事文件集里排除（其余条目才是 .kin）。
+    const files = new Map(index.filter((p) => p !== found.name).map((p) => [p, readFileSync(join(demoDir, p), 'utf8')]))
 
-    const res = loadProjectFromFiles(manifest, files)
+    const res = loadProjectFromFiles(manifest, files, found.name)
     expect(res.ok).toBe(true)
     if (!res.ok) return
     const { program, diagnostics } = analyze(res.files)

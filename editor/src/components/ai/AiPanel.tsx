@@ -3,7 +3,8 @@ import { useState, type ReactNode } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { Components } from 'react-markdown'
-import type { AiTurn, AiSegment } from '../../ai/useAiSession'
+import type { AiTurn, AiSegment, ConversationSummary } from '../../ai/useAiSession'
+import { relativeTime } from '../../state/chatStore'
 import { ColResizer } from '../ColResizer'
 
 /**
@@ -59,13 +60,24 @@ export interface AiPanelProps {
   onNewConversation: () => void
   onClose: () => void
   onOpenSettings: () => void
+  /** 该项目会话列表（倒序），供历史面板呈现。 */
+  conversations: ConversationSummary[]
+  /** 当前选中会话 id。 */
+  currentId: string | null
+  onSelectConversation: (id: string) => void
+  onDeleteConversation: (id: string) => void
   /** 拖拽左缘调面板宽度；省略则不渲染分隔条。clientX → 父组件换算列宽。 */
   onResize?: (clientX: number) => void
 }
 
 export function AiPanel(props: AiPanelProps) {
-  const { configured, model, turns, running, onSend, onStop, onNewConversation, onClose, onOpenSettings, onResize } = props
+  const {
+    configured, model, turns, running, onSend, onStop, onNewConversation, onClose, onOpenSettings,
+    conversations, currentId, onSelectConversation, onDeleteConversation, onResize,
+  } = props
   const [input, setInput] = useState('')
+  const [showHistory, setShowHistory] = useState(false)
+  const now = Date.now()
 
   const submit = () => {
     const v = input.trim()
@@ -91,10 +103,38 @@ export function AiPanel(props: AiPanelProps) {
           {configured ? model : '未配置'}
         </span>
         <div className="ai-head-spacer" />
-        <button className="ai-iconbtn" title="新对话" aria-label="新对话" disabled={running} onClick={onNewConversation}>＋</button>
-        <button className="ai-iconbtn" title="对话历史 · 即将支持" aria-label="对话历史" disabled>⟲</button>
+        <button className="ai-iconbtn" title="新对话" aria-label="新对话" disabled={running} onClick={() => { setShowHistory(false); onNewConversation() }}>＋</button>
+        <button
+          className={'ai-iconbtn' + (showHistory ? ' on' : '')}
+          title="对话历史" aria-label="对话历史" aria-pressed={showHistory}
+          onClick={() => setShowHistory((v) => !v)}
+        >☰</button>
         <button className="ai-iconbtn" title="关闭面板" aria-label="关闭 AI 面板" onClick={onClose}>×</button>
       </div>
+
+      {showHistory && (
+        <div className="ai-history" role="listbox" aria-label="对话历史">
+          {conversations.length === 0 ? (
+            <div className="ai-history-empty">暂无历史对话</div>
+          ) : conversations.map((c) => (
+            <div className={'ai-history-item' + (c.id === currentId ? ' on' : '')} key={c.id} role="option" aria-selected={c.id === currentId}>
+              <button
+                className="ai-history-pick" title={c.title}
+                disabled={running}
+                onClick={() => { onSelectConversation(c.id); setShowHistory(false) }}
+              >
+                <span className="ai-history-title">{c.title}</span>
+                <span className="ai-history-time">{relativeTime(c.lastActivityAt, now)}</span>
+              </button>
+              <button
+                className="ai-history-del" title="删除对话" aria-label={`删除对话 ${c.title}`}
+                disabled={running}
+                onClick={() => onDeleteConversation(c.id)}
+              >🗑</button>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="ai-convo">
         {!configured ? (

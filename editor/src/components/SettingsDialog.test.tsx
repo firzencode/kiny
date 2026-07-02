@@ -98,6 +98,17 @@ describe('SettingsDialog', () => {
     await userEvent.click(screen.getByRole('button', { name: '保存' }))
     expect(onSave).toHaveBeenCalledWith({ ...DEFAULT_SETTINGS, autosaveRecovery: false }, 'dark', DEFAULT_AI_CONFIG)
   })
+
+  it('预览随机种子开关：默认关，可切换并回传', async () => {
+    const onSave = vi.fn()
+    render(<SettingsDialog {...base} onSave={onSave} />)
+    const sw = screen.getByRole('switch', { name: '预览随机种子' })
+    expect(sw).not.toBeChecked()
+    await userEvent.click(sw)
+    expect(sw).toBeChecked()
+    await userEvent.click(screen.getByRole('button', { name: '保存' }))
+    expect(onSave).toHaveBeenCalledWith({ ...DEFAULT_SETTINGS, previewRandomSeed: true }, 'dark', DEFAULT_AI_CONFIG)
+  })
 })
 
 describe('SettingsDialog · AI 节', () => {

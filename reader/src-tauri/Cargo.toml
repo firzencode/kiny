@@ -1,6 +1,6 @@
 [package]
-name = "app"
-version = "0.4.0"
+name = "kiny-reader"
+version = "0.5.0"
 description = "Kiny story reader — a Tauri 2 shell that reads .kip story packages"
 authors = ["firzencode <firzencode@gmail.com>"]
 license = "Apache-2.0"
@@ -25,5 +25,12 @@ tauri-plugin-fs = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-opener = "2"
+# Android 上 plugin-fs 读不了文件选择器 / 分享意图给的 content:// URI（Tauri #9083），
+# 用它经 ContentResolver 在原生侧读字节。非 android 平台其 read() 返回 NOT_ANDROID（编译通过、无害）。
+tauri-plugin-android-fs = "28.2.2"
 zip = "2"
 uuid = { version = "1", features = ["v4"] }
+
+# 免安装 portable 版启动期检测 WebView2 运行时（缺失则弹原生提示并干净退出）。
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Registry", "Win32_UI_WindowsAndMessaging"] }

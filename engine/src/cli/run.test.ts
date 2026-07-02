@@ -12,11 +12,11 @@ function fakeTerm(answers: string[] = []): Term & { out: string[] } {
 }
 
 describe('cli run 编排', () => {
-  it('缺 kiny.json → 打印错误，退出码 1', async () => {
+  it('缺 manifest（无 .kiw 无 kiny.json）→ 打印错误，退出码 1', async () => {
     const term = fakeTerm()
     const code = await run([fx('no-manifest')], term)
     expect(code).toBe(1)
-    expect(term.out.some((l) => l.includes('kiny.json'))).toBe(true)
+    expect(term.out.some((l) => l.includes('Kiny 项目'))).toBe(true)
   })
   it('analyze 有 error → 打印诊断，退出码 1', async () => {
     const term = fakeTerm()

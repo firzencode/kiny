@@ -14,7 +14,15 @@ describe('loadProject', () => {
       expect(r.files.some((f) => f.path === 'main.kin')).toBe(true)
     }
   })
-  it('缺 kiny.json → io 错', () => {
+  it('.kiw 项目 → ok，定位 <名>.kiw 作 manifest', () => {
+    const r = loadProject(fx('ok-kiw'))
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.entry).toBe('main.kin')
+      expect(r.meta.name).toBe('测试项目')
+    }
+  })
+  it('缺 manifest（无 .kiw 无 kiny.json）→ io 错', () => {
     const r = loadProject(fx('no-manifest'))
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.errors[0]?.kind).toBe('io')

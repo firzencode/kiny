@@ -111,3 +111,42 @@ body { overflow:hidden; background:var(--bg1); color:var(--text);
   background:rgba(8,11,16,.88); color:#e7eaf0; border:1px solid rgba(255,255,255,.14); border-radius:10px;
   padding:9px 18px; font-size:13px; pointer-events:none; animation:toast-in .16s ease-out; }
 @keyframes toast-in { from { opacity:0; transform:translate(-50%,6px); } to { opacity:1; transform:translate(-50%,0); } }
+
+/* ===== 移动端适配（T100d）=====
+   仅保证手机上可用、不为手机重设计。reader 的 styles.css 在 @kiny/player/styles.css 之后引入，
+   故可覆盖 player 的 .choice/.player-content/.audio-toggle（桌面宽屏 / 细指针下面媒体查询不触发，桌面零改动）。
+   env(safe-area-inset-*) 在无安全区的设备 / 桌面上恒为 0，故基础块无条件应用亦无害。 */
+
+/* 顺滑滚动 + 安全区避让（刘海 / 圆角 / 手势条）。配合 index.html 的 viewport-fit=cover。 */
+.shelf, .reading, .saves-panel { -webkit-overflow-scrolling: touch; }
+.shelfbar { padding: calc(16px + env(safe-area-inset-top)) calc(22px + env(safe-area-inset-right)) 14px calc(22px + env(safe-area-inset-left)); }
+.shelf { padding: 8px calc(22px + env(safe-area-inset-right)) calc(24px + env(safe-area-inset-bottom)) calc(22px + env(safe-area-inset-left)); }
+.reading-bar { height: calc(52px + env(safe-area-inset-top)); padding-top: env(safe-area-inset-top);
+  padding-left: calc(14px + env(safe-area-inset-left)); padding-right: calc(14px + env(safe-area-inset-right)); }
+/* player 静音键钉在 reading-bar 垂直中心（半高 + 安全区顶），与书架/标题/存档同行同心。 */
+.audio-toggle { top: calc(26px + env(safe-area-inset-top)); }
+.toast-error { top: calc(14px + env(safe-area-inset-top)); }
+/* 阅读正文全宽单栏（player .player-content 本就 max-width:680px 居中、手机上近全宽）：补四向安全区 padding。 */
+.player-content { padding: calc(64px + env(safe-area-inset-top)) calc(24px + env(safe-area-inset-right))
+  calc(120px + env(safe-area-inset-bottom)) calc(24px + env(safe-area-inset-left)); }
+
+/* 触摸设备（细指针）：无 hover，删除键须常显；交互控件触摸命中尺寸 ≥ 44px。 */
+@media (pointer: coarse) {
+  .ed-del { opacity: 1; }
+  .btn-import, .ed-go, .ed-restart, .reading-bar .back, .reading-bar .saves-btn,
+  .saves-new, .saves-load, .saves-del-confirm, .choice { min-height: 44px; }
+  .ed-del, .saves-close, .saves-del { min-width: 44px; min-height: 44px; }
+}
+
+/* 窄屏（手机）：单列书架收紧间距、阅读正文缩小留白，避免横向溢出。 */
+@media (max-width: 640px) {
+  .shelfbar { padding: calc(14px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right)) 12px calc(16px + env(safe-area-inset-left)); gap: 10px; }
+  .shelfbar h1 { font-size: 16px; }
+  .shelf { padding: 6px calc(16px + env(safe-area-inset-right)) calc(20px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left)); }
+  .ed-row { gap: 12px; padding: 14px 2px; }
+  .ed-cover { width: 50px; height: 68px; }
+  .ed-title { font-size: 15px; }
+  .empty { padding: 28px; }
+  .player-content { padding: calc(52px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right))
+    calc(96px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left)); }
+}

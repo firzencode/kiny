@@ -20,23 +20,33 @@ import { SidebarResizer } from './components/SidebarResizer'
 import { ColResizer } from './components/ColResizer'
 import { HelpDialog, type HelpScreen } from './components/HelpDialog'
 import { ConfirmCloseDialog, type CloseIntent } from './components/ConfirmCloseDialog'
+import { ImportConflictDialog, type ConflictChoice } from './components/ImportConflictDialog'
+import { basename, destPath, uniqueName } from './files/importAssets'
 import { RecoveryDialog } from './components/RecoveryDialog'
 import { SettingsDialog } from './components/SettingsDialog'
 import { useAutosave } from './hooks/useAutosave'
 import { detectRecoverable, type RecoverableItem } from './state/drafts'
 import { loadSettings, saveSettings, applySettingsVars, clampSettings, DEFAULT_SETTINGS, SETTINGS_BOUNDS, type Settings } from './state/settings'
 import { AiPanel } from './components/ai/AiPanel'
-import { useAiSession } from './ai/useAiSession'
+import { useAiSession, cleanupExpiredChats } from './ai/useAiSession'
 import { loadAiConfig, saveAiConfig, isConfigured, type AiConfig } from './ai/aiConfig'
 import type { PreviewPort, PreviewSnapshot } from './ai/actions'
 import { loadSession, saveSession, resolveSession } from './state/session'
 import { logErrorEntry, ErrorDetailsDialog } from '@kiny/error-report'
 
+// 确定性模式的固定种子（默认行为）。随机模式下由 randomSeed() 每次 ↺ 重掷。
 const SESSION_SEED = 0x5eed
+// 32 位无符号随机种子；与 engine makeRng 的 `n >>> 0` 吻合。
+const randomSeed = () => Math.floor(Math.random() * 0x1_0000_0000) >>> 0
 const idResolve: ResolveAsset = (n: string) => n
 
 /** 取异常的可读信息（用于「<动作>失败：<具体>」通知）。 */
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
+/** 从文件绝对路径派生父目录（跨平台：兼容 / 与 \ 分隔）。 */
+const parentDir = (p: string): string => {
+  const i = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'))
+  return i >= 0 ? p.slice(0, i) : p
+}
 
 type Theme = 'dark' | 'light'
 interface ViewPrefs {
@@ -67,6 +77,13 @@ function loadTheme(): Theme {
 function loadView(): ViewPrefs {
   try { return { ...DEFAULT_VIEW, ...JSON.parse(localStorage.getItem('kiny-editor-view') || '{}') } } catch { return { ...DEFAULT_VIEW } }
 }
+// 「我的布局」快照：用户显式保存的一份 ViewPrefs；未存过返回 null。
+function loadSavedView(): ViewPrefs | null {
+  try {
+    const raw = localStorage.getItem('kiny-editor-view-saved')
+    return raw == null ? null : { ...DEFAULT_VIEW, ...JSON.parse(raw) }
+  } catch { return null }
+}
 
 export function App({ gateway }: { gateway: FileGateway }) {
   const [state, dispatch] = useReducer(editorReducer, initialEditorState)
@@ -87,6 +104,11 @@ export function App({ gateway }: { gateway: FileGateway }) {
   }
   const [theme, setTheme] = useState<Theme>(loadTheme)
   const [view, setView] = useState<ViewPrefs>(loadView)
+  const [savedView, setSavedView] = useState<ViewPrefs | null>(loadSavedView)
+  const hasSavedLayout = savedView !== null
+  // 预览随机种子会话态：编辑期恒稳定（recompute 读 seedRef），仅显式 ↺ 重开预览时按设置重掷。
+  const [previewSeed, setPreviewSeed] = useState(SESSION_SEED)
+  const seedRef = useRef(SESSION_SEED)
   const [settings, setSettings] = useState<Settings>(loadSettings)
   const [aiConfig, setAiConfig] = useState<AiConfig>(loadAiConfig)
   useEffect(() => { saveAiConfig(aiConfig) }, [aiConfig])
@@ -96,6 +118,9 @@ export function App({ gateway }: { gateway: FileGateway }) {
   const [pendingClose, setPendingClose] = useState<CloseIntent | null>(null)
   // 崩溃恢复提示：重开项目检测到残留草稿（草稿 ≠ 磁盘）时弹出。
   const [recovery, setRecovery] = useState<{ projectDir: string; items: RecoverableItem[] } | null>(null)
+  // 导入资源同名冲突：弹三选框；resolver 承接 Promise，选择后回填。
+  const [importConflict, setImportConflict] = useState<{ destRel: string } | null>(null)
+  const conflictResolver = useRef<((d: { choice: ConflictChoice; applyRest: boolean }) => void) | null>(null)
 
   const editorRef = useRef<EditorHandle>(null)
 
@@ -109,6 +134,7 @@ export function App({ gateway }: { gateway: FileGateway }) {
   const entryRef = useRef<string | null>(null)
   const pendingJumpRef = useRef<{ file: string; line: number } | null>(null)
   const validatorRef = useRef(createIncrementalValidator())
+  const loadDirRef = useRef<(dir: string) => Promise<void>>(async () => {})
   useEffect(() => { runIdRef.current = state.runId }, [state.runId])
   useEffect(() => { filesRef.current = state.files }, [state.files])
   useEffect(() => { entryRef.current = state.entry }, [state.entry])
@@ -145,7 +171,7 @@ export function App({ gateway }: { gateway: FileGateway }) {
   const recompute = useCallback(
     (prog: ValidatedProgram | null, seq: number[], resolve: ResolveAsset, prev: PlayState | null, emitSfx = false): PreviewSnapshot => {
       const start = prog && entryRef.current ? resolveStart(prog, entryRef.current) : null
-      const snap = computePreview(prog, start, SESSION_SEED, seq, resolve, prev)
+      const snap = computePreview(prog, start, seedRef.current, seq, resolve, prev)
       setPlay(snap.play); playRef.current = snap.play
       choiceSeqRef.current = snap.choiceSeq
       setStale(snap.stale); staleRef.current = snap.stale
@@ -169,7 +195,17 @@ export function App({ gateway }: { gateway: FileGateway }) {
     preview: previewPort,
     config: aiConfig,
     setNotice,
+    projectDir: state.projectDir,
+    retentionDays: settings.aiChatRetentionDays,
   })
+
+  // 启动期按日期清理全部项目的过期 AI 对话记录（spec §5），跑一次。
+  const chatCleanupRan = useRef(false)
+  useEffect(() => {
+    if (chatCleanupRan.current) return
+    chatCleanupRan.current = true
+    void cleanupExpiredChats(gateway, settings.aiChatRetentionDays, Date.now())
+  }, [gateway, settings.aiChatRetentionDays])
 
   // 自动保存恢复草稿：脏缓冲后台写独立草稿（落 app-data，不碰真文件）。
   const draftBuffers = useMemo(() => Object.values(state.files), [state.files])
@@ -240,8 +276,10 @@ export function App({ gateway }: { gateway: FileGateway }) {
     }
   }
 
-  const onOpenProject = async () => { const d = await gateway.pickProjectDir(); if (d) await loadDir(d) }
+  const onOpenProject = async () => { const d = await gateway.pickProjectFile(); if (d) await loadDir(d) }
   const onNewProject = async () => { const d = await gateway.newProject(); if (d) await loadDir(d) }
+  // 记住最新 loadDir 闭包，供 onOpenProjectFile 事件订阅（一次性订阅、避免 stale）。
+  loadDirRef.current = loadDir
   // 写单个文件缓冲（按 path 取，支持保存非活动 tab）。成功返 true，失败弹 notice 返 false。
   const saveBuffer = async (path: string): Promise<boolean> => {
     const buf = state.files[path]
@@ -362,6 +400,22 @@ export function App({ gateway }: { gateway: FileGateway }) {
       .catch(() => { /* 非 Tauri 环境忽略 */ })
     return () => unlisten?.()
   }, [gateway])
+  // OS 双击 / 关联打开 .kiw：single-instance 转发的路径 → 派生父目录 → 打开项目（复用 loadDir 守卫）。
+  useEffect(() => {
+    let unlisten: (() => void) | undefined
+    gateway
+      .onOpenProjectFile((path) => { void loadDirRef.current(parentDir(path)) })
+      .then((u) => { unlisten = u })
+      .catch(() => { /* 非 Tauri 环境忽略 */ })
+    return () => unlisten?.()
+  }, [gateway])
+  // 冷启动（OS 双击 .kiw 首次拉起）：mount 后主动取走 Rust 暂存的启动路径（emit 会早于订阅而丢，故用拉取）。
+  useEffect(() => {
+    gateway
+      .takeLaunchProject()
+      .then((path) => { if (path) void loadDirRef.current(parentDir(path)) })
+      .catch(() => { /* 非 Tauri 环境忽略 */ })
+  }, [gateway])
 
   const onCreateFile = async (rawName: string) => {
     if (!state.projectDir) return
@@ -378,12 +432,12 @@ export function App({ gateway }: { gateway: FileGateway }) {
     try {
       await gateway.renamePath(state.projectDir, from, to)
       dispatch({ type: 'path_renamed', from, to })
-      if (state.manifest && state.entry && (state.entry === from || state.entry.startsWith(`${from}/`))) {
+      if (state.manifest && state.manifestFile && state.entry && (state.entry === from || state.entry.startsWith(`${from}/`))) {
         const newEntry = state.entry === from ? to : to + state.entry.slice(from.length)
         try {
-          await gateway.writeManifest(state.projectDir, { ...state.manifest, entry: newEntry })
+          await gateway.writeManifest(state.projectDir, { ...state.manifest, entry: newEntry }, state.manifestFile)
         } catch {
-          setNotice('重命名成功，但写回 kiny.json 失败，请手动修复入口路径')
+          setNotice('重命名成功，但写回项目文件失败，请手动修复入口路径')
         }
       }
     } catch (e) { setNotice(`重命名失败：${errMsg(e)}`) }
@@ -399,6 +453,51 @@ export function App({ gateway }: { gateway: FileGateway }) {
   const onMove = (from: string, toDir: string) => {
     const name = from.slice(from.lastIndexOf('/') + 1)
     void onRename(from, toDir ? `${toDir}/${name}` : name)
+  }
+  // 冲突三选：返回 Promise，由对话框按钮回填 resolver。
+  const askImportConflict = (destRel: string) =>
+    new Promise<{ choice: ConflictChoice; applyRest: boolean }>((resolve) => {
+      conflictResolver.current = resolve
+      setImportConflict({ destRel })
+    })
+  const resolveImportConflict = (choice: ConflictChoice, applyRest: boolean) => {
+    setImportConflict(null)
+    const r = conflictResolver.current
+    conflictResolver.current = null
+    r?.({ choice, applyRest })
+  }
+  // 导入资源：选文件 → 逐个拷入 targetDir，遇同名弹三选（可「应用到其余」）→ 新增 asset entry 刷新树。
+  const onImportAssets = async (targetDir: string) => {
+    if (!state.projectDir) return
+    let picks: string[] | null
+    try { picks = await gateway.pickImportFiles() } catch (e) { setNotice(`导入失败：${errMsg(e)}`); return }
+    if (!picks || picks.length === 0) return
+    const existing = new Set(state.entries.map((e) => e.path)) // 现有全部文件路径
+    const taken = new Set(existing)                            // 现有 + 本批已导入（唯一名/冲突判定用）
+    let applyRest: ConflictChoice | null = null
+    let imported = 0
+    try {
+      for (const src of picks) {
+        let destRel = destPath(targetDir, basename(src))
+        if (taken.has(destRel)) {
+          let choice = applyRest
+          if (choice === null) {
+            const d = await askImportConflict(destRel)
+            choice = d.choice
+            if (d.applyRest) applyRest = d.choice
+          }
+          if (choice === 'skip') continue
+          if (choice === 'rename') destRel = uniqueName(destRel, taken)
+          // overwrite：沿用 destRel（覆盖）
+        }
+        await gateway.importAsset(state.projectDir, destRel, src)
+        const isNew = !existing.has(destRel)
+        taken.add(destRel)
+        if (isNew) { dispatch({ type: 'file_created', file: { path: destRel, isKin: false } }); existing.add(destRel) }
+        imported++
+      }
+      if (imported > 0) setNotice(`已导入 ${imported} 个资源`, 'success')
+    } catch (e) { setNotice(`导入失败：${errMsg(e)}`) }
   }
   const onAbout = () => setHelp('about')
   const onSyntaxRef = () => setHelp('syntax')
@@ -416,6 +515,16 @@ export function App({ gateway }: { gateway: FileGateway }) {
   const onZoomIn = () => bumpCodeSize(SETTINGS_BOUNDS.codeSize.step)
   const onZoomOut = () => bumpCodeSize(-SETTINGS_BOUNDS.codeSize.step)
   const onZoomReset = () => setSettings((s) => ({ ...s, codeSize: DEFAULT_SETTINGS.codeSize }))
+
+  // 布局快照：保存当前 view 到「我的布局」槽 / 恢复我的或出厂布局。
+  // 恢复统一走 { ...DEFAULT_VIEW, ...target } 合并，保证将来 ViewPrefs 新增字段时旧快照缺的字段自动取默认。
+  const onSaveLayout = () => {
+    try { localStorage.setItem('kiny-editor-view-saved', JSON.stringify(view)) } catch { /* ignore */ }
+    setSavedView(view)
+    setNotice('已保存当前布局', 'success')
+  }
+  const onRestoreMyLayout = () => { if (savedView) setView({ ...DEFAULT_VIEW, ...savedView }) }
+  const onRestoreDefaultLayout = () => setView({ ...DEFAULT_VIEW })
 
   // 全局键盘快捷键：菜单里的 sc 仅是提示文本，这里做真正的绑定（文件类动作）。
   // 编辑类（Ctrl+X/C/V/A）由 textarea 原生处理，不在此重绑，以免冲突/双重执行。
@@ -450,8 +559,13 @@ export function App({ gateway }: { gateway: FileGateway }) {
 
   const onChoosePreview = (pos: number) =>
     recompute(programRef.current, [...choiceSeqRef.current, pos], resolveRef.current, playRef.current, true)
-  const onRestart = () =>
+  // ↺ 重开预览：随机模式换新种子、确定性模式回落固定种子；翻设置开关本身不换，下一次 ↺ 才生效。
+  const onRestart = () => {
+    const nextSeed = settings.previewRandomSeed ? randomSeed() : SESSION_SEED
+    seedRef.current = nextSeed
+    setPreviewSeed(nextSeed)
     recompute(programRef.current, [], resolveRef.current, playRef.current)
+  }
 
   const dirtyMap = useMemo(() => {
     const m: Record<string, boolean> = {}
@@ -530,6 +644,10 @@ export function App({ gateway }: { gateway: FileGateway }) {
         onZoomIn={onZoomIn}
         onZoomOut={onZoomOut}
         onZoomReset={onZoomReset}
+        hasSavedLayout={hasSavedLayout}
+        onSaveLayout={onSaveLayout}
+        onRestoreMyLayout={onRestoreMyLayout}
+        onRestoreDefaultLayout={onRestoreDefaultLayout}
       />
       {notice && (
         <div
@@ -561,6 +679,7 @@ export function App({ gateway }: { gateway: FileGateway }) {
               onDelete={onDelete}
               onCreateFolder={onCreateFolder}
               onMove={onMove}
+              onImportAssets={onImportAssets}
               collapsed={view.explorerCollapsed}
               onToggleCollapse={() => setView((v) => ({ ...v, explorerCollapsed: !v.explorerCollapsed }))}
               style={explorerStyle}
@@ -615,7 +734,7 @@ export function App({ gateway }: { gateway: FileGateway }) {
           />
           {view.preview && <ColResizer edge="right" onResize={onResizeEditorPreview} ariaLabel="调整编辑区与预览占比" />}
         </div>
-        {view.preview && <PreviewPane play={play} stale={stale} sfx={sfxQueue} onChoose={onChoosePreview} onRestart={onRestart} />}
+        {view.preview && <PreviewPane play={play} stale={stale} sfx={sfxQueue} seed={previewSeed} onChoose={onChoosePreview} onRestart={onRestart} />}
         {view.ai && (
           <AiPanel
             configured={isConfigured(aiConfig)}
@@ -625,6 +744,10 @@ export function App({ gateway }: { gateway: FileGateway }) {
             onSend={ai.send}
             onStop={ai.stop}
             onNewConversation={ai.newConversation}
+            conversations={ai.conversations}
+            currentId={ai.currentId}
+            onSelectConversation={ai.selectConversation}
+            onDeleteConversation={ai.deleteConversation}
             onClose={() => setView((v) => ({ ...v, ai: false }))}
             onOpenSettings={() => { setView((v) => ({ ...v, ai: true })); onOpenSettings() }}
             onResize={onResizeAi}
@@ -651,6 +774,10 @@ export function App({ gateway }: { gateway: FileGateway }) {
         items={recovery?.items ?? null}
         onRecover={onRecover}
         onDiscard={onDiscardRecovery}
+      />
+      <ImportConflictDialog
+        destRel={importConflict?.destRel ?? null}
+        onChoose={resolveImportConflict}
       />
     </div>
   )

@@ -6,6 +6,7 @@ import { EditorSelection } from '@codemirror/state'
 import { App } from './App'
 import { createMemoryGateway } from './files/memoryGateway'
 import { SESSION_KEY } from './state/session'
+import { SETTINGS_KEY } from './state/settings'
 
 // 编辑区已是 CodeMirror 6（contenteditable，非 textarea）。这些 helper 经内部 EditorView
 // 读文档 / 模拟用户编辑（dispatch 事务，走 updateListener→onChange→React，等价真实输入）。
@@ -80,6 +81,37 @@ describe('App 多文件集成', () => {
     expect(editorValue()).toContain('开场。')
     // 预览推进到首个选项
     expect(await screen.findByRole('button', { name: '向左' })).toBeInTheDocument()
+  })
+
+  it('OS 双击 .kiw 打开事件：派生父目录并打开该项目', async () => {
+    const hook: { fire?: (path: string) => void } = {}
+    const gateway = createMemoryGateway({
+      files: {
+        '/proj/kiny.json': JSON.stringify({ name: '雾港', version: '1.0.0', engine: '0.1.0', entry: 'main.kin' }),
+        '/proj/main.kin': MAIN,
+        '/proj/末.kin': END,
+      },
+      openFileHook: hook,
+    })
+    render(<App gateway={gateway} />)
+    await waitFor(() => expect(hook.fire).toBeDefined()) // onOpenProjectFile 订阅已建立
+    hook.fire!('/proj/雾港.kiw') // 派生父目录 = /proj
+    expect((await screen.findAllByText('雾港')).length).toBeGreaterThan(0)
+    expect((await screen.findAllByText('main.kin')).length).toBeGreaterThan(0)
+  })
+
+  it('冷启动（OS 双击 .kiw 首次拉起）：mount 后取走启动路径并打开该项目', async () => {
+    const gateway = createMemoryGateway({
+      files: {
+        '/proj/kiny.json': JSON.stringify({ name: '雾港', version: '1.0.0', engine: '0.1.0', entry: 'main.kin' }),
+        '/proj/main.kin': MAIN,
+        '/proj/末.kin': END,
+      },
+      launchProject: '/proj/雾港.kiw', // Rust 暂存的冷启动路径，派生父目录 = /proj
+    })
+    render(<App gateway={gateway} />)
+    expect((await screen.findAllByText('雾港')).length).toBeGreaterThan(0)
+    expect((await screen.findAllByText('main.kin')).length).toBeGreaterThan(0)
   })
 
   it('会话恢复：预置该项目上次活动 tab 为 末.kin → 打开项目后编辑区即是 末.kin', async () => {
@@ -765,5 +797,201 @@ describe('App 导出独立网页', () => {
     await fileMenu('导出独立网页...')
     const err = await screen.findByRole('alert')
     expect(err).toHaveTextContent('导出失败：磁盘已满')
+  })
+})
+
+describe('App 布局快照（保存 / 恢复布局）', () => {
+  beforeEach(() => { localStorage.clear() })
+
+  async function viewMenu(item: string) {
+    await userEvent.click(screen.getByRole('menuitem', { name: '视图' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: item }))
+  }
+  const readView = () => JSON.parse(localStorage.getItem('kiny-editor-view') || '{}')
+
+  it('保存当前布局：写入 kiny-editor-view-saved 且等于当前 view，并弹成功提示', async () => {
+    render(<App gateway={gw()} />)
+    // 先调乱一处布局（关预览面板），使当前 view 区别于默认
+    await viewMenu('预览面板')
+    expect(readView().preview).toBe(false)
+    await viewMenu('保存当前布局')
+    expect(await screen.findByText('已保存当前布局')).toBeInTheDocument()
+    const saved = JSON.parse(localStorage.getItem('kiny-editor-view-saved')!)
+    expect(saved.preview).toBe(false)
+    expect(saved).toEqual(readView())
+  })
+
+  it('未存过快照时视图菜单不出现「恢复我的布局」，保存后出现', async () => {
+    render(<App gateway={gw()} />)
+    await userEvent.click(screen.getByRole('menuitem', { name: '视图' }))
+    expect(await screen.findByRole('menuitem', { name: '保存当前布局' })).toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: '恢复我的布局' })).not.toBeInTheDocument()
+    await userEvent.click(await screen.findByRole('menuitem', { name: '保存当前布局' }))
+    await userEvent.click(screen.getByRole('menuitem', { name: '视图' }))
+    expect(await screen.findByRole('menuitem', { name: '恢复我的布局' })).toBeInTheDocument()
+  })
+
+  it('恢复我的布局：把 view 还原为已存快照', async () => {
+    render(<App gateway={gw()} />)
+    await viewMenu('预览面板')      // preview: false
+    await viewMenu('保存当前布局')   // 快照 preview=false
+    await viewMenu('预览面板')      // 再调乱回 preview: true
+    expect(readView().preview).toBe(true)
+    await viewMenu('恢复我的布局')
+    await waitFor(() => expect(readView().preview).toBe(false))
+  })
+
+  it('恢复默认布局：把 view 还原为出厂默认', async () => {
+    render(<App gateway={gw()} />)
+    await viewMenu('预览面板')      // preview: false（默认是 true）
+    await viewMenu('语义着色')      // highlight: false（默认是 true）
+    expect(readView().preview).toBe(false)
+    await viewMenu('恢复默认布局')
+    await waitFor(() => {
+      const v = readView()
+      expect(v.preview).toBe(true)
+      expect(v.highlight).toBe(true)
+    })
+  })
+
+  it('前向兼容：saved 快照缺字段时，恢复后该字段取默认', async () => {
+    // 预置一份缺 sidebarWidth 的旧快照
+    localStorage.setItem('kiny-editor-view-saved', JSON.stringify({ preview: false }))
+    render(<App gateway={gw()} />)
+    await viewMenu('恢复我的布局')
+    await waitFor(() => {
+      const v = readView()
+      expect(v.preview).toBe(false)     // 快照里有 → 生效
+      expect(v.sidebarWidth).toBe(232)  // 快照缺 → 取 DEFAULT_VIEW 默认
+    })
+  })
+})
+
+describe('App 预览随机种子（T029）', () => {
+  beforeEach(() => { localStorage.clear() })
+  const seedText = () => screen.getByText(/^种子 #/).textContent
+
+  it('确定性模式（默认）：↺ 重开预览种子恒为 #5eed', async () => {
+    render(<App gateway={gw()} />)
+    await fileMenu('打开项目...')
+    expect(await screen.findByText('种子 #5eed')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '↺ 重开预览' }))
+    // ↺ 后仍确定性回落固定种子
+    expect(screen.getByText('种子 #5eed')).toBeInTheDocument()
+  })
+
+  it('随机模式：↺ 重开预览换新随机种子（stub Math.random）', async () => {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ previewRandomSeed: true }))
+    const rnd = vi.spyOn(Math, 'random').mockReturnValue(0.5) // → floor(0.5*2^32)>>>0 = 0x80000000
+    try {
+      render(<App gateway={gw()} />)
+      await fileMenu('打开项目...')
+      // 开档时未 ↺，仍是初始固定种子
+      expect(await screen.findByText('种子 #5eed')).toBeInTheDocument()
+      await userEvent.click(screen.getByRole('button', { name: '↺ 重开预览' }))
+      expect(await screen.findByText('种子 #80000000')).toBeInTheDocument()
+    } finally { rnd.mockRestore() }
+  })
+
+  it('随机模式下编辑期种子稳定：敲键重算不换种子', async () => {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ previewRandomSeed: true }))
+    const rnd = vi.spyOn(Math, 'random').mockReturnValue(0.5)
+    try {
+      render(<App gateway={gw()} />)
+      await fileMenu('打开项目...')
+      await screen.findByText('种子 #5eed')
+      await typeInEditor('x') // 编辑触发防抖校验 + recompute
+      await waitFor(() => expect(editorValue()).toContain('x'))
+      // 编辑期 recompute 读 seedRef、绝不 reseed → 种子仍固定
+      expect(seedText()).toBe('种子 #5eed')
+    } finally { rnd.mockRestore() }
+  })
+})
+
+describe('App 导入资源（T027）', () => {
+  beforeEach(() => { localStorage.clear() })
+
+  function gwImport(over: { importPicks?: string[] | null; extraFiles?: Record<string, string> } = {}) {
+    const sink: { dir: string; destRel: string; sourceAbsPath: string }[] = []
+    const gateway = createMemoryGateway({
+      pickedDir: '/proj', newDir: '/fresh',
+      files: {
+        '/proj/kiny.json': JSON.stringify({ name: '雾港', version: '1.0.0', engine: '0.1.0', entry: 'main.kin' }),
+        '/proj/main.kin': MAIN, '/proj/末.kin': END, ...over.extraFiles,
+      },
+      importPicks: over.importPicks ?? null,
+      importSink: sink,
+    })
+    return { gateway, sink }
+  }
+  const explorer = () => screen.getByRole('navigation', { name: '资源管理器' })
+  const importVia = (rowText: string) => {
+    fireEvent.contextMenu(within(explorer()).getByText(rowText))
+    fireEvent.click(screen.getByText('导入资源…'))
+  }
+
+  it('右键根级文件 → 导入 → importAsset(项目根, 文件名, 源路径) + 新 entry 出现在树', async () => {
+    const { gateway, sink } = gwImport({ importPicks: ['/ext/pic.png'] })
+    render(<App gateway={gateway} />)
+    await fileMenu('打开项目...')
+    importVia('main.kin') // main.kin 在根 → 目标 ''
+    await waitFor(() => expect(sink).toEqual([{ dir: '/proj', destRel: 'pic.png', sourceAbsPath: '/ext/pic.png' }]))
+    expect(await within(explorer()).findByText('pic.png')).toBeInTheDocument()
+  })
+
+  it('取消选择（pickImportFiles 返回 null）→ 不导入', async () => {
+    const { gateway, sink } = gwImport({ importPicks: null })
+    render(<App gateway={gateway} />)
+    await fileMenu('打开项目...')
+    importVia('main.kin')
+    await Promise.resolve()
+    expect(sink).toEqual([])
+  })
+
+  it('同名冲突 → 覆盖 → importAsset 同路径', async () => {
+    const { gateway, sink } = gwImport({ importPicks: ['/ext/pic.png'], extraFiles: { '/proj/pic.png': 'X' } })
+    render(<App gateway={gateway} />)
+    await fileMenu('打开项目...')
+    importVia('main.kin')
+    await userEvent.click(await screen.findByRole('button', { name: '覆盖' }))
+    await waitFor(() => expect(sink).toEqual([{ dir: '/proj', destRel: 'pic.png', sourceAbsPath: '/ext/pic.png' }]))
+  })
+
+  it('同名冲突 → 改名 → importAsset 唯一路径 pic-1.png', async () => {
+    const { gateway, sink } = gwImport({ importPicks: ['/ext/pic.png'], extraFiles: { '/proj/pic.png': 'X' } })
+    render(<App gateway={gateway} />)
+    await fileMenu('打开项目...')
+    importVia('main.kin')
+    await userEvent.click(await screen.findByRole('button', { name: '改名' }))
+    await waitFor(() => expect(sink).toEqual([{ dir: '/proj', destRel: 'pic-1.png', sourceAbsPath: '/ext/pic.png' }]))
+  })
+
+  it('同名冲突 → 跳过 → 不调 importAsset', async () => {
+    const { gateway, sink } = gwImport({ importPicks: ['/ext/pic.png'], extraFiles: { '/proj/pic.png': 'X' } })
+    render(<App gateway={gateway} />)
+    await fileMenu('打开项目...')
+    importVia('main.kin')
+    await userEvent.click(await screen.findByRole('button', { name: '跳过' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '资源同名冲突' })).toBeNull())
+    expect(sink).toEqual([])
+  })
+
+  it('多文件多冲突 → 勾「应用到其余」+ 改名 → 只弹一次、其余同样改名', async () => {
+    const { gateway, sink } = gwImport({
+      importPicks: ['/ext/a.png', '/ext/b.png'],
+      extraFiles: { '/proj/a.png': 'X', '/proj/b.png': 'Y' },
+    })
+    render(<App gateway={gateway} />)
+    await fileMenu('打开项目...')
+    importVia('main.kin')
+    // 第一个冲突弹框：勾选应用到其余，选改名
+    await userEvent.click(await screen.findByRole('checkbox'))
+    await userEvent.click(screen.getByRole('button', { name: '改名' }))
+    // 第二个冲突不再弹框，自动改名
+    await waitFor(() => expect(sink).toEqual([
+      { dir: '/proj', destRel: 'a-1.png', sourceAbsPath: '/ext/a.png' },
+      { dir: '/proj', destRel: 'b-1.png', sourceAbsPath: '/ext/b.png' },
+    ]))
+    expect(screen.queryByRole('dialog', { name: '资源同名冲突' })).toBeNull()
   })
 })

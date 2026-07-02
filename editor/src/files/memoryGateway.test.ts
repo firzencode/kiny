@@ -56,6 +56,72 @@ describe('memoryGateway readProject（路径模型）', () => {
   })
 })
 
+describe('memoryGateway 项目文件（.kiw）与打开', () => {
+  it('readProject 定位 <名>.kiw 并回 manifestFile；.kiw 不进资源树', async () => {
+    const gw = createMemoryGateway({
+      files: {
+        '/p/雾港之夜.kiw': JSON.stringify({ name: '雾港之夜', version: '1', engine: '0.1.0', entry: 'main.kin' }),
+        '/p/main.kin': '=== a ===\n',
+      },
+    })
+    const proj = await gw.readProject('/p')
+    expect(proj.manifestFile).toBe('雾港之夜.kiw')
+    expect(proj.manifest.name).toBe('雾港之夜')
+    expect(proj.files.map((f) => f.path)).toEqual(['main.kin']) // 无 .kiw
+  })
+
+  it('缺 manifest（无 .kiw 无 kiny.json）→ 抛错', async () => {
+    const gw = createMemoryGateway({ files: { '/p/main.kin': '=== a ===\n' } })
+    await expect(gw.readProject('/p')).rejects.toThrow('.kiw')
+  })
+
+  it('newProject 产出 <名>.kiw（不写 kiny.json）', async () => {
+    const gw = createMemoryGateway({ files: {}, newDir: '/np' })
+    const dir = await gw.newProject()
+    expect(dir).toBe('/np')
+    const proj = await gw.readProject('/np')
+    expect(proj.manifestFile).toBe('未命名项目.kiw')
+    expect(proj.manifest.entry).toBe('main.kin')
+  })
+
+  it('自动迁移：打开旧 kiny.json 项目 → 重命名为 <项目名>.kiw', async () => {
+    const gw = createMemoryGateway({
+      files: {
+        '/p/kiny.json': JSON.stringify({ name: '故事', version: '1', engine: '0.1.0', entry: 'main.kin' }),
+        '/p/main.kin': '=== a ===\n',
+      },
+    })
+    const proj = await gw.readProject('/p')
+    expect(proj.manifestFile).toBe('故事.kiw') // 已迁移
+    // 再次打开：磁盘上已是 .kiw，稳定定位同一文件、不再迁移。
+    expect((await gw.readProject('/p')).manifestFile).toBe('故事.kiw')
+  })
+
+  it('pickProjectFile 返回注入的父目录', async () => {
+    const gw = createMemoryGateway({ files: {}, projectFilePick: '/picked' })
+    expect(await gw.pickProjectFile()).toBe('/picked')
+    expect(await createMemoryGateway({ files: {} }).pickProjectFile()).toBeNull()
+  })
+
+  it('onOpenProjectFile 可注入触发；退订后不再回调', async () => {
+    const hook: { fire?: (path: string) => void } = {}
+    const gw = createMemoryGateway({ files: {}, openFileHook: hook })
+    const got: string[] = []
+    const un = await gw.onOpenProjectFile((path) => got.push(path))
+    hook.fire!('/x/故事.kiw')
+    expect(got).toEqual(['/x/故事.kiw'])
+    un()
+    expect(hook.fire).toBeUndefined()
+  })
+
+  it('takeLaunchProject 返回冷启动路径，单次消费（取走后为 null）', async () => {
+    const gw = createMemoryGateway({ files: {}, launchProject: '/x/故事.kiw' })
+    expect(await gw.takeLaunchProject()).toBe('/x/故事.kiw')
+    expect(await gw.takeLaunchProject()).toBeNull() // 已消费
+    expect(await createMemoryGateway({ files: {} }).takeLaunchProject()).toBeNull()
+  })
+})
+
 describe('memoryGateway 文件管理原语', () => {
   const mk = (extra: Record<string, string> = {}, confirmResult = true) => createMemoryGateway({
     files: { '/p/kiny.json': JSON.stringify({ name: 'P', version: '1', engine: '0.1.0', entry: 'main.kin' }), '/p/main.kin': 'X', ...extra },
@@ -95,9 +161,9 @@ describe('memoryGateway 文件管理原语', () => {
     expect((await gw.readProject('/p')).files.map((f) => f.path)).toEqual(['main.kin'])
   })
 
-  it('writeManifest 改 entry', async () => {
+  it('writeManifest 改 entry（写回所定位的 manifest 文件）', async () => {
     const gw = mk({ '/p/start.kin': 'S' })
-    await gw.writeManifest('/p', { name: 'P', version: '1', engine: '0.1.0', entry: 'start.kin' })
+    await gw.writeManifest('/p', { name: 'P', version: '1', engine: '0.1.0', entry: 'start.kin' }, 'kiny.json')
     expect((await gw.readProject('/p')).manifest.entry).toBe('start.kin')
   })
 
@@ -180,7 +246,32 @@ describe('memoryGateway 导出相关', () => {
     expect(sink).toEqual([{ dest: '/out/x.kip', files: ['assets/c.bin', 'main.kin'] }])
   })
 
-  it('exportKip 在缺 kiny.json 时抛错', async () => {
-    await expect(createMemoryGateway({ files: {} }).exportKip('/proj', '/out/x.kip')).rejects.toThrow('kiny.json')
+  it('exportKip 在缺 manifest 时抛错', async () => {
+    await expect(createMemoryGateway({ files: {} }).exportKip('/proj', '/out/x.kip')).rejects.toThrow('manifest')
+  })
+})
+
+describe('memoryGateway AI 对话存储', () => {
+  const store = { version: 1 as const, projectDir: '/p', conversations: [] }
+  it('read/write/delete/list 往返', async () => {
+    const gw = createMemoryGateway({ files: {} })
+    expect(await gw.readChatStore('k1')).toBeNull()
+    expect(await gw.listChatStoreKeys()).toEqual([])
+    await gw.writeChatStore('k1', store)
+    expect(await gw.readChatStore('k1')).toEqual(store)
+    expect(await gw.listChatStoreKeys()).toEqual(['k1'])
+    await gw.deleteChatStore('k1')
+    expect(await gw.readChatStore('k1')).toBeNull()
+    expect(await gw.listChatStoreKeys()).toEqual([])
+  })
+  it('read 返回深拷贝（外部改动不回写内部）', async () => {
+    const gw = createMemoryGateway({ files: {}, chatStores: { k1: store } })
+    const got = await gw.readChatStore('k1')
+    got!.conversations.push({ id: 'x', title: 't', createdAt: 0, lastActivityAt: 0, turns: [], history: [] })
+    expect((await gw.readChatStore('k1'))!.conversations).toHaveLength(0)
+  })
+  it('init.chatStores 预置可读', async () => {
+    const gw = createMemoryGateway({ files: {}, chatStores: { a: store, b: { ...store, projectDir: '/q' } } })
+    expect((await gw.listChatStoreKeys()).sort()).toEqual(['a', 'b'])
   })
 })

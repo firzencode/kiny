@@ -6,6 +6,7 @@ export interface FileBuffer { path: string; source: string; savedSource: string;
 export interface EditorState {
   projectDir: string | null
   manifest: Manifest | null
+  manifestFile: string | null
   entry: string | null
   files: Record<string, FileBuffer>
   fileOrder: string[]
@@ -19,7 +20,7 @@ export interface EditorState {
 }
 
 export const initialEditorState: EditorState = {
-  projectDir: null, manifest: null, entry: null,
+  projectDir: null, manifest: null, manifestFile: null, entry: null,
   files: {}, fileOrder: [], entries: [], emptyDirs: [],
   openTabs: [], activeFile: null, diagnostics: [], runId: 0,
 }
@@ -56,7 +57,7 @@ export function editorReducer(s: EditorState, a: EditorAction): EditorState {
       const openTabs = a.restore ? a.restore.openTabs : hasEntry ? [entry] : []
       const activeFile = a.restore ? a.restore.activeFile : hasEntry ? entry : null
       return {
-        projectDir: a.project.dir, manifest: a.project.manifest, entry,
+        projectDir: a.project.dir, manifest: a.project.manifest, manifestFile: a.project.manifestFile, entry,
         files, fileOrder: sortNames(Object.keys(files)),
         entries: [...a.project.files].sort(byPath),
         emptyDirs: a.project.emptyDirs,

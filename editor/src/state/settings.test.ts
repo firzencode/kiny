@@ -61,4 +61,23 @@ describe('settings', () => {
   it('sanitizeFontName 剥离危险字符', () => {
     expect(sanitizeFontName('Fira; }<x>')).toBe('Fira x')
   })
+
+  describe('aiChatRetentionDays', () => {
+    it('默认 30 天', () => {
+      expect(DEFAULT_SETTINGS.aiChatRetentionDays).toBe(30)
+    })
+    it('null（关闭清理）原样保留', () => {
+      expect(clampSettings({ ...DEFAULT_SETTINGS, aiChatRetentionDays: null }).aiChatRetentionDays).toBeNull()
+    })
+    it('越界夹紧、非法回默认、小数取整', () => {
+      expect(clampSettings({ ...DEFAULT_SETTINGS, aiChatRetentionDays: 0 }).aiChatRetentionDays).toBe(30)   // <1 非法回默认
+      expect(clampSettings({ ...DEFAULT_SETTINGS, aiChatRetentionDays: 9999 }).aiChatRetentionDays).toBe(365)
+      expect(clampSettings({ ...DEFAULT_SETTINGS, aiChatRetentionDays: 7.8 }).aiChatRetentionDays).toBe(7)
+      expect(clampSettings({ ...DEFAULT_SETTINGS, aiChatRetentionDays: NaN as unknown as number }).aiChatRetentionDays).toBe(30)
+    })
+    it('loadSettings 合并存储的 null', () => {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({ aiChatRetentionDays: null }))
+      expect(loadSettings().aiChatRetentionDays).toBeNull()
+    })
+  })
 })
