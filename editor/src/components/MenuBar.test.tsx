@@ -27,6 +27,7 @@ function setup(over: Partial<ComponentProps<typeof MenuBar>> = {}) {
     onAbout: vi.fn(),
     onReportIssue: vi.fn(),
     onOpenSettings: vi.fn(),
+    onOpenProjectSettings: vi.fn(),
     onZoomIn: vi.fn(),
     onZoomOut: vi.fn(),
     onZoomReset: vi.fn(),
@@ -36,6 +37,9 @@ function setup(over: Partial<ComponentProps<typeof MenuBar>> = {}) {
     onSaveLayout: vi.fn(),
     onRestoreMyLayout: vi.fn(),
     onRestoreDefaultLayout: vi.fn(),
+    recentProjects: [] as { dir: string; name: string }[],
+    onOpenRecent: vi.fn(),
+    onCloseProject: vi.fn(),
     ...over,
   }
   render(<MenuBar {...props} />)
@@ -100,6 +104,33 @@ describe('MenuBar', () => {
     expect(p.onReportIssue).toHaveBeenCalled()
   })
 
+  it('关闭项目：有项目时可点并回调', async () => {
+    const p = setup({ projectName: '雾港之夜' })
+    await openMenu('文件')
+    await userEvent.click(await screen.findByRole('menuitem', { name: '关闭项目' }))
+    expect(p.onCloseProject).toHaveBeenCalled()
+  })
+
+  it('关闭项目：无项目时禁用', async () => {
+    setup({ projectName: null })
+    await openMenu('文件')
+    expect(await screen.findByRole('menuitem', { name: '关闭项目' })).toHaveAttribute('aria-disabled', 'true')
+  })
+
+  it('最近打开：无最近项目时禁用', async () => {
+    setup({ recentProjects: [] })
+    await openMenu('文件')
+    expect(await screen.findByRole('menuitem', { name: '最近打开' })).toHaveAttribute('aria-disabled', 'true')
+  })
+
+  it('最近打开：悬停展开子菜单，点条目回调对应目录', async () => {
+    const p = setup({ recentProjects: [{ dir: '/a', name: '甲项目' }, { dir: '/b', name: '乙项目' }] })
+    await openMenu('文件')
+    await userEvent.hover(await screen.findByRole('menuitem', { name: '最近打开' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: '甲项目' }))
+    expect(p.onOpenRecent).toHaveBeenCalledWith('/a')
+  })
+
   it('校验通过显示状态胶囊', () => {
     setup({ errorCount: 0, warnCount: 0, hasProgram: true })
     expect(screen.getByText('校验通过')).toBeInTheDocument()
@@ -133,6 +164,19 @@ describe('MenuBar', () => {
     await openMenu('文件')
     await userEvent.click(await screen.findByRole('menuitem', { name: '导出故事包（.kip）...' }))
     expect(p.onExportKip).toHaveBeenCalled()
+  })
+
+  it('项目设置：有项目时可点并回调', async () => {
+    const p = setup({ projectName: '雾港之夜' })
+    await openMenu('文件')
+    await userEvent.click(await screen.findByRole('menuitem', { name: '项目设置...' }))
+    expect(p.onOpenProjectSettings).toHaveBeenCalled()
+  })
+
+  it('项目设置：无项目时禁用', async () => {
+    setup({ projectName: null })
+    await openMenu('文件')
+    expect(await screen.findByRole('menuitem', { name: '项目设置...' })).toHaveAttribute('aria-disabled', 'true')
   })
 
   it('导出独立网页：有项目且无错误时可点并回调', async () => {

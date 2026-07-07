@@ -3,6 +3,7 @@ import { useEffect } from 'react'
 export type CloseIntent =
   | { kind: 'tab'; path: string } // 关某个 tab（可能非活动）
   | { kind: 'exit' }              // 退出整个 editor
+  | { kind: 'closeProject' }      // 关闭当前项目、回到启动页
 
 export interface ConfirmCloseDialogProps {
   intent: CloseIntent | null // null = 不渲染
@@ -24,12 +25,15 @@ export function ConfirmCloseDialog({ intent, dirtyCount, onSave, onDiscard, onCa
   if (!intent) return null
 
   const isTab = intent.kind === 'tab'
-  const title = isTab ? '关闭未保存的文件' : '退出 Kiny Editor'
+  const isCloseProject = intent.kind === 'closeProject'
+  const title = isTab ? '关闭未保存的文件' : isCloseProject ? '关闭项目' : '退出 Kiny Editor'
   const body = isTab
     ? `「${intent.path}」有未保存的改动。是否保存后再关闭？`
-    : `有 ${dirtyCount} 个文件未保存，退出前是否保存？`
+    : isCloseProject
+      ? `有 ${dirtyCount} 个文件未保存，关闭项目前是否保存？`
+      : `有 ${dirtyCount} 个文件未保存，退出前是否保存？`
   const saveLabel = isTab ? '保存' : '全部保存'
-  const discardLabel = isTab ? '不保存' : '不保存并退出'
+  const discardLabel = isTab ? '不保存' : isCloseProject ? '不保存并关闭' : '不保存并退出'
 
   return (
     <div className="confirm-scrim" onClick={onCancel}>

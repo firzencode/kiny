@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest'
-import { defaultKipName, defaultWebpageDirName, buildProjectData, starterManifest, type Manifest } from './gateway'
+import {
+  defaultKipName,
+  defaultWebpageDirName,
+  buildProjectData,
+  starterManifest,
+  sanitizeProjectBase,
+  projectFolderName,
+  type Manifest,
+} from './gateway'
 
 describe('defaultKipName', () => {
   it('正常故事名加 .kip 后缀', () => {
@@ -50,6 +58,22 @@ describe('buildProjectData', () => {
     // \uXXXX 是合法 JSON 转义，往返还原原文
     const data = JSON.parse(json) as { files: Record<string, string> }
     expect(data.files['main.kin']).toBe('教程：写 </script> 与 a<b & c>d')
+  })
+})
+
+describe('sanitizeProjectBase', () => {
+  it('去非法字符与首尾空白，可为空', () => {
+    expect(sanitizeProjectBase(' 雾港/夜 ')).toBe('雾港夜')
+    expect(sanitizeProjectBase('  /:*?  ')).toBe('')
+  })
+})
+
+describe('projectFolderName', () => {
+  it('sanitize 结果非空时原样返回', () => {
+    expect(projectFolderName(' 雾港/夜 ')).toBe('雾港夜')
+  })
+  it('sanitize 后为空 → 回退 project', () => {
+    expect(projectFolderName('  /:*?  ')).toBe('project')
   })
 })
 

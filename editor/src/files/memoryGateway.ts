@@ -2,14 +2,13 @@ import { findManifest } from '@kiny/engine'
 import type { ResolveAsset } from '@kiny/player'
 import {
   type FileGateway, type LoadedProject, type Manifest, type ProjectFileEntry,
-  STARTER_MAIN_KIN, STARTER_NEW_FILE, normalizeKinName, starterManifest, projectFileName, assertSafeRelPath,
+  STARTER_MAIN_KIN, STARTER_NEW_FILE, normalizeKinName, starterManifest, projectFileName, projectFolderName, assertSafeRelPath,
 } from './gateway'
 import { type DraftStore, emptyDraftStore } from '../state/drafts'
 import type { ChatStore } from '../state/chatStore'
 
 export interface MemoryGatewayInit {
   pickedDir?: string | null
-  newDir?: string | null
   files: Record<string, string>          // 绝对键，如 '/p/chapters/a.kin'
   emptyDirs?: Record<string, string[]>   // dir → 相对空目录列表
   confirmResult?: boolean
@@ -27,8 +26,12 @@ export interface MemoryGatewayInit {
   projectFilePick?: string | null
   /** onOpenProjectFile 注册的 handler 会被赋到此对象的 fire；测试可调 fire(path) 模拟 OS 双击 .kiw 打开事件。 */
   openFileHook?: { fire?: (path: string) => void }
+  /** onWindowResize 注册的 handler 会被赋到此对象的 fire；测试可调 fire(w,h) 模拟用户拖拽调整窗口。 */
+  resizeHook?: { fire?: (width: number, height: number) => void }
   /** takeLaunchProject 返回的冷启动待打开路径（取走后置空，模拟单次消费）；缺省 null。 */
   launchProject?: string | null
+  /** pickDirectory 返回的注入父目录；缺省回退 pickedDir，再缺省 null。 */
+  newParent?: string | null
 }
 
 /** 内存 FileGateway：纯 Map 支撑，前端逻辑可在 jsdom 全单测、不碰 Tauri。 */
@@ -87,10 +90,14 @@ export function createMemoryGateway(init: MemoryGatewayInit): FileGateway {
   return {
     // 未显式注入 projectFilePick 时回退 pickedDir（指向项目根目录，便于既有测试沿用）。
     pickProjectFile: async () => init.projectFilePick ?? init.pickedDir ?? null,
-    newProject: async () => {
-      const dir = init.newDir ?? null
-      if (dir === null) return null
-      files.set(`${dir}/${projectFileName('未命名项目')}`, JSON.stringify(starterManifest('未命名项目'), null, 2))
+    pickDirectory: async () => init.newParent ?? init.pickedDir ?? null,
+    newProject: async (parentDir, name) => {
+      const folder = projectFolderName(name)
+      const dir = `${parentDir}/${folder}`
+      if ([...files.keys()].some((k) => k.startsWith(`${dir}/`))) {
+        throw new Error(`目标位置已存在「${folder}」，无法创建`)
+      }
+      files.set(`${dir}/${projectFileName(name)}`, JSON.stringify(starterManifest(name), null, 2))
       files.set(`${dir}/main.kin`, STARTER_MAIN_KIN)
       return dir
     },
@@ -153,6 +160,11 @@ export function createMemoryGateway(init: MemoryGatewayInit): FileGateway {
     },
     confirm: async () => init.confirmResult ?? true,
     closeWindow: async () => { /* 内存桩：无窗口可关 */ },
+    setWindowSize: async () => { /* 内存桩：无窗口可调 */ },
+    onWindowResize: async (handler) => {
+      if (init.resizeHook) init.resizeHook.fire = handler
+      return () => { if (init.resizeHook) init.resizeHook.fire = undefined }
+    },
     onWindowCloseRequest: async () => () => { /* 内存桩：永不回调 */ },
     onOpenProjectFile: async (handler) => {
       if (init.openFileHook) init.openFileHook.fire = handler

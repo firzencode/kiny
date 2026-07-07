@@ -39,6 +39,8 @@ export type EditorAction =
   | { type: 'path_renamed'; from: string; to: string }
   | { type: 'path_deleted'; path: string }
   | { type: 'folder_created'; relDir: string }
+  | { type: 'manifest_updated'; manifest: Manifest; manifestFile: string }
+  | { type: 'project_closed' }
 
 const sortNames = (ns: string[]) => [...ns].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
 const byPath = (a: ProjectFileEntry, b: ProjectFileEntry) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)
@@ -159,6 +161,18 @@ export function editorReducer(s: EditorState, a: EditorAction): EditorState {
     }
     case 'folder_created':
       return s.emptyDirs.includes(a.relDir) ? s : { ...s, emptyDirs: sortNames([...s.emptyDirs, a.relDir]) }
+    case 'manifest_updated':
+      // 项目设置保存：整份替换 manifest（name/entry/version）+ 定位文件名（改名后为新 `.kiw`）；
+      // entry 同步到顶层 s.entry（预览/入口校验读它）。不动文件缓冲 / 树。
+      // entry 变更须 bump runId：预览重算由 runId 驱动（同 path_renamed），否则改启动入口后预览不刷新。
+      return {
+        ...s, manifest: a.manifest, manifestFile: a.manifestFile, entry: a.manifest.entry,
+        runId: a.manifest.entry !== s.entry ? s.runId + 1 : s.runId,
+      }
+    case 'project_closed':
+      // 关闭项目：整体重置回初始态（顶层据 projectDir=null 切回启动页）。
+      // runId 沿用递增，避免上个项目在途的过期校验回调落到已重置的空态。
+      return { ...initialEditorState, runId: s.runId + 1 }
     default:
       return s
   }

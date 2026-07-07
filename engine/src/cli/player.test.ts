@@ -28,6 +28,11 @@ describe('cli play 循环', () => {
     await play(storyFromEntry('@bg_show("a.jpg")\n你好。\n-> END'), term)
     expect(term.out).toEqual(['» bg_show(a.jpg)', '你好。', '—— 故事结束 ——'])
   })
+  it('@clear 打印清屏分隔标记（不误当未知命令、不崩）', async () => {
+    const term = fakeTerm()
+    await play(storyFromEntry('旧文。\n@clear()\n新文。\n-> END'), term)
+    expect(term.out).toEqual(['旧文。', '———— 清屏 ————', '新文。', '—— 故事结束 ——'])
+  })
   it('选项编号呈现，输入数字推进', async () => {
     const term = fakeTerm(['1'])
     const r = await play(storyFromEntry(CHOICE_SRC), term)

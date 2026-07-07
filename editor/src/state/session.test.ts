@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import {
   SESSION_KEY, MAX_PROJECTS, loadSession, saveSession, resolveSession,
+  listRecentProjects, removeSession,
 } from './session'
 
 beforeEach(() => {
@@ -16,6 +17,12 @@ describe('saveSession / loadSession 往返', () => {
     saveSession('/p', ['a.kin', 'b.kin'], 'b.kin')
     const s = loadSession('/p')
     expect(s).toEqual({ openTabs: ['a.kin', 'b.kin'], activeFile: 'b.kin', ts: 1000 })
+  })
+
+  it('传入 name 时持久化项目名', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1000)
+    saveSession('/p', ['a.kin'], 'a.kin', '雾港之夜')
+    expect(loadSession('/p')).toEqual({ openTabs: ['a.kin'], activeFile: 'a.kin', ts: 1000, name: '雾港之夜' })
   })
 
   it('openTabs 为空也照写（用户主动关光 tab）', () => {
@@ -78,6 +85,66 @@ describe('LRU 上限', () => {
     saveSession('/new', ['n.kin'], 'n.kin')
     expect(loadSession('/p0')!.openTabs).toEqual(['refreshed.kin'])
     expect(loadSession('/p1')).toBeNull()
+  })
+})
+
+describe('listRecentProjects', () => {
+  it('空存储 → 空数组', () => {
+    expect(listRecentProjects()).toEqual([])
+  })
+
+  it('按 ts 降序返回（最近打开在前），带 name', () => {
+    let t = 0
+    vi.spyOn(Date, 'now').mockImplementation(() => ++t)
+    saveSession('/a', ['a.kin'], 'a.kin', '甲')
+    saveSession('/b', ['b.kin'], 'b.kin', '乙')
+    saveSession('/c', ['c.kin'], 'c.kin', '丙')
+    expect(listRecentProjects()).toEqual([
+      { dir: '/c', name: '丙', ts: 3 },
+      { dir: '/b', name: '乙', ts: 2 },
+      { dir: '/a', name: '甲', ts: 1 },
+    ])
+  })
+
+  it('缺 name 的旧数据 → 用目录 basename 降级（兼容 / 与 \\ 分隔）', () => {
+    localStorage.setItem(SESSION_KEY, JSON.stringify({
+      version: 1,
+      projects: {
+        'D:\\stories\\fog-harbor': { openTabs: [], activeFile: null, ts: 2 },
+        '/home/u/star': { openTabs: [], activeFile: null, ts: 1 },
+      },
+    }))
+    expect(listRecentProjects()).toEqual([
+      { dir: 'D:\\stories\\fog-harbor', name: 'fog-harbor', ts: 2 },
+      { dir: '/home/u/star', name: 'star', ts: 1 },
+    ])
+  })
+
+  it('损坏存储 → 空数组', () => {
+    localStorage.setItem(SESSION_KEY, '{ not json')
+    expect(listRecentProjects()).toEqual([])
+  })
+})
+
+describe('removeSession', () => {
+  it('删除指定项目并落盘，其余保留', () => {
+    saveSession('/a', ['a.kin'], 'a.kin', '甲')
+    saveSession('/b', ['b.kin'], 'b.kin', '乙')
+    removeSession('/a')
+    expect(loadSession('/a')).toBeNull()
+    expect(loadSession('/b')!.openTabs).toEqual(['b.kin'])
+  })
+
+  it('删不存在的项目 → 无副作用', () => {
+    saveSession('/b', ['b.kin'], 'b.kin', '乙')
+    removeSession('/never')
+    expect(loadSession('/b')!.openTabs).toEqual(['b.kin'])
+  })
+
+  it('存储不可用时静默不抛', () => {
+    saveSession('/a', ['a.kin'], 'a.kin', '甲')
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota') })
+    expect(() => removeSession('/a')).not.toThrow()
   })
 })
 

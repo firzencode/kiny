@@ -1,14 +1,14 @@
 import { open, ask, save } from '@tauri-apps/plugin-dialog'
 import { readTextFile, writeTextFile, readDir, mkdir, exists, rename, remove, copyFile, BaseDirectory } from '@tauri-apps/plugin-fs'
 import { convertFileSrc, invoke } from '@tauri-apps/api/core'
-import { getCurrentWindow } from '@tauri-apps/api/window'
+import { getCurrentWindow, LogicalSize } from '@tauri-apps/api/window'
 import { listen } from '@tauri-apps/api/event'
 import { join, dirname } from '@tauri-apps/api/path'
 import { findManifest } from '@kiny/engine'
 import type { ResolveAsset } from '@kiny/player'
 import {
   type FileGateway, type LoadedProject, type Manifest, type ProjectFileEntry,
-  STARTER_MAIN_KIN, STARTER_NEW_FILE, normalizeKinName, starterManifest, projectFileName, assertSafeRelPath,
+  STARTER_MAIN_KIN, STARTER_NEW_FILE, normalizeKinName, starterManifest, projectFileName, projectFolderName, assertSafeRelPath,
 } from './gateway'
 import { type DraftStore, parseDraftStore, emptyDraftStore } from '../state/drafts'
 import { type ChatStore, parseChatStore } from '../state/chatStore'
@@ -97,13 +97,21 @@ export const tauriFileGateway: FileGateway = {
     if (typeof picked !== 'string') return null
     return dirname(picked) // 项目根 = 所选文件的父目录
   },
-  async newProject() {
-    const dir = await pickDir()
-    if (dir === null) return null
-    await grantProjectScope(dir) // 新建项目也可能落在任意位置：写盘前先放行
-    await writeTextFile(await join(dir, projectFileName('未命名项目')), JSON.stringify(starterManifest('未命名项目'), null, 2))
+  pickDirectory: pickDir,
+  async newProject(parentDir, name) {
+    const folder = projectFolderName(name)
+    const dir = await join(parentDir, folder)
+    await grantProjectScope(parentDir) // 触及 dir 前先放行父目录树（递归覆盖子路径），任意盘符位置需要
+    // 不覆盖：exists 预检给友好文案；非递归 mkdir 作竞态兜底屏障（exists 与 mkdir 之间的极小窗口也转同一文案）。
+    if (await exists(dir)) throw new Error(`目标位置已存在「${folder}」，无法创建`)
+    try {
+      await mkdir(dir) // 非递归：目标已存在即抛错
+    } catch {
+      throw new Error(`目标位置已存在「${folder}」，无法创建`)
+    }
+    await writeTextFile(await join(dir, projectFileName(name)), JSON.stringify(starterManifest(name), null, 2))
     await writeTextFile(await join(dir, 'main.kin'), STARTER_MAIN_KIN)
-    // 不默认建 assets 目录——首次导入资源时按需创建（对齐 memoryGateway 行为）。
+    // 不默认建 assets 目录——首次导入资源时按需创建。
     return dir
   },
   readProject,
@@ -176,6 +184,18 @@ export const tauriFileGateway: FileGateway = {
   async closeWindow() {
     // destroy（非 close）：不再触发 onCloseRequested，避免守卫死循环
     await getCurrentWindow().destroy()
+  },
+  async setWindowSize(width, height) {
+    // 逻辑尺寸（DPI 无关，与 tauri.conf width/height 同单位）；改尺寸后居中，避免从角部放大而溢出屏幕
+    const w = getCurrentWindow()
+    await w.setSize(new LogicalSize(width, height))
+    await w.center()
+  },
+  async onWindowResize(handler) {
+    // onResized 给物理尺寸；除以缩放因子换算成逻辑尺寸（与 setWindowSize 同单位，往返一致）
+    const w = getCurrentWindow()
+    const scale = await w.scaleFactor()
+    return w.onResized(({ payload }) => handler(Math.round(payload.width / scale), Math.round(payload.height / scale)))
   },
   async onWindowCloseRequest(handler) {
     return getCurrentWindow().onCloseRequested((e) => {

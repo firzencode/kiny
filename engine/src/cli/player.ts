@@ -11,6 +11,7 @@ export async function play(story: Story, term: Term): Promise<'ended' | 'quit'> 
     while (story.canContinue) {
       const e = story.continue()
       if (e.kind === 'text') term.write(plainText(e.spans))
+      else if (e.name === 'clear') term.write(dim('———— 清屏 ————')) // 终端无法真清历史，打分隔标记示意
       else term.write(dim(`» ${e.name}(${e.args.map(String).join(', ')})`))
     }
     if (story.hasEnded) {

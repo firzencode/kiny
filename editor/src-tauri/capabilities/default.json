@@ -8,6 +8,8 @@
   "permissions": [
     "core:default",
     "core:window:allow-destroy",
+    "core:window:allow-set-size",
+    "core:window:allow-center",
     "fs:default",
     "dialog:default",
     "log:default",

@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'r
 import { resolveStart } from '@kiny/engine'
 import type { ValidatedProgram } from '@kiny/engine'
 import type { PlayState, ResolveAsset } from '@kiny/player'
-import type { FileGateway } from './files/gateway'
-import { defaultKipName, defaultWebpageDirName, buildProjectData } from './files/gateway'
+import type { FileGateway, Manifest } from './files/gateway'
+import { defaultKipName, defaultWebpageDirName, buildProjectData, projectFileName } from './files/gateway'
 import { editorReducer, initialEditorState, anyDirty, activeBuffer } from './state/editorReducer'
 import { useDebouncedValidation, type ValidationOutcome } from './hooks/useDebouncedValidation'
 import { createIncrementalValidator } from './validate/validate'
@@ -24,6 +24,8 @@ import { ImportConflictDialog, type ConflictChoice } from './components/ImportCo
 import { basename, destPath, uniqueName } from './files/importAssets'
 import { RecoveryDialog } from './components/RecoveryDialog'
 import { SettingsDialog } from './components/SettingsDialog'
+import { ProjectSettingsDialog } from './components/ProjectSettingsDialog'
+import { NewProjectDialog } from './components/NewProjectDialog'
 import { useAutosave } from './hooks/useAutosave'
 import { detectRecoverable, type RecoverableItem } from './state/drafts'
 import { loadSettings, saveSettings, applySettingsVars, clampSettings, DEFAULT_SETTINGS, SETTINGS_BOUNDS, type Settings } from './state/settings'
@@ -31,7 +33,8 @@ import { AiPanel } from './components/ai/AiPanel'
 import { useAiSession, cleanupExpiredChats } from './ai/useAiSession'
 import { loadAiConfig, saveAiConfig, isConfigured, type AiConfig } from './ai/aiConfig'
 import type { PreviewPort, PreviewSnapshot } from './ai/actions'
-import { loadSession, saveSession, resolveSession } from './state/session'
+import { loadSession, saveSession, resolveSession, listRecentProjects, removeSession } from './state/session'
+import { LaunchScreen } from './components/LaunchScreen'
 import { logErrorEntry, ErrorDetailsDialog } from '@kiny/error-report'
 
 // 确定性模式的固定种子（默认行为）。随机模式下由 randomSeed() 每次 ↺ 重掷。
@@ -39,6 +42,11 @@ const SESSION_SEED = 0x5eed
 // 32 位无符号随机种子；与 engine makeRng 的 `n >>> 0` 吻合。
 const randomSeed = () => Math.floor(Math.random() * 0x1_0000_0000) >>> 0
 const idResolve: ResolveAsset = (n: string) => n
+
+// 窗口逻辑尺寸随「启动页 ↔ workbench」切换调整观感：启动页紧凑（贴合冷启动默认），
+// 打开项目后放大到宽敞的编辑尺寸；与 tauri.conf 默认/最小值保持同一量纲。
+const LAUNCH_WINDOW = { width: 880, height: 620 }
+const WORKBENCH_WINDOW = { width: 1440, height: 900 }
 
 /** 取异常的可读信息（用于「<动作>失败：<具体>」通知）。 */
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
@@ -85,6 +93,18 @@ function loadSavedView(): ViewPrefs | null {
   } catch { return null }
 }
 
+// 记忆用户手动调整过的 workbench 窗口尺寸（逻辑像素）；未记过返回 null → 用默认。
+const WINDOW_KEY = 'kiny-editor-window'
+function loadWorkbenchSize(): { width: number; height: number } | null {
+  try {
+    const v = JSON.parse(localStorage.getItem(WINDOW_KEY) || 'null')
+    return v && typeof v.width === 'number' && typeof v.height === 'number' ? { width: v.width, height: v.height } : null
+  } catch { return null }
+}
+function saveWorkbenchSize(width: number, height: number): void {
+  try { localStorage.setItem(WINDOW_KEY, JSON.stringify({ width, height })) } catch { /* ignore */ }
+}
+
 export function App({ gateway }: { gateway: FileGateway }) {
   const [state, dispatch] = useReducer(editorReducer, initialEditorState)
   // 校验产出的符号表（补全 / 跳转用），随 onValidated 更新；与 programRef 并存（ref 供热路径、state 供 EditorPane 反应式回灌）。
@@ -113,6 +133,8 @@ export function App({ gateway }: { gateway: FileGateway }) {
   const [aiConfig, setAiConfig] = useState<AiConfig>(loadAiConfig)
   useEffect(() => { saveAiConfig(aiConfig) }, [aiConfig])
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [projectSettingsOpen, setProjectSettingsOpen] = useState(false)
+  const [newProjectOpen, setNewProjectOpen] = useState(false)
   const [newFileToken, setNewFileToken] = useState(0)
   const [help, setHelp] = useState<HelpScreen | null>(null)
   const [pendingClose, setPendingClose] = useState<CloseIntent | null>(null)
@@ -134,7 +156,7 @@ export function App({ gateway }: { gateway: FileGateway }) {
   const entryRef = useRef<string | null>(null)
   const pendingJumpRef = useRef<{ file: string; line: number } | null>(null)
   const validatorRef = useRef(createIncrementalValidator())
-  const loadDirRef = useRef<(dir: string) => Promise<void>>(async () => {})
+  const loadDirRef = useRef<(dir: string) => Promise<boolean>>(async () => false)
   useEffect(() => { runIdRef.current = state.runId }, [state.runId])
   useEffect(() => { filesRef.current = state.files }, [state.files])
   useEffect(() => { entryRef.current = state.entry }, [state.entry])
@@ -151,10 +173,13 @@ export function App({ gateway }: { gateway: FileGateway }) {
     try { localStorage.setItem('kiny-editor-view', JSON.stringify(view)) } catch { /* ignore */ }
   }, [view])
   useEffect(() => { applySettingsVars(settings); saveSettings(settings) }, [settings])
-  // 会话持久化：记住当前项目打开的 tab 集合与活动 tab
+  // 会话持久化：记住当前项目打开的 tab 集合与活动 tab、项目名（启动页最近项目显示用）
   useEffect(() => {
-    if (state.projectDir) saveSession(state.projectDir, state.openTabs, state.activeFile)
-  }, [state.projectDir, state.openTabs, state.activeFile])
+    if (state.projectDir) saveSession(state.projectDir, state.openTabs, state.activeFile, state.manifest?.name)
+  }, [state.projectDir, state.openTabs, state.activeFile, state.manifest?.name])
+  // 最近项目：随打开 / 关闭项目（projectDir 变）与失效移除（recentTick）刷新。
+  const [recentTick, setRecentTick] = useState(0)
+  const recentProjects = useMemo(() => listRecentProjects(), [state.projectDir, recentTick])
 
   // 派生量
   const active = activeBuffer(state)
@@ -252,7 +277,7 @@ export function App({ gateway }: { gateway: FileGateway }) {
     }
   }, [state.activeFile])
 
-  const loadDir = async (dir: string) => {
+  const loadDir = async (dir: string): Promise<boolean> => {
     try {
       const proj = await gateway.readProject(dir)
       resolveRef.current = gateway.makeResolveAsset(dir)
@@ -271,13 +296,30 @@ export function App({ gateway }: { gateway: FileGateway }) {
         const items = detectRecoverable(store, dir, diskKin)
         setRecovery(items.length ? { projectDir: dir, items } : null)
       }
+      return true
     } catch (e) {
       setNotice(`打开项目失败：${errMsg(e)}`)
+      return false
     }
   }
 
   const onOpenProject = async () => { const d = await gateway.pickProjectFile(); if (d) await loadDir(d) }
-  const onNewProject = async () => { const d = await gateway.newProject(); if (d) await loadDir(d) }
+  const onNewProject = () => setNewProjectOpen(true)
+  const onBrowseNewProject = () => gateway.pickDirectory()
+  const onCreateProject = async (parentDir: string, name: string): Promise<string | null> => {
+    try {
+      const dir = await gateway.newProject(parentDir, name)
+      setNewProjectOpen(false)
+      await loadDir(dir)
+      return null
+    } catch (e) {
+      return errMsg(e)
+    }
+  }
+  // 从启动页 / 「最近打开」菜单点最近项目：打开失败（目录被移动 / 删除）→ 提示 + 从会话存储移除该失效条目。
+  const onOpenRecent = async (dir: string) => {
+    if (!(await loadDir(dir))) { removeSession(dir); setRecentTick((t) => t + 1) }
+  }
   // 记住最新 loadDir 闭包，供 onOpenProjectFile 事件订阅（一次性订阅、避免 stale）。
   loadDirRef.current = loadDir
   // 写单个文件缓冲（按 path 取，支持保存非活动 tab）。成功返 true，失败弹 notice 返 false。
@@ -349,12 +391,28 @@ export function App({ gateway }: { gateway: FileGateway }) {
     else void doExit()
   }
 
+  // 关闭当前项目回到启动页：清本项目残留草稿（同干净退出，避免下次误报崩溃恢复）→ 重置编辑器态。
+  const doCloseProject = async () => {
+    if (settings.autosaveRecovery && state.projectDir) {
+      try { await autosave.clearProjectDrafts(state.projectDir) } catch { /* 清草稿失败不阻断关闭 */ }
+    }
+    setNotice(null)
+    dispatch({ type: 'project_closed' })
+    setRecentTick((t) => t + 1)
+  }
+  // 关闭项目守卫：有脏则弹确认框，否则直接关。
+  const requestCloseProject = () => {
+    if (anyDirty(state)) setPendingClose({ kind: 'closeProject' })
+    else void doCloseProject()
+  }
+
   // 对话框三解析器：消费 pendingClose 后置空。
   const onCloseDialogSave = async () => {
     const intent = pendingClose
     setPendingClose(null)
     if (!intent) return
     if (intent.kind === 'tab') { if (await saveBuffer(intent.path)) dispatch({ type: 'close_tab', path: intent.path }) }
+    else if (intent.kind === 'closeProject') { if (await saveAllDirty()) await doCloseProject() }
     else { if (await saveAllDirty()) await doExit() }
   }
   const onCloseDialogDiscard = async () => {
@@ -362,6 +420,7 @@ export function App({ gateway }: { gateway: FileGateway }) {
     setPendingClose(null)
     if (!intent) return
     if (intent.kind === 'tab') dispatch({ type: 'discard_tab', path: intent.path })
+    else if (intent.kind === 'closeProject') await doCloseProject()
     else await doExit()
   }
   const onCloseDialogCancel = () => setPendingClose(null)
@@ -392,6 +451,12 @@ export function App({ gateway }: { gateway: FileGateway }) {
   // 设置弹窗开启状态 ref：全局快捷键 onKey 中早退，避免弹窗开启时触发 zoom 等动作污染已提交 settings。
   const settingsOpenRef = useRef(settingsOpen)
   settingsOpenRef.current = settingsOpen
+  // 项目设置弹窗同理：打开时拦全局快捷键（含 Ctrl+S），避免在弹窗输入框里误触编辑器动作。
+  const projectSettingsOpenRef = useRef(projectSettingsOpen)
+  projectSettingsOpenRef.current = projectSettingsOpen
+  // 新建项目弹窗同理：打开时拦全局快捷键。
+  const newProjectOpenRef = useRef(newProjectOpen)
+  newProjectOpenRef.current = newProjectOpen
   useEffect(() => {
     let unlisten: (() => void) | undefined
     gateway
@@ -405,6 +470,29 @@ export function App({ gateway }: { gateway: FileGateway }) {
     let unlisten: (() => void) | undefined
     gateway
       .onOpenProjectFile((path) => { void loadDirRef.current(parentDir(path)) })
+      .then((u) => { unlisten = u })
+      .catch(() => { /* 非 Tauri 环境忽略 */ })
+    return () => unlisten?.()
+  }, [gateway])
+  // 窗口尺寸随启动页 ↔ workbench 切换调整：仅在 projectDir 的「有↔无」真正翻转时改尺寸并居中，
+  // 冷启动首帧（prev==cur==null）不动窗（已是启动页默认尺寸），项目间切换（都非空）也不动。
+  const prevProjectDirRef = useRef(state.projectDir)
+  useEffect(() => {
+    const prev = prevProjectDirRef.current
+    const cur = state.projectDir
+    if (prev === cur) return
+    prevProjectDirRef.current = cur
+    // 只在「有项目 ↔ 无项目」边界翻转时调整；项目间切换（都非空）不动窗、不重复居中。
+    // 进 workbench 优先用记忆的尺寸（用户上次手动调整的），未记过用默认；回启动页用固定尺寸。
+    const size = prev === null && cur !== null ? (loadWorkbenchSize() ?? WORKBENCH_WINDOW) : prev !== null && cur === null ? LAUNCH_WINDOW : null
+    if (size) void gateway.setWindowSize(size.width, size.height).catch((e) => console.error('调整窗口尺寸失败', e))
+  }, [state.projectDir, gateway])
+  // 记忆用户手动调整的 workbench 尺寸：订阅窗口 resize，仅在有项目时落库（启动页固定尺寸不记，
+  // 含切回启动页时我们自己触发的程序化 resize）。订阅只建一次。
+  useEffect(() => {
+    let unlisten: (() => void) | undefined
+    gateway
+      .onWindowResize((w, h) => { if (committedStateRef.current.projectDir !== null) saveWorkbenchSize(w, h) })
       .then((u) => { unlisten = u })
       .catch(() => { /* 非 Tauri 环境忽略 */ })
     return () => unlisten?.()
@@ -510,6 +598,41 @@ export function App({ gateway }: { gateway: FileGateway }) {
     setSettingsOpen(false)
   }
   const onCancelSettings = () => setSettingsOpen(false)
+  const onOpenProjectSettings = () => setProjectSettingsOpen(true)
+  const onCancelProjectSettings = () => setProjectSettingsOpen(false)
+  // 保存项目设置：写 manifest；改项目名时连带 rename manifest 文件（失败即中止、盘无改动）。
+  const onSaveProjectSettings = async (draft: Manifest) => {
+    const dir = state.projectDir
+    const cur = state.manifest
+    const curFile = state.manifestFile
+    if (!dir || !cur || !curFile) return
+    const target = projectFileName(draft.name)
+    const renamed = target !== curFile
+    try {
+      if (renamed) {
+        // 目标名已存在（renamePath 带 exists 检查）或 IO 失败 → 抛错，检查在改动之前故盘无改动。
+        await gateway.renamePath(dir, curFile, target)
+        try {
+          await gateway.writeManifest(dir, draft, target)
+        } catch {
+          // 罕见：rename 已成、write 未成。文件已在新名下（内容仍旧），manifestFile 须跟到 target
+          // 避免后续写回旧名；manifest 内容保持 cur（磁盘未更新）。弹窗留驻等重试。
+          dispatch({ type: 'manifest_updated', manifest: cur, manifestFile: target })
+          setNotice('项目文件已重命名，但写入内容失败，请重试保存')
+          return
+        }
+        dispatch({ type: 'manifest_updated', manifest: draft, manifestFile: target })
+      } else {
+        await gateway.writeManifest(dir, draft, curFile)
+        dispatch({ type: 'manifest_updated', manifest: draft, manifestFile: curFile })
+      }
+      setProjectSettingsOpen(false)
+      setNotice('项目设置已保存', 'success')
+    } catch (e) {
+      // 含改名目标已存在的冲突：报错、盘无改动、弹窗留驻（draft 保留）。
+      setNotice(`保存项目设置失败：${errMsg(e)}`)
+    }
+  }
   const bumpCodeSize = (delta: number) =>
     setSettings((s) => clampSettings({ ...s, codeSize: s.codeSize + delta }))
   const onZoomIn = () => bumpCodeSize(SETTINGS_BOUNDS.codeSize.step)
@@ -533,7 +656,7 @@ export function App({ gateway }: { gateway: FileGateway }) {
   shortcutsRef.current = { onNewProject, onOpenProject, onSave, onSaveAll, onOpenSettings, onZoomIn, onZoomOut, onZoomReset }
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (settingsOpenRef.current) return
+      if (settingsOpenRef.current || projectSettingsOpenRef.current || newProjectOpenRef.current) return
       if (!(e.ctrlKey || e.metaKey)) return
       const k = e.key.toLowerCase()
       const a = shortcutsRef.current
@@ -542,8 +665,10 @@ export function App({ gateway }: { gateway: FileGateway }) {
       else if (k === 'n' && e.shiftKey) { e.preventDefault(); setNewFileToken((t) => t + 1) }
       else if (k === 'n') { e.preventDefault(); void a.onNewProject() }
       else if (k === 'o') { e.preventDefault(); void a.onOpenProject() }
-      else if (k === '/') { e.preventDefault(); setHelp('syntax') }
-      else if (k === ',') { e.preventDefault(); a.onOpenSettings() }
+      // 语法帮助 / 设置弹窗随 workbench 挂载：无项目（启动页）时不触发，
+      // 否则会置 help/settingsOpen 状态、下次进项目时弹窗意外弹出。
+      else if (k === '/') { if (committedStateRef.current.projectDir !== null) { e.preventDefault(); setHelp('syntax') } }
+      else if (k === ',') { if (committedStateRef.current.projectDir !== null) { e.preventDefault(); a.onOpenSettings() } }
       else if (k === '=' || k === '+') { e.preventDefault(); a.onZoomIn() }
       else if (k === '-') { e.preventDefault(); a.onZoomOut() }
       else if (k === '0') { e.preventDefault(); a.onZoomReset() }
@@ -575,7 +700,9 @@ export function App({ gateway }: { gateway: FileGateway }) {
 
   const cols: React.CSSProperties = {
     ['--col-sidebar' as string]: view.sidebar ? `${view.sidebarWidth}px` : '0px',
-    ['--col-editor' as string]: `${view.editorRatio}fr`,
+    // 预览显示时 editor+preview 两条 fr 之和 = 1，正常按比例分；预览隐藏时 editor 必须用 1fr
+    // 而非 editorRatio fr——否则孤立的 `<1fr`（如 0.5fr）按 CSS Grid 的 max(1, Σfr) 基数只填一半、右侧留空。
+    ['--col-editor' as string]: view.preview ? `${view.editorRatio}fr` : '1fr',
     ['--col-preview' as string]: view.preview ? `${1 - view.editorRatio}fr` : '0px',
     ['--col-ai' as string]: view.ai ? `${view.aiWidth}px` : '0px',
   }
@@ -617,6 +744,7 @@ export function App({ gateway }: { gateway: FileGateway }) {
 
   return (
     <div className="app">
+      {state.projectDir !== null && (
       <MenuBar
         projectName={state.manifest?.name ?? null}
         anyDirty={anyDirty(state)}
@@ -641,6 +769,7 @@ export function App({ gateway }: { gateway: FileGateway }) {
         onAbout={onAbout}
         onReportIssue={onReportIssue}
         onOpenSettings={onOpenSettings}
+        onOpenProjectSettings={onOpenProjectSettings}
         onZoomIn={onZoomIn}
         onZoomOut={onZoomOut}
         onZoomReset={onZoomReset}
@@ -648,7 +777,11 @@ export function App({ gateway }: { gateway: FileGateway }) {
         onSaveLayout={onSaveLayout}
         onRestoreMyLayout={onRestoreMyLayout}
         onRestoreDefaultLayout={onRestoreDefaultLayout}
+        recentProjects={recentProjects}
+        onOpenRecent={onOpenRecent}
+        onCloseProject={requestCloseProject}
       />
+      )}
       {notice && (
         <div
           className={`toolbar-notice ${notice.tone === 'success' ? 'ok' : 'err'}`}
@@ -662,9 +795,32 @@ export function App({ gateway }: { gateway: FileGateway }) {
         </div>
       )}
       <ErrorDetailsDialog open={showErrorDetails} onClose={() => setShowErrorDetails(false)} />
+      {/* 常驻（不随 projectDir 分支）：启动页 / workbench 均可触发新建项目（Ctrl+N、启动页按钮、菜单栏）。 */}
+      <NewProjectDialog
+        open={newProjectOpen}
+        onBrowse={onBrowseNewProject}
+        onCreate={onCreateProject}
+        onCancel={() => setNewProjectOpen(false)}
+      />
+      {state.projectDir === null ? (
+      <LaunchScreen
+        theme={theme}
+        recent={recentProjects}
+        onNewProject={onNewProject}
+        onOpenProject={onOpenProject}
+        onOpenRecent={onOpenRecent}
+      />
+      ) : (
+      <>
       <div className="workbench" style={cols}>
+        {/*
+          各面板显式钉在自己的 grid 列（sidebar=1 / editor=2 / preview=3 / ai=4）。
+          面板条件渲染，若靠 grid 自动排布，隐藏某面板后其后的子项会顺位落到错误的列轨道
+          （如隐藏 sidebar 后 .editor-col 会落进 0px 的 --col-sidebar 轨道被压扁）。显式定位后，
+          任一面板显隐都不影响其余面板的落列——隐藏面板的列塌成 0px 且无子项占用。
+        */}
         {view.sidebar && (
-          <div className="sidebar">
+          <div className="sidebar" style={{ gridColumn: 1 }}>
             <Explorer
               projectName={state.manifest?.name ?? null}
               entries={state.entries}
@@ -698,7 +854,7 @@ export function App({ gateway }: { gateway: FileGateway }) {
             <ColResizer edge="right" onResize={onResizeSidebar} ariaLabel="调整资源管理器宽度" />
           </div>
         )}
-        <div className="editor-col">
+        <div className="editor-col" style={{ gridColumn: 2 }}>
           <TabBar
             openTabs={state.openTabs}
             activeFile={state.activeFile}
@@ -734,7 +890,7 @@ export function App({ gateway }: { gateway: FileGateway }) {
           />
           {view.preview && <ColResizer edge="right" onResize={onResizeEditorPreview} ariaLabel="调整编辑区与预览占比" />}
         </div>
-        {view.preview && <PreviewPane play={play} stale={stale} sfx={sfxQueue} seed={previewSeed} onChoose={onChoosePreview} onRestart={onRestart} />}
+        {view.preview && <PreviewPane play={play} stale={stale} sfx={sfxQueue} seed={previewSeed} onChoose={onChoosePreview} onRestart={onRestart} style={{ gridColumn: 3 }} />}
         {view.ai && (
           <AiPanel
             configured={isConfigured(aiConfig)}
@@ -751,6 +907,7 @@ export function App({ gateway }: { gateway: FileGateway }) {
             onClose={() => setView((v) => ({ ...v, ai: false }))}
             onOpenSettings={() => { setView((v) => ({ ...v, ai: true })); onOpenSettings() }}
             onResize={onResizeAi}
+            style={{ gridColumn: 4 }}
           />
         )}
       </div>
@@ -762,6 +919,13 @@ export function App({ gateway }: { gateway: FileGateway }) {
         aiConfig={aiConfig}
         onSave={onSaveSettings}
         onCancel={onCancelSettings}
+      />
+      <ProjectSettingsDialog
+        open={projectSettingsOpen}
+        manifest={state.manifest}
+        kinFiles={state.fileOrder}
+        onSave={onSaveProjectSettings}
+        onCancel={onCancelProjectSettings}
       />
       <ConfirmCloseDialog
         intent={pendingClose}
@@ -779,6 +943,8 @@ export function App({ gateway }: { gateway: FileGateway }) {
         destRel={importConflict?.destRel ?? null}
         onChoose={resolveImportConflict}
       />
+      </>
+      )}
     </div>
   )
 }

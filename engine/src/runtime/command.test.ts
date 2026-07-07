@@ -35,6 +35,20 @@ describe('runtime 3a —— 命令事件', () => {
     expect(drain(s)).toEqual([{ kind: 'command', name: 'sfx', args: ['door.mp3'] }])
   })
 
+  it('@clear() 产出 command 事件（无参，宿主清屏）', () => {
+    const s = story('=== A ===\n@clear()\n-> END')
+    expect(drain(s)).toEqual([{ kind: 'command', name: 'clear', args: [] }])
+  })
+
+  it('文本 → @clear → 文本：命令是硬边界，前后文本各自产出（宿主据此先清后显）', () => {
+    const src = ['=== A ===', '旧文。', '@clear()', '新文。', '-> END'].join('\n')
+    expect(drain(story(src))).toEqual([
+      { kind: 'text', spans: [{ text: '旧文。' }] },
+      { kind: 'command', name: 'clear', args: [] },
+      { kind: 'text', spans: [{ text: '新文。' }] },
+    ])
+  })
+
   it('连续命令各自产出', () => {
     const src = ['=== A ===', '@bg_hide()', '@bgm_stop()', '-> END'].join('\n')
     expect(drain(story(src))).toEqual([

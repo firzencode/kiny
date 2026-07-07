@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "kiny-editor",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "identifier": "com.kiny.editor",
   "build": {
     "frontendDist": "../dist",
@@ -13,8 +13,8 @@
     "windows": [
       {
         "title": "Kiny Editor",
-        "width": 1280,
-        "height": 800,
+        "width": 880,
+        "height": 620,
         "minWidth": 860,
         "minHeight": 560,
         "resizable": true,

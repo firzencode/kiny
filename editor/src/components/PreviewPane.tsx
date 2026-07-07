@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, type CSSProperties } from 'react'
 import { Player, type PlayState } from '@kiny/player'
 
 /**
@@ -15,6 +15,7 @@ export function PreviewPane({
   seed,
   onChoose,
   onRestart,
+  style,
 }: {
   play: PlayState | null
   stale: boolean
@@ -22,6 +23,8 @@ export function PreviewPane({
   seed: number
   onChoose: (pos: number) => void
   onRestart: () => void
+  /** 作为 workbench grid 子项时的外部样式（如显式 grid-column 定位）。 */
+  style?: CSSProperties
 }) {
   // 叙事增长时把阅读区滚到底（用 scrollTop，绝不用 scrollIntoView——会搞坏容器滚动）。
   const stageRef = useRef<HTMLDivElement>(null)
@@ -32,7 +35,7 @@ export function PreviewPane({
   }, [logLen])
 
   return (
-    <div className="preview-pane" data-testid="preview">
+    <div className="preview-pane" data-testid="preview" style={style}>
       <div className="preview-bar">
         <span className="preview-label">预览</span>
         {stale && <span className="preview-stale">基于上一个有效版本</span>}

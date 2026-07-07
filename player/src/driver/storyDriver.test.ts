@@ -41,6 +41,35 @@ describe('advance', () => {
     expect(sfx).toEqual([])
   })
 
+  it('@clear：清空已显示正文（log=[]），保留 host（bg/bgm 不动）', () => {
+    const KIN_CLEAR = `@bg_show("scene.jpg")
+@bgm_play("loop.mp3")
+旧文一。
+旧文二。
+@clear()
+-> END
+`
+    const { state } = advance(makeStory(KIN_CLEAR), initialState, RESOLVE)
+    // 清屏发生在结束前：log 仅余 end（清空后无新正文），host 背景/BGM 保留
+    expect(state.log).toEqual([{ kind: 'end' }])
+    expect(state.host.bg).toBe('demo/assets/scene.jpg')
+    expect(state.host.bgm).toEqual({ src: 'demo/assets/loop.mp3', playing: true })
+    expect(state.ended).toBe(true)
+  })
+
+  it('text → @clear → text：最终 log 仅含 clear 之后的正文', () => {
+    const KIN_CLEAR2 = `旧文。
+@clear()
+新文。
+-> END
+`
+    const { state } = advance(makeStory(KIN_CLEAR2), initialState, RESOLVE)
+    expect(state.log).toEqual([
+      { kind: 'narration', spans: [{ text: '新文。' }] },
+      { kind: 'end' },
+    ])
+  })
+
   it('@sfx：URL 进瞬时 sfx、不触动 host；同一推进多个叠加', () => {
     const KIN_SFX = `=== A ===
 @sfx("a.mp3")

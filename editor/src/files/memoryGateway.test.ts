@@ -75,13 +75,24 @@ describe('memoryGateway 项目文件（.kiw）与打开', () => {
     await expect(gw.readProject('/p')).rejects.toThrow('.kiw')
   })
 
-  it('newProject 产出 <名>.kiw（不写 kiny.json）', async () => {
-    const gw = createMemoryGateway({ files: {}, newDir: '/np' })
-    const dir = await gw.newProject()
-    expect(dir).toBe('/np')
-    const proj = await gw.readProject('/np')
-    expect(proj.manifestFile).toBe('未命名项目.kiw')
+  it('newProject 在 <parent>/<sanitize名> 铺 <名>.kiw（原名入 manifest）+ main.kin', async () => {
+    const gw = createMemoryGateway({ files: {} })
+    const dir = await gw.newProject('/loc', '雾港')
+    expect(dir).toBe('/loc/雾港')
+    const proj = await gw.readProject('/loc/雾港')
+    expect(proj.manifestFile).toBe('雾港.kiw')
+    expect(proj.manifest.name).toBe('雾港')
     expect(proj.manifest.entry).toBe('main.kin')
+  })
+
+  it('newProject 目标已存在 → 抛错、不覆盖', async () => {
+    const gw = createMemoryGateway({ files: { '/loc/雾港/雾港.kiw': 'OLD' } })
+    await expect(gw.newProject('/loc', '雾港')).rejects.toThrow('已存在')
+  })
+
+  it('pickDirectory 返回注入的 newParent', async () => {
+    const gw = createMemoryGateway({ files: {}, newParent: '/loc' })
+    expect(await gw.pickDirectory()).toBe('/loc')
   })
 
   it('自动迁移：打开旧 kiny.json 项目 → 重命名为 <项目名>.kiw', async () => {

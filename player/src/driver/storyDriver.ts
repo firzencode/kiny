@@ -38,6 +38,7 @@ export function advance(story: Story, prev: PlayState, resolve: ResolveAsset): A
       const e = story.continue()
       if (e.kind === 'text') log = [...log, { kind: 'narration', spans: e.spans }]
       else if (e.name === 'sfx') sfx.push(resolve(String(e.args[0]))) // 一次性音效：瞬时收集，不进 host
+      else if (e.name === 'clear') log = [] // 清屏：清空已显示正文；host（bg/bgm）不动、非 HostState 故不走 applyCommand
       else host = applyCommand(host, e, resolve)
     }
   } catch (err) {

@@ -27,6 +27,7 @@ export interface MenuBarProps {
   onAbout: () => void
   onReportIssue: () => void
   onOpenSettings: () => void
+  onOpenProjectSettings: () => void
   onZoomIn: () => void
   onZoomOut: () => void
   onZoomReset: () => void
@@ -35,6 +36,10 @@ export interface MenuBarProps {
   onSaveLayout: () => void
   onRestoreMyLayout: () => void
   onRestoreDefaultLayout: () => void
+  /** 最近项目（按最近打开降序）；供「最近打开」子菜单。 */
+  recentProjects: { dir: string; name: string }[]
+  onOpenRecent: (dir: string) => void
+  onCloseProject: () => void
 }
 
 interface Item {
@@ -44,7 +49,12 @@ interface Item {
   check?: boolean
   sep?: boolean
   act?: () => void
+  /** 子菜单项（如「最近打开」）；有则悬停展开、本项自身不触发 act。 */
+  sub?: { label: string; act: () => void }[]
 }
+
+// 「最近打开」子菜单最多列几条（LRU 存储已封顶 20，这里再截给菜单）。
+const RECENT_MENU_MAX = 8
 
 export function MenuBar(p: MenuBarProps) {
   const [open, setOpen] = useState<string | null>(null)
@@ -57,11 +67,15 @@ export function MenuBar(p: MenuBarProps) {
         { label: '新建项目...', sc: 'Ctrl+N', act: p.onNewProject },
         { label: '打开项目...', sc: 'Ctrl+O', act: p.onOpenProject },
         { label: '新建文件...', sc: 'Ctrl+Shift+N', act: p.onNewFile },
-        { label: '最近打开', disabled: true },
+        p.recentProjects.length > 0
+          ? { label: '最近打开', sub: p.recentProjects.slice(0, RECENT_MENU_MAX).map((r) => ({ label: r.name, act: () => p.onOpenRecent(r.dir) })) }
+          : { label: '最近打开', disabled: true },
         { sep: true },
         { label: '保存', sc: 'Ctrl+S', disabled: !p.canSave, act: p.onSave },
         { label: '全部保存', sc: 'Ctrl+Alt+S', disabled: !p.anyDirty, act: p.onSaveAll },
         { sep: true },
+        { label: '关闭项目', disabled: !p.projectName, act: p.onCloseProject },
+        { label: '项目设置...', disabled: !p.projectName, act: p.onOpenProjectSettings },
         { label: '导出故事包（.kip）...', disabled: !p.projectName || p.errorCount > 0, act: p.onExportKip },
         { label: '导出独立网页...', disabled: !p.projectName || p.errorCount > 0, act: p.onExportWebpage },
         { sep: true },
@@ -141,6 +155,8 @@ export function MenuBar(p: MenuBarProps) {
               {m.items.map((it, i) =>
                 it.sep ? (
                   <div className="menu-sep" key={i} />
+                ) : it.sub ? (
+                  <SubMenuItem key={i} item={it} onPick={() => setOpen(null)} />
                 ) : (
                   <button
                     key={i}
@@ -169,6 +185,46 @@ export function MenuBar(p: MenuBarProps) {
         {p.anyDirty && <span className="menubar-dirty">● 未保存</span>}
         {p.projectName && statusPill(p)}
       </span>
+    </div>
+  )
+}
+
+/** 带子菜单的菜单项（如「最近打开」）：悬停 / 聚焦展开右侧子面板，点子项触发并关整菜单。 */
+function SubMenuItem({ item, onPick }: { item: Item; onPick: () => void }) {
+  const [expanded, setExpanded] = useState(false)
+  const sub = item.sub ?? []
+  return (
+    <div
+      className="menu-sub-root"
+      onMouseEnter={() => setExpanded(true)}
+      onMouseLeave={() => setExpanded(false)}
+    >
+      <button
+        className="menu-item"
+        role="menuitem"
+        aria-haspopup="true"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((v) => !v)}
+      >
+        <span className="menu-check" aria-hidden={true} />
+        <span className="menu-label">{item.label}</span>
+        <span className="menu-sub-arrow" aria-hidden={true}>▸</span>
+      </button>
+      {expanded && (
+        <div className="menu-dropdown menu-submenu" role="menu">
+          {sub.map((s, i) => (
+            <button
+              key={i}
+              className="menu-item"
+              role="menuitem"
+              onClick={() => { s.act(); onPick() }}
+            >
+              <span className="menu-check" aria-hidden={true} />
+              <span className="menu-label">{s.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

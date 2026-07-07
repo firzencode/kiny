@@ -33,7 +33,13 @@ export interface LoadedProject {
 export interface FileGateway {
   /** 弹文件选择器选项目文件（`.kiw`，兼容旧 `kiny.json`——选中后经父目录 findManifest 定位并自动迁移）；返回其**父目录**，取消返 null。 */
   pickProjectFile(): Promise<string | null>
-  newProject(): Promise<string | null>
+  /** 弹原生目录选择器选一个文件夹（新建项目的父目录）；取消返 null。 */
+  pickDirectory(): Promise<string | null>
+  /**
+   * 在 parentDir 下建 `<projectFolderName(name)>` 子文件夹，铺 `<name>.kiw` + `main.kin`
+   * （`manifest.name` = 原始输入名）。返回新建项目根目录；目标子文件夹已存在则抛错，绝不覆盖。
+   */
+  newProject(parentDir: string, name: string): Promise<string>
   readProject(dir: string): Promise<LoadedProject>
   /** 在项目内新建 .kin（脚手架空文件）。relPath 可含子目录，自动补 .kin。 */
   createFile(dir: string, relPath: string): Promise<ProjectFileEntry>
@@ -68,6 +74,10 @@ export interface FileGateway {
   confirm(message: string): Promise<boolean>
   /** 强制关闭窗口（destroy，绕过 close-requested 守卫，避免自触发死循环）。 */
   closeWindow(): Promise<void>
+  /** 设置窗口逻辑尺寸并居中（启动页 ↔ workbench 切换时调整观感）；非 Tauri 环境 no-op。 */
+  setWindowSize(width: number, height: number): Promise<void>
+  /** 订阅窗口尺寸变化（记忆用户手动调整的 workbench 尺寸）；回调收到逻辑尺寸。返回退订函数。 */
+  onWindowResize(handler: (width: number, height: number) => void): Promise<() => void>
   /** 订阅 OS 窗口关闭请求；回调里已 preventDefault。返回退订函数。 */
   onWindowCloseRequest(handler: () => void): Promise<() => void>
   /** 订阅「用 OS 双击 / 关联打开某 `.kiw` 文件」事件（single-instance 转发，热启动用）；回调收到项目文件绝对路径。返回退订函数。 */
@@ -126,21 +136,30 @@ export function starterManifest(name: string): Manifest {
   return { name, version: '1.0.0', engine: __KINY_VERSION__, entry: 'main.kin' }
 }
 
-/** 项目名 → 项目文件名 `<sanitize>.kiw`（去 Windows 文件名非法字符与首尾空白，空结果回退 project）。 */
+/** 项目名 → sanitize 基名：去 Windows 文件名非法字符与首尾空白，可返回空串。 */
+export function sanitizeProjectBase(name: string): string {
+  return name.replace(/[\\/:*?"<>|]/g, '').trim()
+}
+
+/** 项目名 → 项目子文件夹名：sanitize 后为空则回退 project。 */
+export function projectFolderName(name: string): string {
+  return sanitizeProjectBase(name) || 'project'
+}
+
+/** 项目名 → 项目文件名 `<sanitize>.kiw`（与子文件夹名同源，保证一致）。 */
 export function projectFileName(name: string): string {
-  const base = name.replace(/[\\/:*?"<>|]/g, '').trim()
-  return `${base || 'project'}.kiw`
+  return `${projectFolderName(name)}.kiw`
 }
 
 /** 故事名 → 安全的默认 .kip 文件名：去 Windows 文件名非法字符与首尾空白，空结果回退 story。 */
 export function defaultKipName(storyName: string): string {
-  const base = storyName.replace(/[\\/:*?"<>|]/g, '').trim()
+  const base = sanitizeProjectBase(storyName)
   return `${base || 'story'}.kip`
 }
 
 /** 故事名 → 默认导出网页文件夹名 `<名>-web`（去非法字符，空结果回退 story-web）。 */
 export function defaultWebpageDirName(storyName: string): string {
-  const base = storyName.replace(/[\\/:*?"<>|]/g, '').trim()
+  const base = sanitizeProjectBase(storyName)
   return `${base || 'story'}-web`
 }
 

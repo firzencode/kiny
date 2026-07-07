@@ -705,6 +705,10 @@ button {
 .menu-label { flex: 1; white-space: nowrap; }
 .menu-sc { color: var(--text-faint); font-size: 11px; font-family: ui-monospace, monospace; }
 .menu-sep { height: 1px; background: var(--border); margin: 5px 8px; }
+/* 子菜单（如「最近打开」）：悬停展开右侧面板；箭头右对齐。 */
+.menu-sub-root { position: relative; }
+.menu-sub-arrow { margin-left: auto; color: var(--text-faint); font-size: 11px; }
+.menu-submenu { top: -6px; left: 100%; margin: 0 0 0 2px; min-width: 200px; max-height: 60vh; overflow-y: auto; }
 .menubar-right { margin-left: auto; display: flex; align-items: center; gap: 12px; padding-right: 8px; }
 .menubar-project { font-size: 13px; font-weight: 600; }
 .menubar-dirty { font-size: 11.5px; color: var(--accent); }
@@ -829,6 +833,56 @@ button {
 .sidebar .outline { flex: 1; }
 .editor-col { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
 .editor-empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--text-faint); font-size: 13px; }
+
+/* =========================================================================
+   启动页（LaunchScreen）—— 冷启动 / 关闭项目后展示；上 banner + 下操作区。
+   全屏、无菜单栏；主题色沿用全局 CSS 变量，banner 图随主题切换（组件内择图）。
+   ========================================================================= */
+/* 启动页填满整个窗口（无居中卡片 / 无四周留白）：banner 顶部铺满、操作区占其余，
+   仅「最近项目」列表内部滚动——窗口拉伸 / 变矮时整体版式稳定，不整页滚动。 */
+.launch { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; background: var(--bg-1); }
+.launch-win { flex: 1; min-height: 0; width: 100%; display: flex; flex-direction: column; }
+/* banner 占据窗口上部主要空间，全宽铺满、无左右留白。图为 16:9、主体（书+字标）
+   居中且四周是大片夜空/晨雾余量，故 cover 铺满时只裁掉可弃的边缘余量、主体恒完整。 */
+.launch-banner { flex: 1 1 auto; min-height: 0; line-height: 0; overflow: hidden; background: var(--bg-1); }
+.launch-banner img { width: 100%; height: 100%; object-fit: cover; object-position: center; display: block; }
+/* 操作区紧凑固定、不抢 banner 高度；最近项目列表内部滚动。 */
+.launch-dock { flex: 0 0 auto; padding: 20px 28px 22px; display: flex; gap: 28px; align-items: stretch; border-top: 1px solid var(--border); }
+.launch-actions { flex: 0 0 288px; align-self: flex-start; display: flex; flex-direction: column; gap: 12px; }
+.launch-act {
+  display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; cursor: pointer;
+  padding: 14px 15px; border-radius: 9px; border: 1px solid var(--border-2); background: var(--bg-2);
+  color: var(--text); font: inherit; transition: background 0.14s ease, border-color 0.14s ease;
+}
+.launch-act:hover { background: var(--bg-3); }
+.launch-act.primary { border-color: var(--accent-line); background: var(--accent-soft); }
+.launch-act-ic { width: 33px; height: 33px; flex: 0 0 33px; border-radius: 8px; display: flex; align-items: center; justify-content: center; background: var(--bg-1); color: var(--accent); }
+.launch-act.primary .launch-act-ic { background: var(--accent); color: var(--accent-fg); }
+.launch-act-ic svg { width: 18px; height: 18px; }
+.launch-act-lb { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.launch-act-lb .t { font-size: 14px; font-weight: 600; }
+.launch-act-lb .s { font-size: 11.5px; color: var(--text-dim); }
+.launch-recent { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.launch-recent-head { flex: 0 0 auto; display: flex; align-items: baseline; justify-content: space-between; padding-bottom: 7px; border-bottom: 1px solid var(--border); }
+.launch-recent-head .lab { font-size: 11px; letter-spacing: 0.16em; color: var(--accent); font-weight: 700; }
+.launch-recent-head .cnt { font-size: 11px; color: var(--text-faint); font-family: ui-monospace, monospace; }
+.launch-recent-empty { margin: 12px 2px 0; font-size: 12.5px; color: var(--text-dim); }
+/* 仅此列表内部纵向滚动（min-height:0 让它在 flex 中真正可收缩），整页不滚；
+   限高使操作区保持紧凑、把窗口高度让给 banner。 */
+.launch-recent-list { flex: 1; min-height: 0; max-height: 178px; overflow-y: auto; list-style: none; margin: 4px 0 0; padding: 0; }
+.launch-recent-item {
+  display: flex; align-items: center; gap: 11px; width: 100%; text-align: left; cursor: pointer;
+  padding: 9px 8px; border-radius: 8px; border: none; background: transparent; color: var(--text); font: inherit;
+}
+.launch-recent-item:hover { background: var(--accent-soft); }
+.launch-recent-item .thumb {
+  width: 29px; height: 29px; flex: 0 0 29px; border-radius: 7px; display: flex; align-items: center; justify-content: center;
+  font-family: var(--prose-font); font-size: 14px; color: var(--accent); background: var(--bg-2); border: 1px solid var(--border-2);
+}
+.launch-recent-item .meta { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 1px; }
+.launch-recent-item .meta .nm { font-size: 13px; font-weight: 500; }
+.launch-recent-item .meta .pt { font-family: ui-monospace, monospace; font-size: 10px; color: var(--text-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.launch-recent-item .when { font-size: 10.5px; color: var(--text-faint); flex: 0 0 auto; }
 
 /* =========================================================================
    帮助浮层 —— 关于 Kiny Editor / Kiny 语法参考
@@ -979,6 +1033,18 @@ button {
 .settings-ver { font-size: 11px; font-family: ui-monospace, monospace; color: var(--text-faint); border: 1px solid var(--border); border-radius: 999px; padding: 2px 9px; }
 .settings-dirty { margin-left: auto; font-size: 11px; color: var(--accent); }
 .settings-body { overflow: auto; padding: 4px 26px 8px; background: var(--bg-0); }
+/* 多 tab 版：左竖向导航 + 右内容页（右栏独立滚动，左栏不随之滚）。
+   固定高度：弹窗高度不随 tab 内容多少忽高忽低，右栏（.settings-pane）内部滚动。 */
+.settings-body.tabbed { display: flex; overflow: hidden; padding: 0; height: min(440px, 70vh); }
+.settings-nav { flex: 0 0 132px; display: flex; flex-direction: column; gap: 2px; padding: 14px 10px; background: var(--bg-1); border-right: 1px solid var(--border); }
+.settings-nav-item { display: flex; align-items: center; gap: 7px; width: 100%; padding: 9px 12px; border: none; background: transparent; border-radius: 8px; color: var(--text-dim); font: inherit; font-size: 13px; text-align: left; cursor: pointer; transition: background .12s, color .12s; }
+.settings-nav-item:hover { background: var(--bg-2); color: var(--text); }
+.settings-nav-item.on { background: var(--accent-soft); color: var(--text); }
+.settings-nav-label { flex: 1; }
+.settings-nav-dot { color: var(--accent); font-size: 9px; line-height: 1; }
+.settings-pane { flex: 1; min-width: 0; overflow-y: auto; padding: 4px 26px 12px; background: var(--bg-0); }
+/* 单类 tab（外观/编辑器/AI）无 .settings-cat 标题时，首个 grp 顶部补足间距。 */
+.settings-pane > .settings-grp:first-child { padding-top: 8px; }
 .settings-cat { font-size: 11px; letter-spacing: .18em; text-transform: uppercase; color: var(--accent); font-weight: 600; padding: 22px 0 2px; }
 .settings-grp { border-bottom: 1px solid var(--border); padding-bottom: 14px; }
 .settings-grp:last-of-type { border-bottom: none; }
@@ -1484,6 +1550,8 @@ button {
 }
 .settings-input:focus { border-color: var(--accent-line); }
 .settings-input::placeholder { color: var(--text-faint); }
+/* 只读字段（如引擎版本）：灰显、等宽，不接受输入。 */
+.settings-readonly { color: var(--text-faint); font-family: var(--code-font); font-size: 12.5px; padding: 8px 0; }
 .key-wrap { display: flex; gap: 8px; }
 .key-wrap .settings-input { flex: 1; letter-spacing: .12em; }
 .key-toggle {
@@ -1517,4 +1585,5 @@ button {
   color: var(--text-dim);
   line-height: 1.65;
 }
+.settings-error { margin: 2px 0 0; font-size: 12.5px; color: var(--err); }
 .settings-trust .lock { flex: 0 0 auto; }

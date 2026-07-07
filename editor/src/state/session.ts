@@ -5,6 +5,7 @@ export interface ProjectSession {
   openTabs: string[]
   activeFile: string | null
   ts: number // 最近写入时间戳（Date.now()），LRU 淘汰依据
+  name?: string // 项目名（manifest.name），启动页最近项目显示用；旧数据缺失时读取降级为目录 basename
 }
 
 interface SessionStore {
@@ -37,11 +38,37 @@ export function loadSession(projectDir: string): ProjectSession | null {
   return loadStore().projects[projectDir] ?? null
 }
 
-/** 写单个项目会话：更新 ts、LRU 裁剪后落盘。openTabs 为空也照写。存储不可用静默。 */
-export function saveSession(projectDir: string, openTabs: string[], activeFile: string | null): void {
+/** 目录路径末段作显示名（兼容 / 与 \ 分隔），供缺 name 的旧会话降级。 */
+function basename(dir: string): string {
+  const i = Math.max(dir.lastIndexOf('/'), dir.lastIndexOf('\\'))
+  return i >= 0 ? dir.slice(i + 1) : dir
+}
+
+/** 最近项目列表：按 ts 降序（最近打开在前）；name 缺失降级为目录 basename。 */
+export function listRecentProjects(): { dir: string; name: string; ts: number }[] {
+  const { projects } = loadStore()
+  return Object.entries(projects)
+    .map(([dir, s]) => ({ dir, name: s.name ?? basename(dir), ts: s.ts }))
+    .sort((a, b) => b.ts - a.ts)
+}
+
+/** 从会话存储删除指定项目（失效条目自动移除用）。存储不可用静默。 */
+export function removeSession(projectDir: string): void {
   try {
     const store = loadStore()
-    store.projects[projectDir] = { openTabs, activeFile, ts: Date.now() }
+    if (!(projectDir in store.projects)) return
+    delete store.projects[projectDir]
+    localStorage.setItem(SESSION_KEY, JSON.stringify(store))
+  } catch {
+    /* 存储不可用时静默——与 saveSession 一致 */
+  }
+}
+
+/** 写单个项目会话：更新 ts、LRU 裁剪后落盘。openTabs 为空也照写。存储不可用静默。 */
+export function saveSession(projectDir: string, openTabs: string[], activeFile: string | null, name?: string): void {
+  try {
+    const store = loadStore()
+    store.projects[projectDir] = { openTabs, activeFile, ts: Date.now(), ...(name != null ? { name } : {}) }
     const dirs = Object.keys(store.projects)
     if (dirs.length > MAX_PROJECTS) {
       const oldestFirst = dirs.sort((a, b) => store.projects[a].ts - store.projects[b].ts)

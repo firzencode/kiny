@@ -14,6 +14,20 @@ const project: LoadedProject = {
 }
 const loaded = editorReducer(initialEditorState, { type: 'project_loaded', project })
 
+describe('project_closed', () => {
+  it('重置回初始态（projectDir=null），runId 单调自增', () => {
+    const s = editorReducer(loaded, { type: 'project_closed' })
+    expect(s.projectDir).toBeNull()
+    expect(s.manifest).toBeNull()
+    expect(s.entry).toBeNull()
+    expect(s.files).toEqual({})
+    expect(s.openTabs).toEqual([])
+    expect(s.activeFile).toBeNull()
+    // runId 不回退，避免上个项目的过期校验落到新态
+    expect(s.runId).toBe(loaded.runId + 1)
+  })
+})
+
 describe('editorReducer 多文件', () => {
   it('project_loaded：entries 含全部文件，files 仅 .kin，只开入口', () => {
     const proj: LoadedProject = {
@@ -43,6 +57,32 @@ describe('editorReducer 多文件', () => {
     expect(anyDirty(loaded)).toBe(false)
     expect(loaded.entries.map((e) => e.path)).toEqual(['main.kin', '末.kin'])
     expect(loaded.emptyDirs).toEqual([])
+  })
+
+  it('manifest_updated：整份替换 manifest + manifestFile，entry 同步顶层，不动文件缓冲', () => {
+    const s = editorReducer(loaded, {
+      type: 'manifest_updated',
+      manifest: { name: '雾港改', version: '2.0.0', engine: '0.1.0', entry: '末.kin' },
+      manifestFile: '雾港改.kiw',
+    })
+    expect(s.manifest).toEqual({ name: '雾港改', version: '2.0.0', engine: '0.1.0', entry: '末.kin' })
+    expect(s.manifestFile).toBe('雾港改.kiw')
+    expect(s.entry).toBe('末.kin')
+    // 文件缓冲不受影响
+    expect(Object.keys(s.files).sort()).toEqual(['main.kin', '末.kin'])
+    expect(s.files).toBe(loaded.files)
+    // entry 变更 → bump runId（触发预览重算）
+    expect(s.runId).toBe(loaded.runId + 1)
+  })
+
+  it('manifest_updated：仅改 name/version（entry 不变）不 bump runId', () => {
+    const s = editorReducer(loaded, {
+      type: 'manifest_updated',
+      manifest: { ...loaded.manifest!, name: '雾港改', version: '2.0.0' },
+      manifestFile: '雾港改.kiw',
+    })
+    expect(s.entry).toBe('main.kin')
+    expect(s.runId).toBe(loaded.runId) // entry 未变，不触发重算
   })
 
   it('source_changed：改对应缓冲 + dirty + runId++', () => {

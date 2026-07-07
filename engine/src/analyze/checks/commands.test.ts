@@ -11,6 +11,9 @@ describe('checkCommands', () => {
   it('@sfx 在白名单内：零诊断', () => {
     expect(run('=== A ===\n@sfx("door.mp3")\n-> END')).toEqual([])
   })
+  it('@clear 在白名单内：零诊断', () => {
+    expect(run('=== A ===\n@clear()\n-> END')).toEqual([])
+  })
   it('未知命令报 unknown-command', () => {
     const ds = run('=== A ===\n@teleport("x")\n-> END')
     expect(ds).toHaveLength(1)

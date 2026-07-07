@@ -68,12 +68,14 @@ export interface AiPanelProps {
   onDeleteConversation: (id: string) => void
   /** 拖拽左缘调面板宽度；省略则不渲染分隔条。clientX → 父组件换算列宽。 */
   onResize?: (clientX: number) => void
+  /** 作为 workbench grid 子项时的外部样式（如显式 grid-column 定位）。 */
+  style?: React.CSSProperties
 }
 
 export function AiPanel(props: AiPanelProps) {
   const {
     configured, model, turns, running, onSend, onStop, onNewConversation, onClose, onOpenSettings,
-    conversations, currentId, onSelectConversation, onDeleteConversation, onResize,
+    conversations, currentId, onSelectConversation, onDeleteConversation, onResize, style,
   } = props
   const [input, setInput] = useState('')
   const [showHistory, setShowHistory] = useState(false)
@@ -95,7 +97,7 @@ export function AiPanel(props: AiPanelProps) {
   const runningText = lastSeg?.kind === 'tool' ? `已执行 ${lastSeg.record.call.name} · 思考中…` : '思考中…'
 
   return (
-    <div className="ai-panel">
+    <div className="ai-panel" style={style}>
       {onResize && <ColResizer edge="left" onResize={onResize} ariaLabel="调整 AI 面板宽度" />}
       <div className="ai-head">
         <span className="title">AI</span>

@@ -47,7 +47,6 @@ const END = `=== 右 ===
 function gw(files: Record<string, string> = { '/proj/main.kin': MAIN, '/proj/末.kin': END }) {
   return createMemoryGateway({
     pickedDir: '/proj',
-    newDir: '/fresh',
     files: { '/proj/kiny.json': JSON.stringify({ name: '雾港', version: '1.0.0', engine: '0.1.0', entry: 'main.kin' }), ...files },
   })
 }
@@ -55,7 +54,6 @@ function gw(files: Record<string, string> = { '/proj/main.kin': MAIN, '/proj/末
 function gwExport(over: { saveKipPath?: string | null; exportSink?: { dest: string; files: string[] }[]; confirmResult?: boolean } = {}) {
   return createMemoryGateway({
     pickedDir: '/proj',
-    newDir: '/fresh',
     files: { '/proj/kiny.json': JSON.stringify({ name: '雾港', version: '1.0.0', engine: '0.1.0', entry: 'main.kin' }), '/proj/main.kin': MAIN, '/proj/末.kin': END },
     saveKipPath: 'saveKipPath' in over ? over.saveKipPath : '/out/雾港.kip',
     exportSink: over.exportSink,
@@ -63,8 +61,13 @@ function gwExport(over: { saveKipPath?: string | null; exportSink?: { dest: stri
   })
 }
 
-// 经菜单「文件 → <item>」点击
+// 经菜单「文件 → <item>」点击。
+// 冷启动（无项目）时顶层是启动页、无菜单栏：新建 / 打开项目改走启动页按钮。
 async function fileMenu(item: string) {
+  if (!screen.queryByRole('menuitem', { name: '文件' })) {
+    if (item === '打开项目...') { await userEvent.click(screen.getByRole('button', { name: /打开项目/ })); return }
+    if (item === '新建项目...') { await userEvent.click(screen.getByRole('button', { name: /新建项目/ })); return }
+  }
   await userEvent.click(screen.getByRole('menuitem', { name: '文件' }))
   await userEvent.click(await screen.findByRole('menuitem', { name: item }))
 }
@@ -211,12 +214,10 @@ describe('App 多文件集成', () => {
     expect((await screen.findAllByText('雾港')).length).toBeGreaterThan(0)
   })
 
-  it('Ctrl+N 快捷键新建项目', async () => {
-    const gateway = gw()
-    const newSpy = vi.spyOn(gateway, 'newProject')
-    render(<App gateway={gateway} />)
+  it('Ctrl+N 打开新建项目弹窗', async () => {
+    render(<App gateway={gw()} />)
     fireEvent.keyDown(window, { key: 'n', ctrlKey: true })
-    await waitFor(() => expect(newSpy).toHaveBeenCalled())
+    expect(await screen.findByRole('dialog', { name: '新建项目' })).toBeInTheDocument()
   })
 
   it('Ctrl+Shift+N 快捷键新建文件（出现内联输入）', async () => {
@@ -267,11 +268,14 @@ describe('App 多文件集成', () => {
     expect(screen.queryByText('雾港')).toBeNull()
   })
 
-  it('新建项目 → 脚手架载入、菜单栏显示起始项目名', async () => {
-    const gateway = createMemoryGateway({ newDir: '/fresh', files: {} })
+  it('新建项目 → 填名称 + 浏览位置 + 创建 → 脚手架载入、菜单栏显示项目名', async () => {
+    const gateway = createMemoryGateway({ files: {}, newParent: '/loc' })
     render(<App gateway={gateway} />)
     await fileMenu('新建项目...')
-    expect((await screen.findAllByText('未命名项目')).length).toBeGreaterThan(0)
+    await userEvent.type(await screen.findByRole('textbox', { name: '项目名称' }), '雾港')
+    await userEvent.click(screen.getByRole('button', { name: '浏览…' }))
+    await userEvent.click(screen.getByRole('button', { name: '创建' }))
+    expect((await screen.findAllByText('雾港')).length).toBeGreaterThan(0)
     expect(editorValue()).toContain('=== 开场 ===')
   })
 
@@ -604,7 +608,9 @@ describe('App 设置弹窗', () => {
     document.documentElement.removeAttribute('data-theme')
   })
 
+  // 设置经菜单栏进入，而菜单栏只在有项目时渲染（启动页无菜单）：先确保项目已打开。
   async function openSettings() {
+    if (!screen.queryByRole('menuitem', { name: '视图' })) await fileMenu('打开项目...')
     await userEvent.click(screen.getByRole('menuitem', { name: '视图' }))
     await userEvent.click(await screen.findByRole('menuitem', { name: '设置...' }))
   }
@@ -635,6 +641,8 @@ describe('App 设置弹窗', () => {
 
   it('Ctrl+, 打开设置', async () => {
     render(<App gateway={gw()} />)
+    await fileMenu('打开项目...') // 设置弹窗随 workbench 挂载，先进项目
+    await screen.findAllByText('雾港')
     fireEvent.keyDown(window, { key: ',', ctrlKey: true })
     expect(await screen.findByRole('dialog', { name: '设置' })).toBeInTheDocument()
   })
@@ -743,7 +751,6 @@ describe('App 导出故事包', () => {
 function gwExportWeb(over: { webpageDir?: string | null; webpageSink?: { dest: string; projectData: string; files: string[] }[]; confirmResult?: boolean } = {}) {
   return createMemoryGateway({
     pickedDir: '/proj',
-    newDir: '/fresh',
     files: { '/proj/kiny.json': JSON.stringify({ name: '雾港', version: '1.0.0', engine: '0.1.0', entry: 'main.kin' }), '/proj/main.kin': MAIN, '/proj/末.kin': END },
     webpageDir: 'webpageDir' in over ? over.webpageDir : '/out',
     webpageSink: over.webpageSink,
@@ -803,7 +810,9 @@ describe('App 导出独立网页', () => {
 describe('App 布局快照（保存 / 恢复布局）', () => {
   beforeEach(() => { localStorage.clear() })
 
+  // 视图菜单只在有项目时渲染（启动页无菜单栏）：先确保项目已打开。
   async function viewMenu(item: string) {
+    if (!screen.queryByRole('menuitem', { name: '视图' })) await fileMenu('打开项目...')
     await userEvent.click(screen.getByRole('menuitem', { name: '视图' }))
     await userEvent.click(await screen.findByRole('menuitem', { name: item }))
   }
@@ -823,6 +832,7 @@ describe('App 布局快照（保存 / 恢复布局）', () => {
 
   it('未存过快照时视图菜单不出现「恢复我的布局」，保存后出现', async () => {
     render(<App gateway={gw()} />)
+    await fileMenu('打开项目...') // 菜单栏随 workbench 挂载，先进项目
     await userEvent.click(screen.getByRole('menuitem', { name: '视图' }))
     expect(await screen.findByRole('menuitem', { name: '保存当前布局' })).toBeInTheDocument()
     expect(screen.queryByRole('menuitem', { name: '恢复我的布局' })).not.toBeInTheDocument()
@@ -914,7 +924,7 @@ describe('App 导入资源（T027）', () => {
   function gwImport(over: { importPicks?: string[] | null; extraFiles?: Record<string, string> } = {}) {
     const sink: { dir: string; destRel: string; sourceAbsPath: string }[] = []
     const gateway = createMemoryGateway({
-      pickedDir: '/proj', newDir: '/fresh',
+      pickedDir: '/proj',
       files: {
         '/proj/kiny.json': JSON.stringify({ name: '雾港', version: '1.0.0', engine: '0.1.0', entry: 'main.kin' }),
         '/proj/main.kin': MAIN, '/proj/末.kin': END, ...over.extraFiles,
@@ -993,5 +1003,290 @@ describe('App 导入资源（T027）', () => {
       { dir: '/proj', destRel: 'b-1.png', sourceAbsPath: '/ext/b.png' },
     ]))
     expect(screen.queryByRole('dialog', { name: '资源同名冲突' })).toBeNull()
+  })
+})
+
+describe('项目设置弹窗（T036）', () => {
+  it('打开「项目设置...」→ 弹窗以当前 manifest 填充', async () => {
+    render(<App gateway={gw()} />)
+    await fileMenu('打开项目...')
+    await screen.findAllByText('雾港')
+    await fileMenu('项目设置...')
+    const dlg = await screen.findByRole('dialog', { name: '项目设置' })
+    expect((within(dlg).getByLabelText('项目名称') as HTMLInputElement).value).toBe('雾港')
+    expect((within(dlg).getByLabelText('启动入口') as HTMLSelectElement).value).toBe('main.kin')
+    const opts = Array.from((within(dlg).getByLabelText('启动入口') as HTMLSelectElement).options).map((o) => o.value)
+    expect(opts).toEqual(['main.kin', '末.kin'])
+  })
+
+  it('改启动入口保存 → writeManifest 写新 entry、manifestFile 不变、无 rename、弹窗关闭', async () => {
+    const gateway = gw()
+    const writeSpy = vi.spyOn(gateway, 'writeManifest')
+    const renameSpy = vi.spyOn(gateway, 'renamePath')
+    render(<App gateway={gateway} />)
+    await fileMenu('打开项目...')
+    await screen.findAllByText('雾港')
+    await fileMenu('项目设置...')
+    await userEvent.selectOptions(await screen.findByLabelText('启动入口'), '末.kin')
+    await userEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(writeSpy).toHaveBeenCalled())
+    const [dir, manifest, manifestFile] = writeSpy.mock.calls[0]
+    expect(dir).toBe('/proj')
+    expect(manifest).toMatchObject({ name: '雾港', entry: '末.kin' })
+    expect(manifestFile).toBe('雾港.kiw') // kiny.json 打开时已迁移
+    expect(renameSpy).not.toHaveBeenCalled()
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '项目设置' })).toBeNull())
+    // 改入口后预览重算：从 末.kin 起始渲染（bump runId 触发），不再停在 main.kin
+    const preview = screen.getByTestId('preview')
+    await waitFor(() => expect(within(preview).getByText('你往右走。')).toBeInTheDocument())
+  })
+
+  it('改项目名保存 → rename manifest 文件到新名 + 写内容，菜单栏项目名更新', async () => {
+    const gateway = gw()
+    const writeSpy = vi.spyOn(gateway, 'writeManifest')
+    const renameSpy = vi.spyOn(gateway, 'renamePath')
+    render(<App gateway={gateway} />)
+    await fileMenu('打开项目...')
+    await screen.findAllByText('雾港')
+    await fileMenu('项目设置...')
+    const nameInput = await screen.findByLabelText('项目名称')
+    await userEvent.clear(nameInput)
+    await userEvent.type(nameInput, '新名')
+    await userEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(renameSpy).toHaveBeenCalledWith('/proj', '雾港.kiw', '新名.kiw'))
+    expect(writeSpy).toHaveBeenCalledWith('/proj', expect.objectContaining({ name: '新名' }), '新名.kiw')
+    expect((await screen.findAllByText('新名')).length).toBeGreaterThan(0)
+  })
+
+  it('改名目标已存在（rename 抛错）→ 不写内容、报错、弹窗留驻', async () => {
+    const gateway = gw()
+    const writeSpy = vi.spyOn(gateway, 'writeManifest')
+    vi.spyOn(gateway, 'renamePath').mockRejectedValue(new Error('目标已存在: 新名.kiw'))
+    render(<App gateway={gateway} />)
+    await fileMenu('打开项目...')
+    await screen.findAllByText('雾港')
+    await fileMenu('项目设置...')
+    const nameInput = await screen.findByLabelText('项目名称')
+    await userEvent.clear(nameInput)
+    await userEvent.type(nameInput, '新名')
+    await userEvent.click(screen.getByRole('button', { name: '保存' }))
+    await screen.findByText(/保存项目设置失败/)
+    expect(writeSpy).not.toHaveBeenCalled() // rename 先失败，未触及写内容
+    expect(screen.getByRole('dialog', { name: '项目设置' })).toBeInTheDocument()
+  })
+
+  it('rename 成功但写内容失败 → 提示「已重命名但写入失败」、弹窗留驻', async () => {
+    const gateway = gw()
+    vi.spyOn(gateway, 'writeManifest').mockRejectedValue(new Error('磁盘满'))
+    render(<App gateway={gateway} />)
+    await fileMenu('打开项目...')
+    await screen.findAllByText('雾港')
+    await fileMenu('项目设置...')
+    const nameInput = await screen.findByLabelText('项目名称')
+    await userEvent.clear(nameInput)
+    await userEvent.type(nameInput, '新名')
+    await userEvent.click(screen.getByRole('button', { name: '保存' }))
+    await screen.findByText(/项目文件已重命名，但写入内容失败/)
+    expect(screen.getByRole('dialog', { name: '项目设置' })).toBeInTheDocument()
+  })
+})
+
+describe('工作台 grid 布局：面板显隐不错位（T035）', () => {
+  // 视图菜单只在有项目时渲染（启动页无菜单栏）：先确保项目已打开。
+  async function viewMenu(item: string) {
+    if (!screen.queryByRole('menuitem', { name: '视图' })) await fileMenu('打开项目...')
+    await userEvent.click(screen.getByRole('menuitem', { name: '视图' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: item }))
+  }
+  const gridCol = (sel: string) => (document.querySelector(sel) as HTMLElement | null)?.style.gridColumn
+  const colVar = (name: string) => (document.querySelector('.workbench') as HTMLElement).style.getPropertyValue(name)
+
+  it('默认布局：sidebar / editor / preview 各就各列（1/2/3）', async () => {
+    render(<App gateway={gw()} />)
+    await fileMenu('打开项目...')
+    await screen.findAllByText('雾港')
+    expect(gridCol('.sidebar')).toBe('1')
+    expect(gridCol('.editor-col')).toBe('2')
+    expect(gridCol('.preview-pane')).toBe('3')
+  })
+
+  it('隐藏侧栏：editor 仍落第 2 列、preview 仍第 3 列（不被压进 0px 侧栏轨道）', async () => {
+    render(<App gateway={gw()} />)
+    await fileMenu('打开项目...')
+    await screen.findAllByText('雾港')
+    await viewMenu('节点导航 / 资源管理器')
+    await waitFor(() => expect(document.querySelector('.sidebar')).toBeNull())
+    expect(gridCol('.editor-col')).toBe('2')
+    expect(gridCol('.preview-pane')).toBe('3')
+  })
+
+  it('隐藏预览：editor 仍落第 2 列，且 --col-editor 变 1fr 撑满（不留半屏空白）', async () => {
+    render(<App gateway={gw()} />)
+    await fileMenu('打开项目...')
+    await screen.findAllByText('雾港')
+    // 预览显示时 editor 列按 editorRatio 分（默认 0.5fr），与 preview 的 0.5fr 之和 = 1
+    expect(colVar('--col-editor')).toBe('0.5fr')
+    await viewMenu('预览面板')
+    await waitFor(() => expect(document.querySelector('.preview-pane')).toBeNull())
+    expect(gridCol('.editor-col')).toBe('2')
+    // 关键：预览隐藏后 editor 必须是 1fr（孤立的 0.5fr 因 CSS Grid max(1,Σfr) 只填一半、右侧留白）
+    expect(colVar('--col-editor')).toBe('1fr')
+    expect(colVar('--col-preview')).toBe('0px')
+  })
+
+  it('显示 AI 面板：ai 落第 4 列、editor 不动', async () => {
+    render(<App gateway={gw()} />)
+    await fileMenu('打开项目...')
+    await screen.findAllByText('雾港')
+    await viewMenu('AI 面板')
+    await waitFor(() => expect(document.querySelector('.ai-panel')).not.toBeNull())
+    expect(gridCol('.ai-panel')).toBe('4')
+    expect(gridCol('.editor-col')).toBe('2')
+  })
+})
+
+describe('App 启动页 / 关闭项目（T034）', () => {
+  beforeEach(() => { localStorage.clear() })
+
+  it('冷启动无项目 → 顶层渲染启动页、无菜单栏、无 workbench', () => {
+    render(<App gateway={gw()} />)
+    expect(document.querySelector('.launch')).not.toBeNull()
+    expect(screen.queryByRole('menuitem', { name: '文件' })).toBeNull()
+    expect(document.querySelector('.workbench')).toBeNull()
+  })
+
+  it('启动页「打开项目」→ 进入 workbench、启动页消失', async () => {
+    render(<App gateway={gw()} />)
+    await userEvent.click(screen.getByRole('button', { name: /打开项目/ }))
+    await screen.findAllByText('雾港')
+    expect(document.querySelector('.workbench')).not.toBeNull()
+    expect(document.querySelector('.launch')).toBeNull()
+  })
+
+  it('启动页列出最近项目并可点击打开', async () => {
+    // 预置一条最近项目会话（指向 gw 的 /proj）
+    localStorage.setItem(SESSION_KEY, JSON.stringify({
+      version: 1,
+      projects: { '/proj': { openTabs: ['main.kin'], activeFile: 'main.kin', ts: 1, name: '雾港' } },
+    }))
+    render(<App gateway={gw()} />)
+    // 启动页最近项目区显示该项目名 + 路径
+    expect(screen.getByText('/proj')).toBeInTheDocument()
+    await userEvent.click(screen.getByText('/proj'))
+    await screen.findAllByText('雾港')
+    expect(document.querySelector('.workbench')).not.toBeNull()
+  })
+
+  it('最近项目失效（目录读取失败）→ 提示 + 从列表移除', async () => {
+    localStorage.setItem(SESSION_KEY, JSON.stringify({
+      version: 1,
+      projects: { '/gone': { openTabs: [], activeFile: null, ts: 1, name: '已失效' } },
+    }))
+    const gateway = gw()
+    gateway.readProject = async () => { throw new Error('目录不存在') }
+    render(<App gateway={gateway} />)
+    expect(screen.getByText('/gone')).toBeInTheDocument()
+    await userEvent.click(screen.getByText('/gone'))
+    // 打开失败提示 + 该失效条目从启动页列表消失
+    expect(await screen.findByRole('alert')).toHaveTextContent('打开项目失败')
+    await waitFor(() => expect(screen.queryByText('/gone')).toBeNull())
+  })
+
+  it('启动页按 Ctrl+, 不武装设置弹窗（进项目后不意外弹出）', async () => {
+    render(<App gateway={gw()} />)
+    fireEvent.keyDown(window, { key: ',', ctrlKey: true }) // 启动页，无 workbench
+    await fileMenu('打开项目...')
+    await screen.findAllByText('雾港')
+    // 进入项目后不应残留、弹出设置弹窗
+    expect(screen.queryByRole('dialog', { name: '设置' })).toBeNull()
+  })
+
+  it('打开项目 → 窗口放大到 workbench 尺寸（1440×900）', async () => {
+    const gateway = gw()
+    const spy = vi.spyOn(gateway, 'setWindowSize')
+    render(<App gateway={gateway} />)
+    await userEvent.click(screen.getByRole('button', { name: /打开项目/ }))
+    await screen.findAllByText('雾港')
+    expect(spy).toHaveBeenCalledWith(1440, 900)
+  })
+
+  it('关闭项目 → 窗口缩回启动页尺寸（880×620）', async () => {
+    const gateway = gw()
+    const spy = vi.spyOn(gateway, 'setWindowSize')
+    render(<App gateway={gateway} />)
+    await fileMenu('打开项目...')
+    await screen.findAllByText('雾港')
+    spy.mockClear()
+    await fileMenu('关闭项目')
+    await waitFor(() => expect(document.querySelector('.launch')).not.toBeNull())
+    expect(spy).toHaveBeenCalledWith(880, 620)
+  })
+
+  it('冷启动（无项目）不触发窗口尺寸调整', async () => {
+    const gateway = gw()
+    const spy = vi.spyOn(gateway, 'setWindowSize')
+    render(<App gateway={gateway} />)
+    // 停在启动页、未开项目 → 不应调窗（已是启动页默认尺寸）
+    expect(document.querySelector('.launch')).not.toBeNull()
+    expect(spy).not.toHaveBeenCalled()
+  })
+
+  it('进项目优先用记忆的 workbench 尺寸（曾手动调整过）', async () => {
+    localStorage.setItem('kiny-editor-window', JSON.stringify({ width: 1600, height: 1000 }))
+    const gateway = gw()
+    const spy = vi.spyOn(gateway, 'setWindowSize')
+    render(<App gateway={gateway} />)
+    await userEvent.click(screen.getByRole('button', { name: /打开项目/ }))
+    await screen.findAllByText('雾港')
+    // 用记忆尺寸而非默认 1440×900
+    expect(spy).toHaveBeenCalledWith(1600, 1000)
+  })
+
+  function gwResize(hook: { fire?: (w: number, h: number) => void }) {
+    return createMemoryGateway({
+      pickedDir: '/proj',
+      files: { '/proj/kiny.json': JSON.stringify({ name: '雾港', version: '1.0.0', engine: '0.1.0', entry: 'main.kin' }), '/proj/main.kin': MAIN, '/proj/末.kin': END },
+      resizeHook: hook,
+    })
+  }
+
+  it('workbench 态手动调整窗口 → 记忆该尺寸', async () => {
+    const hook: { fire?: (w: number, h: number) => void } = {}
+    render(<App gateway={gwResize(hook)} />)
+    await waitFor(() => expect(hook.fire).toBeDefined())
+    await fileMenu('打开项目...')
+    await screen.findAllByText('雾港')
+    act(() => hook.fire!(1600, 1000))
+    expect(JSON.parse(localStorage.getItem('kiny-editor-window')!)).toEqual({ width: 1600, height: 1000 })
+  })
+
+  it('启动页尺寸变化不记忆（无项目时 resize 不落库）', async () => {
+    const hook: { fire?: (w: number, h: number) => void } = {}
+    render(<App gateway={gwResize(hook)} />)
+    await waitFor(() => expect(hook.fire).toBeDefined())
+    // 停在启动页（projectDir null）时 resize
+    act(() => hook.fire!(1000, 700))
+    expect(localStorage.getItem('kiny-editor-window')).toBeNull()
+  })
+
+  it('关闭项目（干净）→ 回到启动页', async () => {
+    render(<App gateway={gw()} />)
+    await fileMenu('打开项目...')
+    await screen.findAllByText('雾港')
+    await fileMenu('关闭项目')
+    await waitFor(() => expect(document.querySelector('.launch')).not.toBeNull())
+    expect(document.querySelector('.workbench')).toBeNull()
+  })
+
+  it('关闭项目（有脏）→ 弹守卫；不保存并关闭 → 回启动页', async () => {
+    render(<App gateway={gw()} />)
+    await fileMenu('打开项目...')
+    await screen.findAllByText('雾港')
+    await typeInEditor('x') // 弄脏入口
+    await fileMenu('关闭项目')
+    // 守卫弹出（关闭项目标题）
+    expect(await screen.findByRole('dialog', { name: '关闭项目' })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '不保存并关闭' }))
+    await waitFor(() => expect(document.querySelector('.launch')).not.toBeNull())
   })
 })

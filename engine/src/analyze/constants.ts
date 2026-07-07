@@ -8,6 +8,7 @@ export const BUILTINS = new Set([
 export const COMMAND_NAMES = new Set([
   'bg_show', 'bg_hide', 'bgm_play', 'bgm_pause', 'bgm_stop',
   'sfx', // 一次性音效（区别于循环 bgm）
+  'clear', // 清屏：清除已显示正文（保留背景 / BGM），宿主落地
 ])
 
 /** §6 JS 内建全局白名单（保守，按需扩充）。 */

@@ -23,7 +23,7 @@ vi.mock('@tauri-apps/api/path', () => ({ join: (...parts: string[]) => parts.joi
 
 import { tauriFileGateway } from './tauriGateway'
 
-describe('tauriFileGateway.newProject', () => {
+describe('tauriFileGateway.newProject / pickDirectory', () => {
   beforeEach(() => {
     [open, writeTextFile, mkdir, exists, invoke].forEach((m) => m.mockReset())
     exists.mockResolvedValue(false)
@@ -32,34 +32,45 @@ describe('tauriFileGateway.newProject', () => {
     invoke.mockResolvedValue(undefined)
   })
 
-  it('只写 <名>.kiw + main.kin 脚手架，不创建 assets 目录', async () => {
-    open.mockResolvedValue('/proj')
-    const dir = await tauriFileGateway.newProject()
-    expect(dir).toBe('/proj')
-    // 脚手架两文件都写了（项目文件用 <名>.kiw，不再是 kiny.json）。
+  it('在 <parent>/<sanitize名> 建目录并铺 <名>.kiw + main.kin，不建 assets', async () => {
+    const dir = await tauriFileGateway.newProject('D:/loc', '雾港')
+    expect(dir).toBe('D:/loc/雾港')
+    expect(mkdir).toHaveBeenCalledWith('D:/loc/雾港') // 非递归：无 options
     const written = writeTextFile.mock.calls.map((c) => c[0] as string)
-    expect(written).toContain('/proj/未命名项目.kiw')
-    expect(written).toContain('/proj/main.kin')
-    // 不再默认建 assets 目录（首次导入资源时按需创建即可）。
+    expect(written).toContain('D:/loc/雾港/雾港.kiw')
+    expect(written).toContain('D:/loc/雾港/main.kin')
+    expect(written).not.toContain('D:/loc/雾港/assets')
+  })
+
+  it('写盘前先放行父目录', async () => {
+    await tauriFileGateway.newProject('D:/loc', '雾港')
+    expect(invoke).toHaveBeenCalledWith('allow_project_dir', { dir: 'D:/loc' })
+  })
+
+  it('放行父目录须早于 exists 探测（任意盘符位置 exists 也需先放行才不越界被拒）', async () => {
+    await tauriFileGateway.newProject('D:/loc', '雾港')
+    expect(invoke.mock.invocationCallOrder[0]).toBeLessThan(exists.mock.invocationCallOrder[0])
+  })
+
+  it('目标已存在 → 抛错、不 mkdir、不写盘', async () => {
+    exists.mockResolvedValue(true)
+    await expect(tauriFileGateway.newProject('D:/loc', '雾港')).rejects.toThrow('已存在')
     expect(mkdir).not.toHaveBeenCalled()
-  })
-
-  it('新建项目前先动态放行该目录（写盘可落任意位置）', async () => {
-    open.mockResolvedValue('D:/anywhere/新项目')
-    await tauriFileGateway.newProject()
-    expect(invoke).toHaveBeenCalledWith('allow_project_dir', { dir: 'D:/anywhere/新项目' })
-    // 放行发生在写盘之前。
-    const grantOrder = invoke.mock.invocationCallOrder[0]
-    const writeOrder = writeTextFile.mock.invocationCallOrder[0]
-    expect(grantOrder).toBeLessThan(writeOrder)
-  })
-
-  it('用户取消选目录 → 返回 null、不写任何文件', async () => {
-    open.mockResolvedValue(null)
-    const dir = await tauriFileGateway.newProject()
-    expect(dir).toBeNull()
     expect(writeTextFile).not.toHaveBeenCalled()
-    expect(mkdir).not.toHaveBeenCalled()
+  })
+
+  it('exists 探测通过但 mkdir 竞态失败 → 转「已存在」友好文案', async () => {
+    exists.mockResolvedValue(false)
+    mkdir.mockRejectedValueOnce(new Error('EEXIST'))
+    await expect(tauriFileGateway.newProject('D:/loc', '雾港')).rejects.toThrow('已存在')
+  })
+
+  it('pickDirectory 走 open({directory:true})', async () => {
+    open.mockResolvedValue('D:/x')
+    expect(await tauriFileGateway.pickDirectory()).toBe('D:/x')
+    expect(open).toHaveBeenCalledWith({ directory: true, multiple: false })
+    open.mockResolvedValue(null)
+    expect(await tauriFileGateway.pickDirectory()).toBeNull()
   })
 })
 
