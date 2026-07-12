@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { emptyHost } from '@kiny/player'
 import { listSaves, writeSave, readSave, deleteSave, genSaveId } from './store'
 import type { SaveRecord } from './types'
 
@@ -8,7 +9,7 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: (...a: unknown[]) => invoke(...
 const save: SaveRecord = {
   id: 'auto', kind: 'auto',
   snapshot: { fingerprint: 'fp' } as SaveRecord['snapshot'],
-  play: { log: [], host: { bg: null, bgm: null }, choices: [], ended: false, error: null },
+  play: { log: [], host: emptyHost, choices: [], input: null, ended: false, error: null },
   meta: { timestamp: 1, label: 'x' },
 }
 

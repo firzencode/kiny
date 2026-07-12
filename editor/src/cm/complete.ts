@@ -13,7 +13,10 @@ import { parseNodes } from '../syntax/kin'
 import { getKinContext } from './context'
 
 /** §11.1 内置命令名（engine COMMAND_NAMES 的 UI 副本；校验仍以 engine 为准）。 */
-export const COMMAND_NAMES = ['bg_show', 'bg_hide', 'bgm_play', 'bgm_pause', 'bgm_stop', 'sfx']
+export const COMMAND_NAMES = [
+  'bg_show', 'bg_hide', 'bgm_play', 'bgm_pause', 'bgm_stop', 'sfx',
+  'clear', 'step_mode', 'text_speed', 'text_fade', 'input',
+]
 
 /** 一次匹配的结果：backup = 已输入前缀长度（from = pos - backup）；options = 候选名。 */
 export interface Match {

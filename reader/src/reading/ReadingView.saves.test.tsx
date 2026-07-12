@@ -27,6 +27,13 @@ function build() {
   return out
 }
 
+/** 独立构建一份开场存点快照（用独立 story，避免与传给 ReadingView 的 fresh story 纠缠）。 */
+function makeOpeningSave(id = 'beef') {
+  const snap = build()
+  const first = advance(snap.story, initialState, resolve).state
+  return captureSave(snap.story, first, 'manual', id, 1000)
+}
+
 describe('ReadingView 存档 / 读档', () => {
   beforeEach(() => {
     listSaves.mockReset().mockResolvedValue([])
@@ -36,9 +43,8 @@ describe('ReadingView 存档 / 读档', () => {
 
   function renderRV() {
     const out = build()
-    const first = advance(out.story, initialState, resolve).state
-    render(<ReadingView story={out.story} program={out.program} storyId="abc" resolveAsset={resolve} first={first} title="T" onBack={() => {}} />)
-    return { out, first }
+    render(<ReadingView story={out.story} program={out.program} storyId="abc" resolveAsset={resolve} title="T" onBack={() => {}} />)
+    return { out }
   }
 
   it('mount 自动写一条 auto 存档', async () => {
@@ -68,10 +74,8 @@ describe('ReadingView 存档 / 读档', () => {
 
   it('读取手动存档 → 回到该存点内容', async () => {
     const out = build()
-    const first = advance(out.story, initialState, resolve).state
-    const save = captureSave(out.story, first, 'manual', 'beef', 1000) // 开场存点
-    listSaves.mockResolvedValue([save])
-    render(<ReadingView story={out.story} program={out.program} storyId="abc" resolveAsset={resolve} first={first} title="T" onBack={() => {}} />)
+    listSaves.mockResolvedValue([makeOpeningSave()])
+    render(<ReadingView story={out.story} program={out.program} storyId="abc" resolveAsset={resolve} title="T" onBack={() => {}} />)
     // 先推进离开开场
     await userEvent.click(screen.getByText('推门进去'))
     expect(screen.getByText('屋里很暖。')).toBeInTheDocument()
@@ -83,10 +87,8 @@ describe('ReadingView 存档 / 读档', () => {
 
   it('读档不写自动存档；载入位置做选择后 auto 才前移', async () => {
     const out = build()
-    const first = advance(out.story, initialState, resolve).state
-    const save = captureSave(out.story, first, 'manual', 'beef', 1000) // 开场存点
-    listSaves.mockResolvedValue([save])
-    render(<ReadingView story={out.story} program={out.program} storyId="abc" resolveAsset={resolve} first={first} title="T" onBack={() => {}} />)
+    listSaves.mockResolvedValue([makeOpeningSave()])
+    render(<ReadingView story={out.story} program={out.program} storyId="abc" resolveAsset={resolve} title="T" onBack={() => {}} />)
     await waitFor(() => expect(writeSave).toHaveBeenCalledTimes(1)) // 开局 auto
     await userEvent.click(screen.getByText('推门进去')) // 做选择 → auto 前移
     await waitFor(() => expect(writeSave).toHaveBeenCalledTimes(2))
@@ -102,10 +104,8 @@ describe('ReadingView 存档 / 读档', () => {
 
   it('删除存档：首点 🗑 不删、转为确认态', async () => {
     const out = build()
-    const first = advance(out.story, initialState, resolve).state
-    const save = captureSave(out.story, first, 'manual', 'beef', 1000)
-    listSaves.mockResolvedValue([save])
-    render(<ReadingView story={out.story} program={out.program} storyId="abc" resolveAsset={resolve} first={first} title="T" onBack={() => {}} />)
+    listSaves.mockResolvedValue([makeOpeningSave()])
+    render(<ReadingView story={out.story} program={out.program} storyId="abc" resolveAsset={resolve} title="T" onBack={() => {}} />)
     await userEvent.click(screen.getByRole('button', { name: '存档 / 读档' }))
     await userEvent.click(await screen.findByRole('button', { name: '删除存档' }))
     expect(deleteSave).not.toHaveBeenCalled()
@@ -114,10 +114,8 @@ describe('ReadingView 存档 / 读档', () => {
 
   it('删除存档：二次点确认才真正删除', async () => {
     const out = build()
-    const first = advance(out.story, initialState, resolve).state
-    const save = captureSave(out.story, first, 'manual', 'beef', 1000)
-    listSaves.mockResolvedValue([save])
-    render(<ReadingView story={out.story} program={out.program} storyId="abc" resolveAsset={resolve} first={first} title="T" onBack={() => {}} />)
+    listSaves.mockResolvedValue([makeOpeningSave()])
+    render(<ReadingView story={out.story} program={out.program} storyId="abc" resolveAsset={resolve} title="T" onBack={() => {}} />)
     await userEvent.click(screen.getByRole('button', { name: '存档 / 读档' }))
     await userEvent.click(await screen.findByRole('button', { name: '删除存档' }))
     await userEvent.click(screen.getByRole('button', { name: /确定删除/ }))
@@ -126,10 +124,8 @@ describe('ReadingView 存档 / 读档', () => {
 
   it('删除确认态点别处即还原', async () => {
     const out = build()
-    const first = advance(out.story, initialState, resolve).state
-    const save = captureSave(out.story, first, 'manual', 'beef', 1000)
-    listSaves.mockResolvedValue([save])
-    render(<ReadingView story={out.story} program={out.program} storyId="abc" resolveAsset={resolve} first={first} title="T" onBack={() => {}} />)
+    listSaves.mockResolvedValue([makeOpeningSave()])
+    render(<ReadingView story={out.story} program={out.program} storyId="abc" resolveAsset={resolve} title="T" onBack={() => {}} />)
     await userEvent.click(screen.getByRole('button', { name: '存档 / 读档' }))
     await userEvent.click(await screen.findByRole('button', { name: '删除存档' }))
     expect(screen.getByRole('button', { name: /确定删除/ })).toBeInTheDocument()

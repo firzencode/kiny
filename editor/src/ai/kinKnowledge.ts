@@ -45,7 +45,9 @@ export const KIN_KNOWLEDGE = `# Kin 语言速参（互动叙事 DSL）
 
 ## 宿主命令
 - @命令(参数) 独占一行、行首顶格，向宿主下达副作用、不产出文本。参数是 JS 表达式，资源用项目根相对路径。
-- 内置：@bg_show("assets/x.jpg") / @bg_hide() / @bgm_play("assets/x.mp3") / @bgm_pause() / @bgm_stop()。引擎只认内置命令集，未知命令报错。
+- 内置：@bg_show("assets/x.jpg") / @bg_hide() / @bgm_play("assets/x.mp3") / @bgm_pause() / @bgm_stop() / @sfx("assets/x.mp3")。引擎只认内置命令集，未知命令报错。
+- 正文呈现：@clear() 清除已显示正文（背景 / BGM 不受影响）；@step_mode("line"|"flow") 切换逐段点击推进 / 连续流动（默认 flow）；@text_speed(cps) 调打字机出字速度（默认 80 字/秒；0=瞬显）；@text_fade(ms) 调每字淡入时长（默认 300ms；0=无淡入）。三者是有状态设定，持续生效到下次改写或故事重开。
+- 读者输入：@input(变量, 提示?) 是唯一的交互命令——暂停故事、请读者输入文本，写回变量供后续 {变量} 插值或 @if 条件用。第一个参数是变量名本身（写入目标，须先用 ~ let 声明），第二个提示可省作 placeholder。读者留空提交则保留变量原值（作默认）。例：~ let player_name = "旅人" 换行 @input(player_name, "请输入你的名字") 换行 你好，{player_name}。
 
 ## 创作守则
 - 写完或改完后，用 validate 命令校验，按诊断修正后再交付。

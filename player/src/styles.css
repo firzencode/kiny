@@ -19,12 +19,50 @@
 .narration { margin: 0; line-height: 1.9; font-size: 1.05rem; }
 .story-end { margin: 12px 0; text-align: center; opacity: .6; letter-spacing: .2em; }
 
+/* 打字机逐字淡入（T033）：每字挂 char-fade 动画，时长 = @text_fade。 */
+.narration-reveal { white-space: pre-wrap; }
+.rchar { display: inline; animation-name: char-fade; animation-timing-function: ease; animation-fill-mode: both; }
+@keyframes char-fade { from { opacity: 0; } to { opacity: 1; } }
+/* 无障碍底线：系统「减弱动态效果」→ 关闭逐字淡入（RevealingLine 亦已整行瞬显，双保险）。 */
+@media (prefers-reduced-motion: reduce) {
+  .rchar { animation: none; }
+}
+
+/* line 模式等待点击的推进提示：底部居中呼吸三角。sticky 让它常驻滚动视口下缘。 */
+.advance-indicator { position: sticky; bottom: 12px; display: flex; justify-content: center; pointer-events: none; }
+.advance-indicator::after {
+  content: ""; width: 0; height: 0;
+  border-left: 7px solid transparent; border-right: 7px solid transparent;
+  border-top: 9px solid rgba(255, 255, 255, .8);
+  animation: advance-breathe 1.6s ease-in-out infinite;
+}
+@keyframes advance-breathe {
+  0%, 100% { opacity: .25; transform: translateY(0); }
+  50% { opacity: .95; transform: translateY(3px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .advance-indicator::after { animation: none; opacity: .7; }
+}
+
 /* 选项 */
 .choices { display: flex; flex-direction: column; gap: 10px; margin-top: 18px; }
 .choice { text-align: left; padding: 12px 16px; font-size: 1rem; color: #fff;
   background: rgba(255, 255, 255, .06); border: 1px solid rgba(255, 255, 255, .35);
   border-radius: 8px; cursor: pointer; transition: background .15s; }
 .choice:hover { background: rgba(255, 255, 255, .14); }
+
+/* 输入框（@input 读者文本输入，与选项对偶） */
+.input-box { display: flex; align-items: center; gap: 10px; margin-top: 18px; flex-wrap: wrap; }
+.input-box-field { flex: 1 1 12rem; min-width: 0; padding: 12px 16px; font-size: 1rem; color: #fff;
+  background: rgba(255, 255, 255, .06); border: 1px solid rgba(255, 255, 255, .35); border-radius: 8px; }
+.input-box-field::placeholder { color: rgba(255, 255, 255, .45); }
+.input-box-field:focus { outline: none; border-color: rgba(255, 255, 255, .75); background: rgba(255, 255, 255, .1); }
+.input-box-field:disabled { opacity: .5; cursor: not-allowed; }
+.input-box-submit { padding: 12px 18px; font-size: 1rem; color: #fff; background: rgba(255, 255, 255, .12);
+  border: 1px solid rgba(255, 255, 255, .35); border-radius: 8px; cursor: pointer; transition: background .15s; }
+.input-box-submit:hover:not(:disabled) { background: rgba(255, 255, 255, .2); }
+.input-box-submit:disabled { opacity: .5; cursor: not-allowed; }
+.input-box-hint { flex-basis: 100%; font-size: .82rem; color: rgba(255, 255, 255, .5); }
 
 .player-error { color: #ff8585; }
 

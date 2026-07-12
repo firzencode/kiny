@@ -1,4 +1,8 @@
 import { useState } from 'react'
+import type { ShortcutOverrides } from '../state/settings'
+import { effectiveKeys } from '../shortcuts/bindings'
+import { format, isMac } from '../shortcuts/keys'
+import type { CommandId } from '../shortcuts/registry'
 
 type EditCmd = 'cut' | 'copy' | 'paste' | 'selectAll'
 type ViewKey = 'sidebar' | 'preview' | 'highlight' | 'ai'
@@ -31,6 +35,8 @@ export interface MenuBarProps {
   onZoomIn: () => void
   onZoomOut: () => void
   onZoomReset: () => void
+  /** 快捷键自定义覆盖：菜单 sc 提示由注册表生效绑定派生，与真实绑定同源、不漂移。 */
+  shortcuts: ShortcutOverrides
   /** 是否已存过「我的布局」快照——决定「恢复我的布局」是否渲染。 */
   hasSavedLayout: boolean
   onSaveLayout: () => void
@@ -40,6 +46,8 @@ export interface MenuBarProps {
   recentProjects: { dir: string; name: string }[]
   onOpenRecent: (dir: string) => void
   onCloseProject: () => void
+  /** 外部控制运行态（T040）：非 null 时常驻显示「已启用 · 端口 N」，提醒作者本机端口开着。 */
+  controlInfo: { port: number } | null
 }
 
 interface Item {
@@ -59,20 +67,25 @@ const RECENT_MENU_MAX = 8
 export function MenuBar(p: MenuBarProps) {
   const [open, setOpen] = useState<string | null>(null)
 
+  // sc 提示统一取自注册表生效绑定（覆盖 ?? 默认），与全局 keydown / CM 绑定同源。
+  const eff = effectiveKeys(p.shortcuts)
+  const mac = isMac()
+  const scFor = (id: CommandId) => format(eff.get(id)!, mac)
+
   const menus: { id: string; label: string; items: Item[] }[] = [
     {
       id: 'file',
       label: '文件',
       items: [
-        { label: '新建项目...', sc: 'Ctrl+N', act: p.onNewProject },
-        { label: '打开项目...', sc: 'Ctrl+O', act: p.onOpenProject },
-        { label: '新建文件...', sc: 'Ctrl+Shift+N', act: p.onNewFile },
+        { label: '新建项目...', sc: scFor('newProject'), act: p.onNewProject },
+        { label: '打开项目...', sc: scFor('openProject'), act: p.onOpenProject },
+        { label: '新建文件...', sc: scFor('newFile'), act: p.onNewFile },
         p.recentProjects.length > 0
           ? { label: '最近打开', sub: p.recentProjects.slice(0, RECENT_MENU_MAX).map((r) => ({ label: r.name, act: () => p.onOpenRecent(r.dir) })) }
           : { label: '最近打开', disabled: true },
         { sep: true },
-        { label: '保存', sc: 'Ctrl+S', disabled: !p.canSave, act: p.onSave },
-        { label: '全部保存', sc: 'Ctrl+Alt+S', disabled: !p.anyDirty, act: p.onSaveAll },
+        { label: '保存', sc: scFor('save'), disabled: !p.canSave, act: p.onSave },
+        { label: '全部保存', sc: scFor('saveAll'), disabled: !p.anyDirty, act: p.onSaveAll },
         { sep: true },
         { label: '关闭项目', disabled: !p.projectName, act: p.onCloseProject },
         { label: '项目设置...', disabled: !p.projectName, act: p.onOpenProjectSettings },
@@ -86,13 +99,13 @@ export function MenuBar(p: MenuBarProps) {
       id: 'edit',
       label: '编辑',
       items: [
-        { label: '撤销', sc: 'Ctrl+Z', disabled: true },
-        { label: '重做', sc: 'Ctrl+Y', disabled: true },
+        { label: '撤销', sc: scFor('undo'), disabled: true },
+        { label: '重做', sc: scFor('redo'), disabled: true },
         { sep: true },
-        { label: '剪切', sc: 'Ctrl+X', act: () => p.onEdit('cut') },
-        { label: '复制', sc: 'Ctrl+C', act: () => p.onEdit('copy') },
-        { label: '粘贴', sc: 'Ctrl+V', act: () => p.onEdit('paste') },
-        { label: '全选', sc: 'Ctrl+A', act: () => p.onEdit('selectAll') },
+        { label: '剪切', sc: scFor('cut'), act: () => p.onEdit('cut') },
+        { label: '复制', sc: scFor('copy'), act: () => p.onEdit('copy') },
+        { label: '粘贴', sc: scFor('paste'), act: () => p.onEdit('paste') },
+        { label: '全选', sc: scFor('selectAll'), act: () => p.onEdit('selectAll') },
         { sep: true },
         { label: '查找...', sc: 'Ctrl+F', disabled: true },
         { label: '跳转到节点...', sc: 'Ctrl+P', disabled: true },
@@ -102,19 +115,19 @@ export function MenuBar(p: MenuBarProps) {
       id: 'view',
       label: '视图',
       items: [
-        { label: '设置...', sc: 'Ctrl+,', act: p.onOpenSettings },
+        { label: '设置...', sc: scFor('openSettings'), act: p.onOpenSettings },
         { sep: true },
         { label: '主题：石板墨', check: p.theme === 'dark', act: () => p.onSetTheme('dark') },
         { label: '主题：象牙稿', check: p.theme === 'light', act: () => p.onSetTheme('light') },
         { sep: true },
         { label: '节点导航 / 资源管理器', check: p.view.sidebar, act: () => p.onToggleView('sidebar') },
-        { label: '预览面板', check: p.view.preview, act: () => p.onToggleView('preview') },
+        { label: '预览 / 结构图面板', check: p.view.preview, act: () => p.onToggleView('preview') },
         { label: '语义着色', check: p.view.highlight, act: () => p.onToggleView('highlight') },
         { label: 'AI 面板', check: p.view.ai, act: () => p.onToggleView('ai') },
         { sep: true },
-        { label: '放大', sc: 'Ctrl+=', act: p.onZoomIn },
-        { label: '缩小', sc: 'Ctrl+-', act: p.onZoomOut },
-        { label: '重置字号', sc: 'Ctrl+0', act: p.onZoomReset },
+        { label: '放大', sc: scFor('zoomIn'), act: p.onZoomIn },
+        { label: '缩小', sc: scFor('zoomOut'), act: p.onZoomOut },
+        { label: '重置字号', sc: scFor('zoomReset'), act: p.onZoomReset },
         { sep: true },
         { label: '保存当前布局', act: p.onSaveLayout },
         // 未存过快照时整项不渲染（隐藏而非置灰，消除无法点的死项）。
@@ -126,7 +139,7 @@ export function MenuBar(p: MenuBarProps) {
       id: 'help',
       label: '帮助',
       items: [
-        { label: 'Kiny 语法参考', sc: 'Ctrl+/', act: p.onSyntaxRef },
+        { label: 'Kiny 语法参考', sc: scFor('help'), act: p.onSyntaxRef },
         { sep: true },
         { label: '问题反馈...', act: p.onReportIssue },
         { sep: true },
@@ -181,6 +194,11 @@ export function MenuBar(p: MenuBarProps) {
       ))}
 
       <span className="menubar-right">
+        {p.controlInfo !== null && (
+          <span className="status-pill control-on" title="本机 HTTP 服务已开放给外部控制（CLI/skill），可在设置 → AI 中关闭">
+            外部控制已启用 · 端口 {p.controlInfo.port}
+          </span>
+        )}
         <span className="menubar-project">{projectNameView(p.projectName)}</span>
         {p.anyDirty && <span className="menubar-dirty">● 未保存</span>}
         {p.projectName && statusPill(p)}

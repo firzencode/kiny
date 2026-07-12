@@ -195,6 +195,11 @@ button {
   color: var(--err);
   border-color: color-mix(in srgb, var(--err) 40%, transparent);
 }
+.status-pill.control-on {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-0));
+}
 .toolbar-notice {
   display: flex;
   align-items: center;
@@ -229,7 +234,7 @@ button {
 .workbench {
   flex: 1;
   display: grid;
-  /* 左/右栏 px 定宽（可拖）；中间编辑+预览按 fr 比例分剩余（可拖中线调比例）。 */
+  /* 左/右栏 px 定宽（可拖）；中间编辑 + 右侧面板按 fr 比例分剩余（可拖中线调比例）。 */
   grid-template-columns: var(--col-sidebar, 0px) var(--col-editor, 1fr) var(--col-preview, 0px) var(--col-ai, 0px);
   min-height: 0;
   overflow: hidden;
@@ -498,7 +503,7 @@ button {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  background: var(--bg-0);
+  background: transparent;
 }
 .preview-bar {
   flex: 0 0 auto;
@@ -600,7 +605,11 @@ button {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
-  /* 滚动容器占满整宽，让滚动条贴预览区右缘；阅读列宽改由内容子元素约束（下方规则）。 */
+  /* 滚动容器占满整宽，让滚动条贴预览区右缘；阅读列宽改由内容子元素约束（下方规则）。
+     必须清掉基础样式的 margin:0 auto + max-width——.preview-stage .player 是 column flex，
+     横向 auto margin 会让本容器 shrink-to-fit 随内容宽度居中变化（打字机第一行从中间长出）。 */
+  margin: 0;
+  max-width: none;
   padding: 48px 28px 96px;
   display: flex;
   flex-direction: column;
@@ -627,6 +636,9 @@ button {
   text-align: center;
   letter-spacing: 0.4em;
   color: var(--text-faint);
+}
+.preview-stage .advance-indicator::after {
+  border-top-color: var(--text-dim); /* 跟随编辑器主题（预览底非恒暗） */
 }
 .preview-stage .choices {
   display: flex;
@@ -834,6 +846,59 @@ button {
 .editor-col { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
 .editor-empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--text-faint); font-size: 13px; }
 
+/* 编辑窗从 ?project 载入项目期间的过渡占位（模型 A：编辑窗永不停在无项目态）。 */
+.editor-booting { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--text-faint); font-size: 13px; }
+
+/* ---------- 右侧面板 dock：预览 ⇄ 结构图 tab 切换（共用一列） ---------- */
+/* 右侧面板统一底色 --bg-1（区别于代码编辑区的 --bg-0，使右侧整体从左边浮出）；
+   预览 / 结构图共用此底色，二者观感一致。 */
+.right-dock { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; background: var(--bg-1); }
+.dock-tabs { flex: 0 0 auto; display: flex; gap: 2px; padding: 4px 8px; background: var(--bg-1); border-bottom: 1px solid var(--border); }
+.dock-tab { font-size: 12px; padding: 3px 12px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--text-dim); cursor: pointer; }
+.dock-tab:hover { color: var(--text); background: var(--bg-2); }
+.dock-tab.active { color: var(--accent-fg); background: var(--accent); border-color: var(--accent); }
+.dock-body { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.dock-body > * { flex: 1; min-height: 0; }
+
+/* ---------- 剧情结构图（StoryGraph） ---------- */
+.story-graph { position: relative; flex: 1; min-height: 0; overflow: hidden; background: transparent; }
+.graph-svg { display: block; width: 100%; height: 100%; cursor: grab; touch-action: none; }
+.graph-svg:active { cursor: grabbing; }
+.graph-empty { flex: 1; height: 100%; display: flex; align-items: center; justify-content: center; color: var(--text-faint); font-size: 13px; }
+
+.graph-node { cursor: pointer; }
+.graph-node-box { fill: var(--bg-2); stroke: var(--border-2); stroke-width: 1.2; transition: fill .12s, stroke .12s; }
+.graph-node:hover .graph-node-box { stroke: var(--accent-line); }
+.graph-node-title { fill: var(--text); font-size: 12px; font-weight: 600; pointer-events: none; }
+.graph-node.opening .graph-node-title { fill: var(--text-dim); font-style: italic; }
+.graph-node.entry .graph-node-box { stroke: var(--accent); stroke-width: 2; }
+.graph-node.active .graph-node-box { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 2; }
+.graph-node.unreachable { opacity: 0.5; }
+.graph-node.unreachable .graph-node-box { stroke-dasharray: 4 3; }
+.graph-node.dim { opacity: 0.3; }
+.graph-node.end .graph-node-box { fill: var(--bg-3); stroke: var(--text-faint); }
+.graph-node.end .graph-node-title { fill: var(--text-dim); }
+
+.graph-stitch-box { fill: var(--bg-1); stroke: var(--border); stroke-width: 1; }
+.graph-stitch:hover .graph-stitch-box { fill: var(--bg-3); stroke: var(--accent-line); }
+.graph-stitch.active .graph-stitch-box { fill: var(--accent-soft); stroke: var(--accent); }
+.graph-stitch-title { fill: var(--text-dim); font-size: 11px; pointer-events: none; }
+
+.graph-edge { fill: none; stroke: var(--border-2); stroke-width: 1.4; }
+.graph-edge.choice { stroke: var(--accent-line); stroke-dasharray: 5 3; }
+.graph-edge.back { stroke: var(--warn); }
+.graph-edge.dangling { stroke: var(--err); stroke-dasharray: 3 3; }
+.graph-edge.incident { stroke-width: 2.2; }
+.graph-arrow { fill: var(--border-2); }
+.graph-arrow.choice { fill: var(--accent-line); }
+
+.graph-toolbar { position: absolute; right: 12px; bottom: 12px; display: flex; align-items: center; gap: 4px; padding: 4px 6px; background: var(--bg-1); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.18); }
+.graph-toolbar button { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border: none; background: transparent; color: var(--text-dim); border-radius: 5px; cursor: pointer; font-size: 15px; }
+.graph-toolbar button:last-of-type { width: auto; padding: 0 8px; font-size: 12px; }
+.graph-toolbar button:hover { background: var(--bg-3); color: var(--text); }
+.graph-scale { font-size: 11px; color: var(--text-faint); min-width: 34px; text-align: right; padding-right: 2px; }
+.graph-hint { position: absolute; left: 12px; bottom: 12px; padding: 4px 10px; background: var(--bg-1); border: 1px solid var(--border); border-radius: 6px; font-size: 11px; color: var(--text-dim); }
+
 /* =========================================================================
    启动页（LaunchScreen）—— 冷启动 / 关闭项目后展示；上 banner + 下操作区。
    全屏、无菜单栏；主题色沿用全局 CSS 变量，banner 图随主题切换（组件内择图）。
@@ -1017,7 +1082,7 @@ button {
   background: color-mix(in srgb, var(--backdrop) 72%, transparent); backdrop-filter: blur(3px);
 }
 .settings-dlg {
-  position: relative; width: 540px; max-width: 100%; max-height: 100%;
+  position: relative; width: 680px; max-width: 100%; max-height: 100%;
   background: var(--bg-1); border: 1px solid var(--border-2); border-radius: 16px;
   box-shadow: 0 28px 80px -24px rgba(0, 0, 0, 0.62); overflow: hidden; display: flex; flex-direction: column;
 }
@@ -1035,7 +1100,7 @@ button {
 .settings-body { overflow: auto; padding: 4px 26px 8px; background: var(--bg-0); }
 /* 多 tab 版：左竖向导航 + 右内容页（右栏独立滚动，左栏不随之滚）。
    固定高度：弹窗高度不随 tab 内容多少忽高忽低，右栏（.settings-pane）内部滚动。 */
-.settings-body.tabbed { display: flex; overflow: hidden; padding: 0; height: min(440px, 70vh); }
+.settings-body.tabbed { display: flex; overflow: hidden; padding: 0; height: min(600px, 80vh); }
 .settings-nav { flex: 0 0 132px; display: flex; flex-direction: column; gap: 2px; padding: 14px 10px; background: var(--bg-1); border-right: 1px solid var(--border); }
 .settings-nav-item { display: flex; align-items: center; gap: 7px; width: 100%; padding: 9px 12px; border: none; background: transparent; border-radius: 8px; color: var(--text-dim); font: inherit; font-size: 13px; text-align: left; cursor: pointer; transition: background .12s, color .12s; }
 .settings-nav-item:hover { background: var(--bg-2); color: var(--text); }
@@ -1048,6 +1113,33 @@ button {
 .settings-cat { font-size: 11px; letter-spacing: .18em; text-transform: uppercase; color: var(--accent); font-weight: 600; padding: 22px 0 2px; }
 .settings-grp { border-bottom: 1px solid var(--border); padding-bottom: 14px; }
 .settings-grp:last-of-type { border-bottom: none; }
+
+/* ---------- 快捷键设置页（ShortcutsSettings，T031） ---------- */
+.shortcuts-settings { padding-top: 6px; }
+.shortcuts-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding-bottom: 6px; }
+.shortcuts-head .settings-hint { margin: 0; font-size: 12px; color: var(--text-dim); line-height: 1.5; }
+.shortcuts-reset-all { flex: none; font-size: 12px; padding: 4px 10px; border: 1px solid var(--border-2); border-radius: 6px; background: transparent; color: var(--text-dim); cursor: pointer; }
+.shortcuts-reset-all:hover:not(:disabled) { color: var(--text); background: var(--bg-2); }
+.shortcuts-reset-all:disabled { opacity: 0.4; cursor: default; }
+.shortcuts-error { margin: 4px 0 8px; padding: 6px 10px; font-size: 12px; color: var(--err); background: color-mix(in srgb, var(--err) 12%, transparent); border: 1px solid color-mix(in srgb, var(--err) 40%, transparent); border-radius: 6px; }
+.shortcuts-conflict { margin: 4px 0 8px; padding: 8px 10px; font-size: 12px; color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); border: 1px solid color-mix(in srgb, var(--warn) 42%, transparent); border-radius: 6px; }
+.shortcuts-conflict-head { margin-bottom: 4px; }
+.shortcuts-conflict ul { margin: 0; padding-left: 18px; }
+.shortcuts-conflict-key { font-family: var(--code-font); }
+.shortcut-row.conflict .shortcut-keys { border-color: var(--warn); color: var(--warn); }
+.shortcuts-group { padding-top: 10px; }
+.shortcuts-group-title { font-size: 11px; letter-spacing: .16em; text-transform: uppercase; color: var(--accent); font-weight: 600; padding: 6px 0 4px; }
+.shortcuts-list { list-style: none; margin: 0; padding: 0; }
+.shortcut-row { display: flex; align-items: center; gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--border); }
+.shortcut-row:last-child { border-bottom: none; }
+.shortcut-label { flex: 1; font-size: 13px; color: var(--text); }
+.shortcut-keys { flex: none; min-width: 96px; text-align: center; font-size: 12px; font-family: var(--code-font); padding: 4px 10px; border: 1px solid var(--border-2); border-radius: 6px; background: var(--bg-2); color: var(--text); cursor: pointer; }
+.shortcut-keys:hover:not(.readonly) { border-color: var(--accent-line); }
+.shortcut-keys.capturing { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.shortcut-keys.overridden { border-color: var(--accent-line); }
+.shortcut-keys.readonly { cursor: default; color: var(--text-faint); background: transparent; border-style: dashed; }
+.shortcut-reset { flex: none; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border: none; background: transparent; color: var(--text-dim); border-radius: 5px; cursor: pointer; font-size: 13px; }
+.shortcut-reset:hover { background: var(--bg-3); color: var(--text); }
 .settings-row { display: grid; grid-template-columns: 116px 1fr; align-items: center; gap: 14px; padding: 11px 0 4px; }
 .settings-label { font-size: 13px; color: var(--text); }
 .settings-fontctl { display: flex; align-items: center; gap: 10px; }
@@ -1586,4 +1678,5 @@ button {
   line-height: 1.65;
 }
 .settings-error { margin: 2px 0 0; font-size: 12.5px; color: var(--err); }
+.settings-control-status { font-size: 12.5px; color: var(--accent); }
 .settings-trust .lock { flex: 0 0 auto; }

@@ -3,13 +3,16 @@
   "identifier": "default",
   "description": "enables the default permissions",
   "windows": [
-    "main"
+    "main",
+    "launch",
+    "editor"
   ],
   "permissions": [
     "core:default",
     "core:window:allow-destroy",
     "core:window:allow-set-size",
     "core:window:allow-center",
+    "core:webview:allow-create-webview-window",
     "fs:default",
     "dialog:default",
     "log:default",
@@ -23,7 +26,7 @@
     { "identifier": "fs:allow-mkdir", "allow": [{ "path": "$HOME/**" }, { "path": "$APPDATA/**" }] },
     { "identifier": "fs:allow-exists", "allow": [{ "path": "$HOME/**" }, { "path": "$APPDATA/**" }] },
     { "identifier": "fs:allow-rename", "allow": [{ "path": "$HOME/**" }] },
-    { "identifier": "fs:allow-remove", "allow": [{ "path": "$HOME/**" }] },
+    { "identifier": "fs:allow-remove", "allow": [{ "path": "$HOME/**" }, { "path": "$APPDATA/**" }] },
     { "identifier": "fs:allow-copy-file", "allow": [{ "path": "$HOME/**" }, { "path": "$APPDATA/**" }] },
     {
       "identifier": "http:default",

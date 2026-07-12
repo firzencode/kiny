@@ -4,7 +4,7 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { loadProjectFromFiles, analyze, resolveStart, createStory } from '@kiny/engine'
 import type { Story } from '@kiny/engine'
-import { advance, initialState, type ResolveAsset } from '@kiny/player'
+import { type ResolveAsset } from '@kiny/player'
 import { PlayingView } from './PlayingView'
 
 beforeEach(() => {
@@ -41,8 +41,7 @@ const RESOLVE: ResolveAsset = (name) => 'demo/assets/' + name
 describe('PlayingView', () => {
   it('点选项触发该步 @sfx：播放一次性音效', async () => {
     const story = makeStory(KIN_SFX)
-    const first = advance(story, initialState, RESOLVE).state
-    render(<PlayingView story={story} resolveAsset={RESOLVE} first={first} />)
+    render(<PlayingView story={story} resolveAsset={RESOLVE} />)
     expect(window.HTMLMediaElement.prototype.play).not.toHaveBeenCalled() // 首屏无 sfx
     await userEvent.click(screen.getByRole('button', { name: '去左边' }))
     expect(window.HTMLMediaElement.prototype.play).toHaveBeenCalled()
@@ -50,8 +49,7 @@ describe('PlayingView', () => {
 
   it('点选项后叙事流增长并走到结束', async () => {
     const story = makeStory(KIN)
-    const first = advance(story, initialState, RESOLVE).state
-    render(<PlayingView story={story} resolveAsset={RESOLVE} first={first} />)
+    render(<PlayingView story={story} resolveAsset={RESOLVE} />)
 
     expect(screen.getByText('开场白。')).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: '去左边' }))
@@ -61,10 +59,9 @@ describe('PlayingView', () => {
 
   it('StrictMode 包裹下渲染与推进正常、无错误', async () => {
     const story = makeStory(KIN)
-    const first = advance(story, initialState, RESOLVE).state
     render(
       <StrictMode>
-        <PlayingView story={story} resolveAsset={RESOLVE} first={first} />
+        <PlayingView story={story} resolveAsset={RESOLVE} />
       </StrictMode>,
     )
     await userEvent.click(screen.getByRole('button', { name: '去左边' }))

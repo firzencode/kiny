@@ -1,19 +1,24 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { resolveStart } from '@kiny/engine'
 import type { ValidatedProgram } from '@kiny/engine'
-import type { PlayState, ResolveAsset } from '@kiny/player'
+import type { PlayState, ResolveAsset, InteractionStep } from '@kiny/player'
 import type { FileGateway, Manifest } from './files/gateway'
 import { defaultKipName, defaultWebpageDirName, buildProjectData, projectFileName } from './files/gateway'
 import { editorReducer, initialEditorState, anyDirty, activeBuffer } from './state/editorReducer'
 import { useDebouncedValidation, type ValidationOutcome } from './hooks/useDebouncedValidation'
 import { createIncrementalValidator } from './validate/validate'
 import { computePreview } from './preview/computePreview'
+import { usePreviewPlayback, type PreviewPlayback } from './preview/usePreviewPlayback'
 import { parseNodes } from './syntax/kin'
 import { MenuBar } from './components/MenuBar'
 import { Explorer } from './components/Explorer'
 import { TabBar } from './components/TabBar'
 import { Outline } from './components/Outline'
 import { EditorPane, type EditorHandle } from './components/EditorPane'
+import { StoryGraph } from './components/StoryGraph'
+import { normalize as normalizeKey } from './shortcuts/keys'
+import { dispatchMap } from './shortcuts/bindings'
+import type { CommandId } from './shortcuts/registry'
 import { DiagnosticsList } from './components/DiagnosticsList'
 import { PreviewPane } from './components/PreviewPane'
 import { SidebarResizer } from './components/SidebarResizer'
@@ -29,10 +34,14 @@ import { NewProjectDialog } from './components/NewProjectDialog'
 import { useAutosave } from './hooks/useAutosave'
 import { detectRecoverable, type RecoverableItem } from './state/drafts'
 import { loadSettings, saveSettings, applySettingsVars, clampSettings, DEFAULT_SETTINGS, SETTINGS_BOUNDS, type Settings } from './state/settings'
+import { loadWorkbenchSize, saveWorkbenchSize, computeLaunchSize, LAUNCH_WINDOW, WORKBENCH_WINDOW } from './state/windowSize'
 import { AiPanel } from './components/ai/AiPanel'
 import { useAiSession, cleanupExpiredChats } from './ai/useAiSession'
 import { loadAiConfig, saveAiConfig, isConfigured, type AiConfig } from './ai/aiConfig'
-import type { PreviewPort, PreviewSnapshot } from './ai/actions'
+import type { ActionContext, PreviewPort, PreviewSnapshot } from './ai/actions'
+import { useExternalControl } from './ai/externalControl'
+import { runExternalControlStart } from './ai/externalControlLifecycle'
+import { invoke } from '@tauri-apps/api/core'
 import { loadSession, saveSession, resolveSession, listRecentProjects, removeSession } from './state/session'
 import { LaunchScreen } from './components/LaunchScreen'
 import { logErrorEntry, ErrorDetailsDialog } from '@kiny/error-report'
@@ -42,11 +51,6 @@ const SESSION_SEED = 0x5eed
 // 32 位无符号随机种子；与 engine makeRng 的 `n >>> 0` 吻合。
 const randomSeed = () => Math.floor(Math.random() * 0x1_0000_0000) >>> 0
 const idResolve: ResolveAsset = (n: string) => n
-
-// 窗口逻辑尺寸随「启动页 ↔ workbench」切换调整观感：启动页紧凑（贴合冷启动默认），
-// 打开项目后放大到宽敞的编辑尺寸；与 tauri.conf 默认/最小值保持同一量纲。
-const LAUNCH_WINDOW = { width: 880, height: 620 }
-const WORKBENCH_WINDOW = { width: 1440, height: 900 }
 
 /** 取异常的可读信息（用于「<动作>失败：<具体>」通知）。 */
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
@@ -69,14 +73,17 @@ interface ViewPrefs {
   sidebarWidth: number
   /** AI 面板列宽 px（横向拖拽设定）。 */
   aiWidth: number
-  /** 中间区里编辑列占比 0..1（其余给预览列）；拖中线设定，默认 0.5。 */
+  /** 中间区里编辑列占比 0..1（其余给右侧面板列）；拖中线设定，默认 0.5。 */
   editorRatio: number
+  /** 右侧面板当前标签页：预览 / 结构图（二者共用同一列，tab 切换，一次只显示一个）。 */
+  rightTab: 'preview' | 'graph'
 }
 const DEFAULT_VIEW: ViewPrefs = {
   sidebar: true, preview: true, highlight: true, ai: false,
   explorerCollapsed: false, outlineCollapsed: false, diagnosticsCollapsed: false,
   explorerHeight: 0,
   sidebarWidth: 232, aiWidth: 360, editorRatio: 0.5,
+  rightTab: 'preview',
 }
 
 function loadTheme(): Theme {
@@ -93,17 +100,7 @@ function loadSavedView(): ViewPrefs | null {
   } catch { return null }
 }
 
-// 记忆用户手动调整过的 workbench 窗口尺寸（逻辑像素）；未记过返回 null → 用默认。
-const WINDOW_KEY = 'kiny-editor-window'
-function loadWorkbenchSize(): { width: number; height: number } | null {
-  try {
-    const v = JSON.parse(localStorage.getItem(WINDOW_KEY) || 'null')
-    return v && typeof v.width === 'number' && typeof v.height === 'number' ? { width: v.width, height: v.height } : null
-  } catch { return null }
-}
-function saveWorkbenchSize(width: number, height: number): void {
-  try { localStorage.setItem(WINDOW_KEY, JSON.stringify({ width, height })) } catch { /* ignore */ }
-}
+// 记忆用户手动调整过的 workbench 窗口尺寸：读写 + 退化尺寸守卫见 ./state/windowSize。
 
 export function App({ gateway }: { gateway: FileGateway }) {
   const [state, dispatch] = useReducer(editorReducer, initialEditorState)
@@ -130,6 +127,9 @@ export function App({ gateway }: { gateway: FileGateway }) {
   const [previewSeed, setPreviewSeed] = useState(SESSION_SEED)
   const seedRef = useRef(SESSION_SEED)
   const [settings, setSettings] = useState<Settings>(loadSettings)
+  // 外部控制运行态（T040）：非 null = 服务已起，含端口；随 settings.externalControl 联动 start/stop。
+  const [controlInfo, setControlInfo] = useState<{ port: number } | null>(null)
+  const controlGenRef = useRef<number | null>(null) // 当前在跑服务的代际号；关闭时据此代际安全地停自己那一代
   const [aiConfig, setAiConfig] = useState<AiConfig>(loadAiConfig)
   useEffect(() => { saveAiConfig(aiConfig) }, [aiConfig])
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -148,7 +148,7 @@ export function App({ gateway }: { gateway: FileGateway }) {
 
   // 热值放 ref，稳定 onValidated/run identity，避免抖动重置防抖
   const programRef = useRef<ValidatedProgram | null>(null)
-  const choiceSeqRef = useRef<number[]>([])
+  const interactionSeqRef = useRef<InteractionStep[]>([])
   const playRef = useRef<PlayState | null>(null)
   const resolveRef = useRef<ResolveAsset>(idResolve)
   const runIdRef = useRef(state.runId)
@@ -157,6 +157,10 @@ export function App({ gateway }: { gateway: FileGateway }) {
   const pendingJumpRef = useRef<{ file: string; line: number } | null>(null)
   const validatorRef = useRef(createIncrementalValidator())
   const loadDirRef = useRef<(dir: string) => Promise<boolean>>(async () => false)
+  const enterProjectRef = useRef<(dir: string) => Promise<boolean>>(async () => false)
+  // 本窗角色（Tauri 多窗模型 A）：'launch'/'editor' 走独立窗分流，null 走单页 SPA（web / 测试）。
+  // 每窗一个固定角色，整生命周期不变，故只读一次。
+  const windowMode = useMemo(() => gateway.currentWindowMode(), [gateway])
   useEffect(() => { runIdRef.current = state.runId }, [state.runId])
   useEffect(() => { filesRef.current = state.files }, [state.files])
   useEffect(() => { entryRef.current = state.entry }, [state.entry])
@@ -194,11 +198,11 @@ export function App({ gateway }: { gateway: FileGateway }) {
 
   // 保位重算
   const recompute = useCallback(
-    (prog: ValidatedProgram | null, seq: number[], resolve: ResolveAsset, prev: PlayState | null, emitSfx = false): PreviewSnapshot => {
+    (prog: ValidatedProgram | null, seq: InteractionStep[], resolve: ResolveAsset, prev: PlayState | null, emitSfx = false): PreviewSnapshot => {
       const start = prog && entryRef.current ? resolveStart(prog, entryRef.current) : null
       const snap = computePreview(prog, start, seedRef.current, seq, resolve, prev)
       setPlay(snap.play); playRef.current = snap.play
-      choiceSeqRef.current = snap.choiceSeq
+      interactionSeqRef.current = snap.interactionSeq
       setStale(snap.stale); staleRef.current = snap.stale
       if (emitSfx) setSfxQueue(snap.sfx) // 仅点选项路径出声；编辑重算不碰队列（保持引用→不重播）
       return snap
@@ -206,11 +210,21 @@ export function App({ gateway }: { gateway: FileGateway }) {
     [],
   )
 
+  const onPreviewCommit = useCallback((state: PlayState, sfx: string[]) => {
+    setPlay(state); playRef.current = state
+    setStale(false); staleRef.current = false
+    setSfxQueue(sfx)
+  }, [])
+  const preview: PreviewPlayback = usePreviewPlayback(onPreviewCommit)
+
+  // AI 动作前先中止在飞的人工打字动画：否则动画后续的 doStep 会覆盖 AI 刚 recompute 出的瞬时态。
+  // 不改 AI 自身的瞬时行为——choose/restart 仍直调 recompute；preview.cancel 引用稳定（useCallback([])）。
   const previewPort = useMemo<PreviewPort>(() => ({
-    snapshot: () => ({ play: playRef.current, stale: staleRef.current, choiceSeq: choiceSeqRef.current }),
-    choose: (pos: number) => recompute(programRef.current, [...choiceSeqRef.current, pos], resolveRef.current, playRef.current, true),
-    restart: () => recompute(programRef.current, [], resolveRef.current, playRef.current),
-  }), [recompute])
+    snapshot: () => ({ play: playRef.current, stale: staleRef.current, interactionSeq: interactionSeqRef.current }),
+    choose: (pos: number) => { preview.cancel(); return recompute(programRef.current, [...interactionSeqRef.current, { kind: 'choice', pos }], resolveRef.current, playRef.current, true) },
+    submitInput: (text: string) => { preview.cancel(); return recompute(programRef.current, [...interactionSeqRef.current, { kind: 'input', text }], resolveRef.current, playRef.current, true) },
+    restart: () => { preview.cancel(); return recompute(programRef.current, [], resolveRef.current, playRef.current) },
+  }), [recompute, preview.cancel])
 
   const ai = useAiSession({
     committedStateRef,
@@ -223,6 +237,59 @@ export function App({ gateway }: { gateway: FileGateway }) {
     projectDir: state.projectDir,
     retentionDays: settings.aiChatRetentionDays,
   })
+
+  // 外部控制（T040）动作层 ctx：与 useAiSession 内部组的 ctx 同款字面量（getState/dispatch/gateway/
+  // validator/preview），差别仅在于外部命令逐条串行处理、无需 AI 会话那种「运行中活态镜像」，
+  // 直接读已提交 state 即可（committedStateRef 由上方 effect 每次渲染后同步）。
+  const externalCtx: ActionContext = useMemo(() => ({
+    getState: () => committedStateRef.current,
+    dispatch,
+    gateway,
+    validator: validatorRef.current,
+    preview: previewPort,
+  }), [committedStateRef, dispatch, gateway, previewPort])
+
+  // 外部控制只在真正的编辑窗（T038 的 'editor' 窗口）参与：启动窗（'launch'）与 web/SPA（null，
+  // 无 Tauri、invoke 不可用）都不起服务、不挂处理器——否则启动窗会随共享的 localStorage 设置
+  // 二次 invoke('start_external_control')，重复起服务并以空 editor 状态错误应答外部请求。
+  const externalControlActive = settings.externalControl && windowMode === 'editor'
+  useExternalControl({ ctx: externalCtx, enabled: externalControlActive })
+
+  // 外部控制开关联动：开→起 Rust HTTP 服务（Rust 侧写 control.json，CLI 据此发现端口+token）；
+  // 关→代际安全地停服务（Rust 侧删文件）。仅在「本次会话确实起过」时才发 stop（避免冷启动默认关时误调用）。
+  // control.json 生命周期由 Rust 持有（文件存在 ⟺ 端口在监听）；start/stop 带代际号，令 dev
+  // StrictMode 双挂载下旧代际的补偿 stop 不误杀新代际的 server（详见 externalControlLifecycle.ts）。
+  useEffect(() => {
+    let cancelled = false
+    if (externalControlActive) {
+      void (async () => {
+        const result = await runExternalControlStart({ invoke, isCancelled: () => cancelled })
+        if (result.kind === 'started') {
+          controlGenRef.current = result.info.generation
+          if (!cancelled) setControlInfo({ port: result.info.port })
+        } else if (result.kind === 'error' && !cancelled) {
+          // 仅对「本效果仍在生效」的失败弹通知：dev StrictMode 双挂载下，被清理的那一代
+          // start 会因自我超代返回良性 error（已被更新的一代取代），此时 cancelled=true，
+          // 不该弹「启用失败」误导用户——真正的 bind 失败发生在未被取消的当代，仍会弹。
+          setNotice(`启用外部控制失败：${result.message}`)
+        }
+        // 'cancelled'：runExternalControlStart 内部已发代际安全的补偿 stop（Rust 删文件），此处无需再做。
+      })()
+    } else if (controlGenRef.current !== null) {
+      const gen = controlGenRef.current
+      controlGenRef.current = null
+      void (async () => {
+        try {
+          await invoke('stop_external_control', { generation: gen })
+        } catch (e) {
+          console.error('停止外部控制失败', e)
+        } finally {
+          if (!cancelled) setControlInfo(null)
+        }
+      })()
+    }
+    return () => { cancelled = true }
+  }, [externalControlActive])
 
   // 启动期按日期清理全部项目的过期 AI 对话记录（spec §5），跑一次。
   const chatCleanupRan = useRef(false)
@@ -259,11 +326,12 @@ export function App({ gateway }: { gateway: FileGateway }) {
     (r: ValidationOutcome) => {
       dispatch({ type: 'validated', runId: r.runId, diagnostics: r.diagnostics })
       if (r.runId !== runIdRef.current) return
+      preview.cancel() // 编辑优先：打断在飞的人工打字动画
       programRef.current = r.program
       setProgram(r.program)
-      recompute(r.program, choiceSeqRef.current, resolveRef.current, playRef.current)
+      recompute(r.program, interactionSeqRef.current, resolveRef.current, playRef.current)
     },
-    [recompute],
+    [recompute, preview.cancel],
   )
   useDebouncedValidation(state.runId, run, onValidated, 300)
 
@@ -281,7 +349,8 @@ export function App({ gateway }: { gateway: FileGateway }) {
     try {
       const proj = await gateway.readProject(dir)
       resolveRef.current = gateway.makeResolveAsset(dir)
-      choiceSeqRef.current = []
+      preview.cancel() // 项目切换/关闭：避免旧项目的动画残留定时器跨项目触发
+      interactionSeqRef.current = []
       playRef.current = null; setPlay(null)
       programRef.current = null; setProgram(null)
       setStale(false); setCaretLine(null); setActiveLine(1); setNotice(null)
@@ -303,14 +372,30 @@ export function App({ gateway }: { gateway: FileGateway }) {
     }
   }
 
-  const onOpenProject = async () => { const d = await gateway.pickProjectFile(); if (d) await loadDir(d) }
+  // 进入某项目：模型 A 分流。
+  // - 启动窗（'launch'）：先校验项目可读（失效的最近项目在此拦下、不开空窗），再 spawn 编辑窗、关本启动窗。
+  // - 编辑窗（'editor'）/ web（null）：就地 loadDir 换项目（无窗口交接）。
+  const enterProject = async (dir: string): Promise<boolean> => {
+    if (windowMode === 'launch') {
+      try { await gateway.readProject(dir) }
+      catch (e) { setNotice(`打开项目失败：${errMsg(e)}`); return false }
+      try {
+        await gateway.openEditorWindow(dir)
+        await gateway.closeWindow()
+        return true
+      } catch (e) { setNotice(`打开编辑窗口失败：${errMsg(e)}`); return false }
+    }
+    return loadDir(dir)
+  }
+
+  const onOpenProject = async () => { const d = await gateway.pickProjectFile(); if (d) await enterProject(d) }
   const onNewProject = () => setNewProjectOpen(true)
   const onBrowseNewProject = () => gateway.pickDirectory()
   const onCreateProject = async (parentDir: string, name: string): Promise<string | null> => {
     try {
       const dir = await gateway.newProject(parentDir, name)
       setNewProjectOpen(false)
-      await loadDir(dir)
+      await enterProject(dir)
       return null
     } catch (e) {
       return errMsg(e)
@@ -318,10 +403,11 @@ export function App({ gateway }: { gateway: FileGateway }) {
   }
   // 从启动页 / 「最近打开」菜单点最近项目：打开失败（目录被移动 / 删除）→ 提示 + 从会话存储移除该失效条目。
   const onOpenRecent = async (dir: string) => {
-    if (!(await loadDir(dir))) { removeSession(dir); setRecentTick((t) => t + 1) }
+    if (!(await enterProject(dir))) { removeSession(dir); setRecentTick((t) => t + 1) }
   }
-  // 记住最新 loadDir 闭包，供 onOpenProjectFile 事件订阅（一次性订阅、避免 stale）。
+  // 记住最新 loadDir / enterProject 闭包，供 onOpenProjectFile / takeLaunchProject 事件订阅（一次性订阅、避免 stale）。
   loadDirRef.current = loadDir
+  enterProjectRef.current = enterProject
   // 写单个文件缓冲（按 path 取，支持保存非活动 tab）。成功返 true，失败弹 notice 返 false。
   const saveBuffer = async (path: string): Promise<boolean> => {
     const buf = state.files[path]
@@ -391,12 +477,20 @@ export function App({ gateway }: { gateway: FileGateway }) {
     else void doExit()
   }
 
-  // 关闭当前项目回到启动页：清本项目残留草稿（同干净退出，避免下次误报崩溃恢复）→ 重置编辑器态。
+  // 关闭当前项目回到启动页：清本项目残留草稿（同干净退出，避免下次误报崩溃恢复）。
+  // - 编辑窗（'editor'）：开启动窗 → 关本编辑窗（互斥交接，不留空编辑窗）。
+  // - web（null）：就地 dispatch project_closed 回启动页（单页 SPA）。
   const doCloseProject = async () => {
     if (settings.autosaveRecovery && state.projectDir) {
       try { await autosave.clearProjectDrafts(state.projectDir) } catch { /* 清草稿失败不阻断关闭 */ }
     }
     setNotice(null)
+    if (windowMode === 'editor') {
+      try { await gateway.openLaunchWindow() }
+      catch (e) { setNotice(`打开启动窗口失败：${errMsg(e)}`); return } // 启动窗没起来则不关本窗，避免无窗
+      await gateway.closeWindow().catch((e) => setNotice(`关闭窗口失败：${errMsg(e)}`))
+      return
+    }
     dispatch({ type: 'project_closed' })
     setRecentTick((t) => t + 1)
   }
@@ -465,19 +559,22 @@ export function App({ gateway }: { gateway: FileGateway }) {
       .catch(() => { /* 非 Tauri 环境忽略 */ })
     return () => unlisten?.()
   }, [gateway])
-  // OS 双击 / 关联打开 .kiw：single-instance 转发的路径 → 派生父目录 → 打开项目（复用 loadDir 守卫）。
+  // OS 双击 / 关联打开 .kiw：single-instance 转发的路径 → 派生父目录 → enterProject（模型 A 分流：
+  // 启动窗开编辑窗、编辑窗就地换项目、web 原地 loadDir）。
   useEffect(() => {
     let unlisten: (() => void) | undefined
     gateway
-      .onOpenProjectFile((path) => { void loadDirRef.current(parentDir(path)) })
+      .onOpenProjectFile((path) => { void enterProjectRef.current(parentDir(path)) })
       .then((u) => { unlisten = u })
       .catch(() => { /* 非 Tauri 环境忽略 */ })
     return () => unlisten?.()
   }, [gateway])
-  // 窗口尺寸随启动页 ↔ workbench 切换调整：仅在 projectDir 的「有↔无」真正翻转时改尺寸并居中，
-  // 冷启动首帧（prev==cur==null）不动窗（已是启动页默认尺寸），项目间切换（都非空）也不动。
+  // 窗口尺寸随启动页 ↔ workbench 切换调整（**仅 web / 单页 SPA**，windowMode===null）：Tauri 多窗下
+  // 尺寸随窗创建即给定（openLaunchWindow / openEditorWindow），窗内不再翻转。仅在 projectDir 的
+  // 「有↔无」真正翻转时改尺寸并居中；冷启动首帧、项目间切换都不动窗。
   const prevProjectDirRef = useRef(state.projectDir)
   useEffect(() => {
+    if (windowMode !== null) return // Tauri 多窗：尺寸随窗创建给定，不在窗内翻转
     const prev = prevProjectDirRef.current
     const cur = state.projectDir
     if (prev === cur) return
@@ -486,7 +583,7 @@ export function App({ gateway }: { gateway: FileGateway }) {
     // 进 workbench 优先用记忆的尺寸（用户上次手动调整的），未记过用默认；回启动页用固定尺寸。
     const size = prev === null && cur !== null ? (loadWorkbenchSize() ?? WORKBENCH_WINDOW) : prev !== null && cur === null ? LAUNCH_WINDOW : null
     if (size) void gateway.setWindowSize(size.width, size.height).catch((e) => console.error('调整窗口尺寸失败', e))
-  }, [state.projectDir, gateway])
+  }, [state.projectDir, gateway, windowMode])
   // 记忆用户手动调整的 workbench 尺寸：订阅窗口 resize，仅在有项目时落库（启动页固定尺寸不记，
   // 含切回启动页时我们自己触发的程序化 resize）。订阅只建一次。
   useEffect(() => {
@@ -498,12 +595,42 @@ export function App({ gateway }: { gateway: FileGateway }) {
     return () => unlisten?.()
   }, [gateway])
   // 冷启动（OS 双击 .kiw 首次拉起）：mount 后主动取走 Rust 暂存的启动路径（emit 会早于订阅而丢，故用拉取）。
+  // 经 enterProject：启动窗下开编辑窗直达项目（不停在启动窗），web 下原地 loadDir。编辑窗自身不跑
+  // （它由 ?project 载入，见下方 boot effect），避免与之重复。
   useEffect(() => {
+    if (windowMode === 'editor') return
     gateway
       .takeLaunchProject()
-      .then((path) => { if (path) void loadDirRef.current(parentDir(path)) })
+      .then((path) => { if (path) void enterProjectRef.current(parentDir(path)) })
       .catch(() => { /* 非 Tauri 环境忽略 */ })
-  }, [gateway])
+  }, [gateway, windowMode])
+  // 启动窗：按屏幕分辨率定固定尺寸并居中（tauri.conf 默认尺寸只是首帧兜底；冷启动与 spawn 的启动窗
+  // 都经此对齐到依分辨率算出的尺寸）。启动窗禁止用户最大化 / 调整尺寸由窗口创建选项 resizable/maximizable:false
+  // 保证，此处只定尺寸。仅 launch 窗跑一次。
+  const launchSizedRef = useRef(false)
+  useEffect(() => {
+    if (windowMode !== 'launch' || launchSizedRef.current) return
+    launchSizedRef.current = true
+    void (async () => {
+      const monitor = await gateway.currentMonitorSize().catch(() => null)
+      const size = monitor ? computeLaunchSize(monitor) : LAUNCH_WINDOW
+      await gateway.setWindowSize(size.width, size.height).catch((e) => console.error('调整启动窗尺寸失败', e))
+    })()
+  }, [gateway, windowMode])
+  // 编辑窗启动：从 URL ?project 载入项目。载入失败 / 无 ?project → 不留空编辑窗，回退开启动窗 + 关本窗。
+  const editorBootedRef = useRef(false)
+  useEffect(() => {
+    if (windowMode !== 'editor' || editorBootedRef.current) return
+    editorBootedRef.current = true
+    const dir = gateway.currentWindowProject()
+    void (async () => {
+      if (dir !== null && (await loadDirRef.current(dir))) return
+      // 启动窗没起来则不关本窗（保留过渡占位，用户可退出/重试），避免零窗口不可恢复——同 doCloseProject。
+      try { await gateway.openLaunchWindow() }
+      catch (e) { setNotice(`打开启动窗口失败：${errMsg(e)}`); return }
+      await gateway.closeWindow().catch(() => { /* 关窗失败无从恢复，静默 */ })
+    })()
+  }, [gateway, windowMode])
 
   const onCreateFile = async (rawName: string) => {
     if (!state.projectDir) return
@@ -649,29 +776,37 @@ export function App({ gateway }: { gateway: FileGateway }) {
   const onRestoreMyLayout = () => { if (savedView) setView({ ...DEFAULT_VIEW, ...savedView }) }
   const onRestoreDefaultLayout = () => setView({ ...DEFAULT_VIEW })
 
-  // 全局键盘快捷键：菜单里的 sc 仅是提示文本，这里做真正的绑定（文件类动作）。
-  // 编辑类（Ctrl+X/C/V/A）由 textarea 原生处理，不在此重绑，以免冲突/双重执行。
-  // 用 ref 取最新 handler，监听器只注册一次；各 handler 自带空操作守卫。
-  const shortcutsRef = useRef({ onNewProject, onOpenProject, onSave, onSaveAll, onOpenSettings, onZoomIn, onZoomOut, onZoomReset })
-  shortcutsRef.current = { onNewProject, onOpenProject, onSave, onSaveAll, onOpenSettings, onZoomIn, onZoomOut, onZoomReset }
+  // 全局键盘快捷键：由中央注册表（shortcuts/registry）驱动，查表派发；菜单 sc 与此同源。
+  // 编辑类（Ctrl+X/C/V/A）与 editor 域命令（注释）由 CodeMirror 处理，不在此重绑。
+  // 命令 handler 与生效绑定放 ref，监听器只注册一次；各 handler 自带空操作 / 项目守卫。
+  const commandHandlersRef = useRef<Record<CommandId, () => void>>(null!)
+  commandHandlersRef.current = {
+    newProject: () => { void onNewProject() },
+    openProject: () => { void onOpenProject() },
+    newFile: () => setNewFileToken((t) => t + 1),
+    save: () => { void onSave() },
+    saveAll: () => { void onSaveAll() },
+    // 语法帮助 / 设置随 workbench 挂载：无项目（启动页）时不触发，否则下次进项目弹窗意外弹出。
+    openSettings: () => { if (committedStateRef.current.projectDir !== null) onOpenSettings() },
+    help: () => { if (committedStateRef.current.projectDir !== null) setHelp('syntax') },
+    zoomIn: () => onZoomIn(),
+    zoomOut: () => onZoomOut(),
+    zoomReset: () => onZoomReset(),
+    // editor 域 / readonly 命令：全局不派发（CM / 原生处理），占位以满足 Record 完整性。
+    toggleComment: () => {}, undo: () => {}, redo: () => {}, cut: () => {}, copy: () => {}, paste: () => {}, selectAll: () => {},
+  }
+  // 生效的 global 域派发表（组合 → 命令 id），随自定义覆盖更新。
+  const globalDispatchRef = useRef<Map<string, CommandId>>(new Map())
+  globalDispatchRef.current = dispatchMap('global', settings.shortcuts)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (settingsOpenRef.current || projectSettingsOpenRef.current || newProjectOpenRef.current) return
-      if (!(e.ctrlKey || e.metaKey)) return
-      const k = e.key.toLowerCase()
-      const a = shortcutsRef.current
-      if (k === 's' && e.altKey) { e.preventDefault(); void a.onSaveAll() }
-      else if (k === 's') { e.preventDefault(); void a.onSave() }
-      else if (k === 'n' && e.shiftKey) { e.preventDefault(); setNewFileToken((t) => t + 1) }
-      else if (k === 'n') { e.preventDefault(); void a.onNewProject() }
-      else if (k === 'o') { e.preventDefault(); void a.onOpenProject() }
-      // 语法帮助 / 设置弹窗随 workbench 挂载：无项目（启动页）时不触发，
-      // 否则会置 help/settingsOpen 状态、下次进项目时弹窗意外弹出。
-      else if (k === '/') { if (committedStateRef.current.projectDir !== null) { e.preventDefault(); setHelp('syntax') } }
-      else if (k === ',') { if (committedStateRef.current.projectDir !== null) { e.preventDefault(); a.onOpenSettings() } }
-      else if (k === '=' || k === '+') { e.preventDefault(); a.onZoomIn() }
-      else if (k === '-') { e.preventDefault(); a.onZoomOut() }
-      else if (k === '0') { e.preventDefault(); a.onZoomReset() }
+      const combo = normalizeKey(e)
+      if (!combo) return
+      const id = globalDispatchRef.current.get(combo)
+      if (!id) return
+      e.preventDefault()
+      commandHandlersRef.current[id]()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -682,14 +817,32 @@ export function App({ gateway }: { gateway: FileGateway }) {
     else { pendingJumpRef.current = { file, line }; dispatch({ type: 'open_tab', path: file }) }
   }
 
-  const onChoosePreview = (pos: number) =>
-    recompute(programRef.current, [...choiceSeqRef.current, pos], resolveRef.current, playRef.current, true)
+  const onChoosePreview = (pos: number) => {
+    const prior = interactionSeqRef.current
+    interactionSeqRef.current = [...prior, { kind: 'choice', pos }]
+    const prog = programRef.current
+    const start = prog && entryRef.current ? resolveStart(prog, entryRef.current) : null
+    if (!prog || start === null) { setStale(true); staleRef.current = true; return } // 程序当前无效：冻结，等下次编辑重算恢复有效再读到这个交互序列
+    preview.choose(prog, start, seedRef.current, prior, pos, resolveRef.current)
+  }
+  const onSubmitInputPreview = (text: string) => {
+    const prior = interactionSeqRef.current
+    interactionSeqRef.current = [...prior, { kind: 'input', text }]
+    const prog = programRef.current
+    const start = prog && entryRef.current ? resolveStart(prog, entryRef.current) : null
+    if (!prog || start === null) { setStale(true); staleRef.current = true; return } // 程序当前无效：冻结，等下次编辑重算恢复
+    preview.submit(prog, start, seedRef.current, prior, text, resolveRef.current)
+  }
   // ↺ 重开预览：随机模式换新种子、确定性模式回落固定种子；翻设置开关本身不换，下一次 ↺ 才生效。
   const onRestart = () => {
     const nextSeed = settings.previewRandomSeed ? randomSeed() : SESSION_SEED
     seedRef.current = nextSeed
     setPreviewSeed(nextSeed)
-    recompute(programRef.current, [], resolveRef.current, playRef.current)
+    interactionSeqRef.current = []
+    const prog = programRef.current
+    const start = prog && entryRef.current ? resolveStart(prog, entryRef.current) : null
+    if (!prog || start === null) { setStale(true); staleRef.current = true; return }
+    preview.restart(prog, start, nextSeed, resolveRef.current)
   }
 
   const dirtyMap = useMemo(() => {
@@ -706,6 +859,13 @@ export function App({ gateway }: { gateway: FileGateway }) {
     ['--col-preview' as string]: view.preview ? `${1 - view.editorRatio}fr` : '0px',
     ['--col-ai' as string]: view.ai ? `${view.aiWidth}px` : '0px',
   }
+
+  // 顶层渲染分流（模型 A）：
+  // - 编辑窗启动、项目尚未载入完 → 过渡态占位（编辑窗永不停在「无项目」）。
+  // - 启动窗，或 web/SPA 且无项目 → LaunchScreen。
+  // - 其余（有项目，或编辑窗已载入）→ workbench。
+  const editorBooting = windowMode === 'editor' && state.projectDir === null
+  const showLaunch = windowMode === 'launch' || (windowMode === null && state.projectDir === null)
 
   // 横向拖拽列宽：从指针 clientX 相对 workbench 边缘换算，夹紧到合理区间。
   const onResizeSidebar = (clientX: number) => {
@@ -773,6 +933,7 @@ export function App({ gateway }: { gateway: FileGateway }) {
         onZoomIn={onZoomIn}
         onZoomOut={onZoomOut}
         onZoomReset={onZoomReset}
+        shortcuts={settings.shortcuts}
         hasSavedLayout={hasSavedLayout}
         onSaveLayout={onSaveLayout}
         onRestoreMyLayout={onRestoreMyLayout}
@@ -780,6 +941,7 @@ export function App({ gateway }: { gateway: FileGateway }) {
         recentProjects={recentProjects}
         onOpenRecent={onOpenRecent}
         onCloseProject={requestCloseProject}
+        controlInfo={controlInfo}
       />
       )}
       {notice && (
@@ -802,7 +964,9 @@ export function App({ gateway }: { gateway: FileGateway }) {
         onCreate={onCreateProject}
         onCancel={() => setNewProjectOpen(false)}
       />
-      {state.projectDir === null ? (
+      {editorBooting ? (
+      <div className="editor-booting" role="status">正在打开项目…</div>
+      ) : showLaunch ? (
       <LaunchScreen
         theme={theme}
         recent={recentProjects}
@@ -815,6 +979,7 @@ export function App({ gateway }: { gateway: FileGateway }) {
       <div className="workbench" style={cols}>
         {/*
           各面板显式钉在自己的 grid 列（sidebar=1 / editor=2 / preview=3 / ai=4）。
+          右侧面板列（第 3 列）内含 tab，预览 / 结构图共用，一次显示一个。
           面板条件渲染，若靠 grid 自动排布，隐藏某面板后其后的子项会顺位落到错误的列轨道
           （如隐藏 sidebar 后 .editor-col 会落进 0px 的 --col-sidebar 轨道被压扁）。显式定位后，
           任一面板显隐都不影响其余面板的落列——隐藏面板的列塌成 0px 且无子项占用。
@@ -878,6 +1043,7 @@ export function App({ gateway }: { gateway: FileGateway }) {
               program={program}
               activeFile={state.activeFile}
               highlight={view.highlight}
+              shortcuts={settings.shortcuts}
             />
           ) : (
             <div className="editor-empty">未打开文件</div>
@@ -888,9 +1054,45 @@ export function App({ gateway }: { gateway: FileGateway }) {
             collapsed={view.diagnosticsCollapsed}
             onToggleCollapse={() => setView((v) => ({ ...v, diagnosticsCollapsed: !v.diagnosticsCollapsed }))}
           />
-          {view.preview && <ColResizer edge="right" onResize={onResizeEditorPreview} ariaLabel="调整编辑区与预览占比" />}
+          {view.preview && <ColResizer edge="right" onResize={onResizeEditorPreview} ariaLabel="调整编辑区与右侧面板占比" />}
         </div>
-        {view.preview && <PreviewPane play={play} stale={stale} sfx={sfxQueue} seed={previewSeed} onChoose={onChoosePreview} onRestart={onRestart} style={{ gridColumn: 3 }} />}
+        {view.preview && (
+          <div className="right-dock" style={{ gridColumn: 3 }}>
+            {/* 预览 ⇄ 结构图共用此列，分段按钮切换（一次只显示一个） */}
+            <div className="dock-tabs" role="group" aria-label="右侧面板视图">
+              <button
+                type="button"
+                aria-pressed={view.rightTab === 'preview'}
+                className={'dock-tab' + (view.rightTab === 'preview' ? ' active' : '')}
+                onClick={() => setView((v) => ({ ...v, rightTab: 'preview' }))}
+              >
+                预览
+              </button>
+              <button
+                type="button"
+                aria-pressed={view.rightTab === 'graph'}
+                className={'dock-tab' + (view.rightTab === 'graph' ? ' active' : '')}
+                onClick={() => setView((v) => ({ ...v, rightTab: 'graph' }))}
+              >
+                结构图
+              </button>
+            </div>
+            <div className="dock-body">
+              {view.rightTab === 'graph' ? (
+                <StoryGraph
+                  program={program}
+                  entryPath={state.entry}
+                  activeFile={state.activeFile}
+                  activeLine={activeLine}
+                  onJump={onJumpDiagnostic}
+                />
+              ) : (
+                <PreviewPane play={play} stale={stale} sfx={sfxQueue} seed={previewSeed} onChoose={onChoosePreview} onSubmitInput={onSubmitInputPreview} onRestart={onRestart}
+                  reveal={preview.reveal} onContentClick={preview.onContentClick} />
+              )}
+            </div>
+          </div>
+        )}
         {view.ai && (
           <AiPanel
             configured={isConfigured(aiConfig)}
@@ -917,6 +1119,7 @@ export function App({ gateway }: { gateway: FileGateway }) {
         settings={settings}
         theme={theme}
         aiConfig={aiConfig}
+        controlInfo={controlInfo}
         onSave={onSaveSettings}
         onCancel={onCancelSettings}
       />

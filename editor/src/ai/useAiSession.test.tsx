@@ -9,9 +9,10 @@ import { projectKey, makeConversation, toChatStore, MS_PER_DAY, type ChatStore }
 import type { FileGateway } from '../files/gateway'
 
 const fakePreview: PreviewPort = {
-  snapshot: () => ({ play: null, stale: false, choiceSeq: [] }),
-  choose: () => ({ play: null, stale: false, choiceSeq: [] }),
-  restart: () => ({ play: null, stale: false, choiceSeq: [] }),
+  snapshot: () => ({ play: null, stale: false, interactionSeq: [] }),
+  choose: () => ({ play: null, stale: false, interactionSeq: [] }),
+  submitInput: () => ({ play: null, stale: false, interactionSeq: [] }),
+  restart: () => ({ play: null, stale: false, interactionSeq: [] }),
 }
 
 function makeDeps(provider: Provider): UseAiSessionDeps {

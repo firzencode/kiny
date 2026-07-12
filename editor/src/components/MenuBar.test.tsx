@@ -31,6 +31,7 @@ function setup(over: Partial<ComponentProps<typeof MenuBar>> = {}) {
     onZoomIn: vi.fn(),
     onZoomOut: vi.fn(),
     onZoomReset: vi.fn(),
+    shortcuts: {},
     onExportKip: vi.fn(),
     onExportWebpage: vi.fn(),
     hasSavedLayout: false,
@@ -40,6 +41,7 @@ function setup(over: Partial<ComponentProps<typeof MenuBar>> = {}) {
     recentProjects: [] as { dir: string; name: string }[],
     onOpenRecent: vi.fn(),
     onCloseProject: vi.fn(),
+    controlInfo: null as { port: number } | null,
     ...over,
   }
   render(<MenuBar {...props} />)
@@ -52,6 +54,16 @@ describe('MenuBar', () => {
     setup()
     expect(screen.getByText('雾港之夜')).toBeInTheDocument()
     expect(screen.getByText('● 未保存')).toBeInTheDocument()
+  })
+
+  it('controlInfo 非 null 时常驻显示外部控制端口；null 时不显示', () => {
+    setup({ controlInfo: null })
+    expect(screen.queryByText(/外部控制已启用/)).toBeNull()
+  })
+
+  it('controlInfo 非 null 时显示端口号', () => {
+    setup({ controlInfo: { port: 5173 } })
+    expect(screen.getByText(/外部控制已启用 · 端口 5173/)).toBeInTheDocument()
   })
 
   it('文件菜单：打开/新建项目/新建文件/保存 回调', async () => {

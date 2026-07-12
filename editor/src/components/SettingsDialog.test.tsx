@@ -7,7 +7,8 @@ import { DEFAULT_AI_CONFIG } from '../ai/aiConfig'
 
 const base = {
   open: true, settings: DEFAULT_SETTINGS, theme: 'dark' as const,
-  aiConfig: DEFAULT_AI_CONFIG, onSave: vi.fn(), onCancel: vi.fn(),
+  aiConfig: DEFAULT_AI_CONFIG, controlInfo: null as { port: number } | null,
+  onSave: vi.fn(), onCancel: vi.fn(),
 }
 
 beforeEach(() => { document.documentElement.removeAttribute('style') })
@@ -57,15 +58,21 @@ describe('SettingsDialog', () => {
     expect(screen.getByRole('button', { name: '保存' })).toBeDisabled()
   })
 
-  it('取消 / Esc / ✕ / 遮罩 → onCancel，从不 onSave', async () => {
+  it('取消 / Esc / ✕ → onCancel，从不 onSave', async () => {
     const onCancel = vi.fn(), onSave = vi.fn()
-    const { container } = render(<SettingsDialog {...base} onCancel={onCancel} onSave={onSave} />)
+    render(<SettingsDialog {...base} onCancel={onCancel} onSave={onSave} />)
     await userEvent.click(screen.getByRole('button', { name: '取消' }))
     fireEvent.keyDown(window, { key: 'Escape' })
     await userEvent.click(screen.getByRole('button', { name: '关闭' }))
-    await userEvent.click(container.querySelector('.settings-scrim')!)
-    expect(onCancel).toHaveBeenCalledTimes(4)
+    expect(onCancel).toHaveBeenCalledTimes(3)
     expect(onSave).not.toHaveBeenCalled()
+  })
+
+  it('点遮罩空白处不关闭（避免误触丢失未保存改动）', async () => {
+    const onCancel = vi.fn()
+    const { container } = render(<SettingsDialog {...base} onCancel={onCancel} />)
+    await userEvent.click(container.querySelector('.settings-scrim')!)
+    expect(onCancel).not.toHaveBeenCalled()
   })
 
   it('恢复默认 → 草稿回默认（从非默认初值，保存随之启用）', async () => {
@@ -111,6 +118,24 @@ describe('SettingsDialog', () => {
     expect(sw).toBeChecked()
     await userEvent.click(screen.getByRole('button', { name: '保存' }))
     expect(onSave).toHaveBeenCalledWith({ ...DEFAULT_SETTINGS, previewRandomSeed: true }, 'dark', DEFAULT_AI_CONFIG)
+  })
+
+  it('外部控制开关：默认关，在 AI tab，可切换并回传', async () => {
+    const onSave = vi.fn()
+    render(<SettingsDialog {...base} onSave={onSave} />)
+    await userEvent.click(screen.getByRole('tab', { name: 'AI' }))
+    const sw = screen.getByRole('switch', { name: '启用外部控制' })
+    expect(sw).not.toBeChecked()
+    await userEvent.click(sw)
+    expect(sw).toBeChecked()
+    await userEvent.click(screen.getByRole('button', { name: '保存' }))
+    expect(onSave).toHaveBeenCalledWith({ ...DEFAULT_SETTINGS, externalControl: true }, 'dark', DEFAULT_AI_CONFIG)
+  })
+
+  it('controlInfo 非 null 时 AI tab 显示运行中端口；null 时不显示', async () => {
+    render(<SettingsDialog {...base} controlInfo={{ port: 4321 }} />)
+    await userEvent.click(screen.getByRole('tab', { name: 'AI' }))
+    expect(screen.getByText(/运行中 · 端口 4321/)).toBeInTheDocument()
   })
 })
 
@@ -172,7 +197,8 @@ describe('SettingsDialog · 多 tab（T030）', () => {
 describe('SettingsDialog · AI 节', () => {
   const baseProps = {
     open: true, settings: DEFAULT_SETTINGS, theme: 'dark' as const,
-    aiConfig: DEFAULT_AI_CONFIG, onSave: vi.fn(), onCancel: vi.fn(),
+    aiConfig: DEFAULT_AI_CONFIG, controlInfo: null as { port: number } | null,
+    onSave: vi.fn(), onCancel: vi.fn(),
   }
 
   it('改 endpoint/model/key 后保存，回传新 aiConfig', () => {

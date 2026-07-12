@@ -46,6 +46,7 @@ export class Story {
 
   private readonly taken = new Set<Choice>() // 一次性已选（按节点身份）
   private pendingChoices: { view: ChoiceView; choice: Choice }[] = []
+  private pendingInput: { varName: string; placeholder: string | null } | null = null // 停在 @input：等读者提交文本（与 pendingChoices 对偶）
   private pendingDivert: { target: string; args: string[]; line: number } | null = null // 点击正文产出后待消费的跳转
   private turns = 0
   private autoSteps = 0 // 自上次玩家交互(choose)起的累计自动推进步数；死循环兜底用
@@ -190,6 +191,11 @@ export class Story {
     return this.pendingChoices.map((p) => p.view)
   }
 
+  /** 当前待填的输入框（停在 @input 时非空；varName 为回写目标变量名，placeholder 为提示文字）。 */
+  get currentInput(): { varName: string; placeholder: string | null } | null {
+    return this.pendingInput
+  }
+
   get canContinue(): boolean {
     // 已有完整成行的待 flush 文本（点击正文 / 非 glue 行 / END 前定型的末段）。
     // 注意：此判断须先于 ended 短路——到达 END 时末段缓冲已定型成行（bufferGlued 清零），
@@ -198,6 +204,7 @@ export class Story {
     if (this.ended) return false
     this.advanceToEvent()
     if (this.buffer !== null && !this.bufferGlued) return true
+    if (this.pendingInput !== null) return false // 停在输入框，等读者提交（与 pendingChoices 对偶，须先于 parkedCommand——@input 元素亦是 command）
     if (this.parkedCommand() !== null) return true // 停在命令，下次 continue 产出 command 事件
     if (this.pendingChoices.length > 0) return false // 停在选项，让玩家选
     return !this.ended
@@ -248,6 +255,29 @@ export class Story {
     return ev
   }
 
+  /**
+   * 提交输入框文本（与 choose 对偶）：trim 后非空按 `~ varName = 文本` 的同一作用域规则回写，
+   * 空 / 纯空白提交则不覆写（保留变量声明值作默认）。记一次玩家交互（turns++、autoSteps 清零），
+   * 清 pendingInput、推进游标越过 @input、恢复推进。
+   */
+  submitInput(text: string): void {
+    if (this.pendingInput === null) {
+      throw new RuntimeError('当前无待填输入框')
+    }
+    const { varName } = this.pendingInput
+    const v = text.trim()
+    if (v !== '') {
+      // 与逻辑行 `~ varName = v` 同一 L→G 作用域链回写，不必关心变量是全局还是局部。
+      this.runLogic(`${varName} = ${JSON.stringify(v)}`, false)
+    }
+    this.turns++
+    this.autoSteps = 0 // 玩家交互 = 取得进展，重置死循环兜底（防 @input 落循环里被 STEP_BUDGET 误伤）
+    this.pendingInput = null
+    const frame = this.stack.current
+    if (frame) frame.index++ // 推进游标越过 @input 元素
+    this.advanceToEvent()
+  }
+
   choose(index: number): void {
     if (this.pendingChoices.length === 0) {
       throw new RuntimeError('当前无待选选项')
@@ -290,6 +320,7 @@ export class Story {
    * 无产出元素（divert/logic 等）就地执行。
    */
   private advanceToEvent(): void {
+    if (this.pendingInput !== null) return // 已停在输入框：不再推进，等 submitInput（幂等，避免重复求值 placeholder）
     for (;;) {
       if (++this.autoSteps > STEP_BUDGET) {
         throw new RuntimeError(
@@ -339,6 +370,14 @@ export class Story {
         continue
       }
       if (el.kind === 'command') {
+        if (el.name === 'input') {
+          // @input 是唯一 engine 内部处理、不透传的命令：先 flush 已成行文本（命令硬边界），
+          // 再 park 成输入暂停。游标**停在** @input 元素上（不推进）——快照据此天然重建（无需 index 回退）。
+          if (this.settleBufferIntoLine()) return // 有缓冲文本 → 先交 continue flush，下轮再 park input
+          const placeholder = el.args.length > 1 ? String(this.evalArg(el.args[1]!, el.line)) : null
+          this.pendingInput = { varName: el.args[0]!, placeholder }
+          return
+        }
         // 命令是硬边界：缓冲非空先 flush 文本（含开口 glue，此处定型成行），命令留到下次推进；
         // 缓冲空则停在命令（不推进游标），由 continue() 经 step 产出 command 事件。
         this.settleBufferIntoLine()
@@ -387,6 +426,15 @@ export class Story {
   /** 选项条件求值；null 视为无条件。 */
   private condOk(c: Choice): boolean {
     return c.condition === null ? true : Boolean(this.evalCondition(c.condition, c.line))
+  }
+
+  /** 求值一个命令实参表达式（含 @input 的 placeholder），出错包成带源定位的 RuntimeError。 */
+  private evalArg(code: string, line: number): unknown {
+    try {
+      return evalExpr(code, this.B, this.G, this.L, `${this.currentKnot.name}:cmdarg${line}`)
+    } catch (e) {
+      throw new RuntimeError(`JS 执行错误：${(e as Error).message}`, this.currentFile, line)
+    }
   }
 
   /**
@@ -452,13 +500,7 @@ export class Story {
       }
       case 'command': {
         frame.index++
-        const args = el.args.map((a) => {
-          try {
-            return evalExpr(a, this.B, this.G, this.L, `${this.currentKnot.name}:cmdarg${el.line}`)
-          } catch (e) {
-            throw new RuntimeError(`JS 执行错误：${(e as Error).message}`, this.currentFile, el.line)
-          }
-        })
+        const args = el.args.map((a) => this.evalArg(a, el.line))
         return { kind: 'command', name: el.name, args }
       }
       case 'choiceGroup': {

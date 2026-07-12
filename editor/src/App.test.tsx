@@ -220,6 +220,18 @@ describe('App 多文件集成', () => {
     expect(await screen.findByRole('dialog', { name: '新建项目' })).toBeInTheDocument()
   })
 
+  it('F1 打开语法参考帮助屏；Ctrl+/ 不再开帮助（改为编辑器注释）', async () => {
+    render(<App gateway={gw()} />)
+    await fileMenu('打开项目...')
+    await screen.findAllByText('雾港')
+    // Ctrl+/ 不再触发帮助屏
+    fireEvent.keyDown(window, { key: '/', ctrlKey: true })
+    expect(screen.queryByRole('dialog', { name: 'Kiny 语法参考' })).toBeNull()
+    // F1 打开帮助屏
+    fireEvent.keyDown(window, { key: 'F1' })
+    expect(await screen.findByRole('dialog', { name: 'Kiny 语法参考' })).toBeInTheDocument()
+  })
+
   it('Ctrl+Shift+N 快捷键新建文件（出现内联输入）', async () => {
     render(<App gateway={gw()} />)
     await fileMenu('打开项目...')
@@ -820,8 +832,8 @@ describe('App 布局快照（保存 / 恢复布局）', () => {
 
   it('保存当前布局：写入 kiny-editor-view-saved 且等于当前 view，并弹成功提示', async () => {
     render(<App gateway={gw()} />)
-    // 先调乱一处布局（关预览面板），使当前 view 区别于默认
-    await viewMenu('预览面板')
+    // 先调乱一处布局（关右侧面板），使当前 view 区别于默认
+    await viewMenu('预览 / 结构图面板')
     expect(readView().preview).toBe(false)
     await viewMenu('保存当前布局')
     expect(await screen.findByText('已保存当前布局')).toBeInTheDocument()
@@ -843,9 +855,9 @@ describe('App 布局快照（保存 / 恢复布局）', () => {
 
   it('恢复我的布局：把 view 还原为已存快照', async () => {
     render(<App gateway={gw()} />)
-    await viewMenu('预览面板')      // preview: false
-    await viewMenu('保存当前布局')   // 快照 preview=false
-    await viewMenu('预览面板')      // 再调乱回 preview: true
+    await viewMenu('预览 / 结构图面板')  // preview: false
+    await viewMenu('保存当前布局')        // 快照 preview=false
+    await viewMenu('预览 / 结构图面板')  // 再调乱回 preview: true
     expect(readView().preview).toBe(true)
     await viewMenu('恢复我的布局')
     await waitFor(() => expect(readView().preview).toBe(false))
@@ -853,8 +865,8 @@ describe('App 布局快照（保存 / 恢复布局）', () => {
 
   it('恢复默认布局：把 view 还原为出厂默认', async () => {
     render(<App gateway={gw()} />)
-    await viewMenu('预览面板')      // preview: false（默认是 true）
-    await viewMenu('语义着色')      // highlight: false（默认是 true）
+    await viewMenu('预览 / 结构图面板')  // preview: false（默认是 true）
+    await viewMenu('语义着色')            // highlight: false（默认是 true）
     expect(readView().preview).toBe(false)
     await viewMenu('恢复默认布局')
     await waitFor(() => {
@@ -1101,35 +1113,55 @@ describe('工作台 grid 布局：面板显隐不错位（T035）', () => {
   const gridCol = (sel: string) => (document.querySelector(sel) as HTMLElement | null)?.style.gridColumn
   const colVar = (name: string) => (document.querySelector('.workbench') as HTMLElement).style.getPropertyValue(name)
 
-  it('默认布局：sidebar / editor / preview 各就各列（1/2/3）', async () => {
+  it('默认布局：sidebar / editor / 右侧面板各就各列（1/2/3）', async () => {
     render(<App gateway={gw()} />)
     await fileMenu('打开项目...')
     await screen.findAllByText('雾港')
     expect(gridCol('.sidebar')).toBe('1')
     expect(gridCol('.editor-col')).toBe('2')
-    expect(gridCol('.preview-pane')).toBe('3')
+    expect(gridCol('.right-dock')).toBe('3')
   })
 
-  it('隐藏侧栏：editor 仍落第 2 列、preview 仍第 3 列（不被压进 0px 侧栏轨道）', async () => {
+  it('右侧面板 tab：默认预览，切到结构图 → 同一列内换成结构图（一次只显示一个）', async () => {
+    render(<App gateway={gw()} />)
+    await fileMenu('打开项目...')
+    await screen.findAllByText('雾港')
+    // 默认显示预览、无结构图
+    expect(document.querySelector('.preview-pane')).not.toBeNull()
+    expect(document.querySelector('.story-graph')).toBeNull()
+    expect(gridCol('.right-dock')).toBe('3')
+    // 切到结构图 → 预览换成结构图，仍在第 3 列
+    await userEvent.click(screen.getByRole('button', { name: '结构图' }))
+    await waitFor(() => expect(document.querySelector('.story-graph')).not.toBeNull())
+    expect(document.querySelector('.preview-pane')).toBeNull()
+    expect(gridCol('.right-dock')).toBe('3')
+    expect(gridCol('.editor-col')).toBe('2')
+    // 切回预览
+    await userEvent.click(screen.getByRole('button', { name: '预览' }))
+    await waitFor(() => expect(document.querySelector('.preview-pane')).not.toBeNull())
+    expect(document.querySelector('.story-graph')).toBeNull()
+  })
+
+  it('隐藏侧栏：editor 仍落第 2 列、右侧面板仍第 3 列（不被压进 0px 侧栏轨道）', async () => {
     render(<App gateway={gw()} />)
     await fileMenu('打开项目...')
     await screen.findAllByText('雾港')
     await viewMenu('节点导航 / 资源管理器')
     await waitFor(() => expect(document.querySelector('.sidebar')).toBeNull())
     expect(gridCol('.editor-col')).toBe('2')
-    expect(gridCol('.preview-pane')).toBe('3')
+    expect(gridCol('.right-dock')).toBe('3')
   })
 
-  it('隐藏预览：editor 仍落第 2 列，且 --col-editor 变 1fr 撑满（不留半屏空白）', async () => {
+  it('隐藏右侧面板：editor 仍落第 2 列，且 --col-editor 变 1fr 撑满（不留半屏空白）', async () => {
     render(<App gateway={gw()} />)
     await fileMenu('打开项目...')
     await screen.findAllByText('雾港')
-    // 预览显示时 editor 列按 editorRatio 分（默认 0.5fr），与 preview 的 0.5fr 之和 = 1
+    // 显示时 editor 列按 editorRatio 分（默认 0.5fr），与右侧面板的 0.5fr 之和 = 1
     expect(colVar('--col-editor')).toBe('0.5fr')
-    await viewMenu('预览面板')
-    await waitFor(() => expect(document.querySelector('.preview-pane')).toBeNull())
+    await viewMenu('预览 / 结构图面板')
+    await waitFor(() => expect(document.querySelector('.right-dock')).toBeNull())
     expect(gridCol('.editor-col')).toBe('2')
-    // 关键：预览隐藏后 editor 必须是 1fr（孤立的 0.5fr 因 CSS Grid max(1,Σfr) 只填一半、右侧留白）
+    // 关键：隐藏后 editor 必须是 1fr（孤立的 0.5fr 因 CSS Grid max(1,Σfr) 只填一半、右侧留白）
     expect(colVar('--col-editor')).toBe('1fr')
     expect(colVar('--col-preview')).toBe('0px')
   })

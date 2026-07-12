@@ -36,6 +36,8 @@ export const kinStreamParser: StreamParser<KinStreamState> = {
     return clsToToken(tok.cls)
   },
   tokenTable: kinTokenTable,
+  // Kin 行注释符 `//`：供 CM `toggleComment`（Ctrl+/）取注释符（T031）。
+  languageData: { commentTokens: { line: '//' } },
 }
 
 export const kinLanguage = StreamLanguage.define(kinStreamParser)

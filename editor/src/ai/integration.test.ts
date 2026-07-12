@@ -41,8 +41,8 @@ function makeHarness() {
       [`${DIR}/main.kin`]: MAIN,
     },
   })
-  const snap: PreviewSnapshot = { play: null, stale: false, choiceSeq: [] }
-  const preview: PreviewPort = { snapshot: () => snap, choose: () => snap, restart: () => snap }
+  const snap: PreviewSnapshot = { play: null, stale: false, interactionSeq: [] }
+  const preview: PreviewPort = { snapshot: () => snap, choose: () => snap, submitInput: () => snap, restart: () => snap }
   const ctx: ActionContext = { getState: () => state, dispatch, gateway, validator: createIncrementalValidator(), preview }
   return { ctx, getState: () => state, gateway }
 }

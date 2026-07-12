@@ -1,3 +1,10 @@
+import type { CommandId } from '../shortcuts/registry'
+import { isRebindable } from '../shortcuts/registry'
+import { isBindable } from '../shortcuts/keys'
+
+/** 快捷键自定义覆盖分片：commandId → 规范键串（生效绑定 = 覆盖 ?? 默认）。 */
+export type ShortcutOverrides = Partial<Record<CommandId, string>>
+
 export interface Settings {
   codeFont: string
   codeSize: number
@@ -11,6 +18,10 @@ export interface Settings {
   previewRandomSeed: boolean
   /** AI 对话记录自动清理阈值（天）：距今超此天数无新增的对话在启动时删除。null = 关闭（永久保留）。默认 30。 */
   aiChatRetentionDays: number | null
+  /** 外部控制（T040）：开启后本地起 HTTP 服务，供 CLI/skill 经动作层驱动编辑器。默认关。 */
+  externalControl: boolean
+  /** 快捷键自定义覆盖；缺省 / 空对象 = 全用默认绑定。 */
+  shortcuts: ShortcutOverrides
 }
 
 export const SETTINGS_KEY = 'kiny-editor-settings'
@@ -29,6 +40,8 @@ export const DEFAULT_SETTINGS: Settings = {
   autosaveRecovery: true,
   previewRandomSeed: false,
   aiChatRetentionDays: 30,
+  externalControl: false,
+  shortcuts: {},
 }
 
 /** AI 对话保留天数边界（自动清理开启时可调范围）。 */
@@ -68,7 +81,24 @@ export function clampSettings(s: Settings): Settings {
     autosaveRecovery: typeof s.autosaveRecovery === 'boolean' ? s.autosaveRecovery : DEFAULT_SETTINGS.autosaveRecovery,
     previewRandomSeed: typeof s.previewRandomSeed === 'boolean' ? s.previewRandomSeed : DEFAULT_SETTINGS.previewRandomSeed,
     aiChatRetentionDays: clampRetention(s.aiChatRetentionDays),
+    externalControl: typeof s.externalControl === 'boolean' ? s.externalControl : DEFAULT_SETTINGS.externalControl,
+    shortcuts: sanitizeShortcuts(s.shortcuts),
   }
+}
+
+/** 清洗快捷键覆盖：只保留「可重绑命令 + 通过可绑校验」的项，其余丢弃（不落损坏数据）。 */
+export function sanitizeShortcuts(raw: unknown): ShortcutOverrides {
+  if (!raw || typeof raw !== 'object') return {}
+  const out: ShortcutOverrides = {}
+  for (const [id, keys] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof keys !== 'string') continue
+    try {
+      if (isRebindable(id as CommandId) && isBindable(keys).ok) out[id as CommandId] = keys
+    } catch {
+      /* 未知命令 id：忽略 */
+    }
+  }
+  return out
 }
 
 /** 清洗保留天数：null（关闭）保留；有效正整数夹紧到边界；其余回默认。 */

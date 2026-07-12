@@ -40,8 +40,9 @@ export function ProjectSettingsDialog({ open, manifest, kinFiles, onSave, onCanc
   const entryOptions = kinFiles.includes(draft.entry) ? kinFiles : [draft.entry, ...kinFiles]
 
   return (
-    <div className="settings-scrim" onClick={onCancel}>
-      <div className="settings-dlg" role="dialog" aria-modal="true" aria-label="项目设置" onClick={(e) => e.stopPropagation()}>
+    // 点遮罩空白处不关闭（避免误触丢失未保存改动）——仅 ×／取消／Esc 可关。
+    <div className="settings-scrim">
+      <div className="settings-dlg" role="dialog" aria-modal="true" aria-label="项目设置">
         <button className="settings-close" aria-label="关闭" onClick={onCancel}>×</button>
         <div className="settings-head">
           <span className="settings-title"><b>项目设置</b></span>

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { Story } from '@kiny/engine'
-import { advance, initialState, type PlayState, type ResolveAsset } from '@kiny/player'
+import { type ResolveAsset } from '@kiny/player'
 import { loadStory, type LoadedStory } from './load/loadStory'
 import { StartGate } from './components/StartGate'
 import { PlayingView } from './components/PlayingView'
@@ -9,7 +9,7 @@ type Phase =
   | { kind: 'loading' }
   | { kind: 'error'; message: string }
   | { kind: 'ready'; loaded: LoadedStory }
-  | { kind: 'playing'; story: Story; resolveAsset: ResolveAsset; first: PlayState }
+  | { kind: 'playing'; story: Story; resolveAsset: ResolveAsset }
 
 export function App() {
   const [phase, setPhase] = useState<Phase>({ kind: 'loading' })
@@ -30,11 +30,10 @@ export function App() {
   if (phase.kind === 'ready') {
     const { story, assetBase, title } = phase.loaded
     const resolveAsset: ResolveAsset = (name) => assetBase + name
-    // 在点击手势内一次性推进到首个暂停点（避免 StrictMode 下 advance 被双调用）
-    const onStart = () =>
-      setPhase({ kind: 'playing', story, resolveAsset, first: advance(story, initialState, resolveAsset).state })
+    // 点击进入播放；首帧推进 + 逐行揭示由 usePlayback 持有（StrictMode 双调用其内部守卫处理）
+    const onStart = () => setPhase({ kind: 'playing', story, resolveAsset })
     return <StartGate title={title} onStart={onStart} />
   }
 
-  return <PlayingView story={phase.story} resolveAsset={phase.resolveAsset} first={phase.first} />
+  return <PlayingView story={phase.story} resolveAsset={phase.resolveAsset} />
 }

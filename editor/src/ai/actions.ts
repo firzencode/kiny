@@ -1,5 +1,5 @@
 import type { Diagnostic } from '@kiny/engine'
-import type { PlayState } from '@kiny/player'
+import type { PlayState, InteractionStep } from '@kiny/player'
 import type { EditorState, EditorAction } from '../state/editorReducer'
 import type { FileGateway, Manifest, ProjectFileEntry } from '../files/gateway'
 import type { ValidateResult } from '../validate/validate'
@@ -19,21 +19,23 @@ import { SPEC_SECTIONS } from './kinSpecData'
  * 仅 saveFile / saveAll 经 gateway 落盘（spec §4）。
  */
 
-/** 预览快照（当前 PlayState + 生效 choiceSeq + 是否陈旧）。 */
+/** 预览快照（当前 PlayState + 生效交互序列 + 是否陈旧）。 */
 export interface PreviewSnapshot {
   play: PlayState | null
   stale: boolean
-  choiceSeq: number[]
+  /** 生效的交互序列（choice | input 步；分歧时已截到最远一致前缀）。 */
+  interactionSeq: InteractionStep[]
 }
 
 /**
- * 预览/运行端口。preview/choose/restart 命令委派给它。
- * 真实运行态（program、choiceSeq、replay）耦合 App 的渲染 ref，由 App（T011d）实现并注入；
- * 单测注入假端口。
+ * 预览/运行端口。preview/choose/submitInput/restart 命令委派给它。
+ * 真实运行态（program、交互序列、replay）耦合 App 的渲染 ref，由 App（T011d）实现并注入；
+ * 单测注入假端口。AI 对输入框与选项完全对等——choose(pos) 与 submitInput(text) 对偶。
  */
 export interface PreviewPort {
   snapshot(): PreviewSnapshot
   choose(pos: number): PreviewSnapshot
+  submitInput(text: string): PreviewSnapshot
   restart(): PreviewSnapshot
 }
 
@@ -72,6 +74,7 @@ export type ActionCommand =
   // 预览 / 运行
   | { name: 'preview' }
   | { name: 'choose'; pos: number }
+  | { name: 'submitInput'; text: string }
   | { name: 'restart' }
   // 保存
   | { name: 'saveFile'; path: string }
@@ -106,6 +109,7 @@ export interface ResultMap {
   getDiagnostics: { diagnostics: Diagnostic[] }
   preview: PreviewSnapshot
   choose: PreviewSnapshot
+  submitInput: PreviewSnapshot
   restart: PreviewSnapshot
   saveFile: { path: string }
   saveAll: { saved: string[] }
@@ -252,6 +256,8 @@ export async function runCommand<C extends ActionCommand>(
       return ctx.preview.snapshot() as ResultFor<C['name']>
     case 'choose':
       return ctx.preview.choose(cmd.pos) as ResultFor<C['name']>
+    case 'submitInput':
+      return ctx.preview.submitInput(cmd.text) as ResultFor<C['name']>
     case 'restart':
       return ctx.preview.restart() as ResultFor<C['name']>
     // ---- 保存 ----
@@ -291,7 +297,7 @@ export const ACTION_NAMES: readonly ActionName[] = [
   'listProject', 'readFile', 'createFile', 'writeFile', 'renamePath', 'deletePath', 'createFolder',
   'listNodes', 'readNode', 'replaceRange', 'insertText',
   'validate', 'getDiagnostics',
-  'preview', 'choose', 'restart',
+  'preview', 'choose', 'submitInput', 'restart',
   'saveFile', 'saveAll',
   'listKinSpec', 'readKinSpec',
 ]

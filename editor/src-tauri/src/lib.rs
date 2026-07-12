@@ -1,3 +1,4 @@
+mod external_control;
 mod kip;
 mod webpage;
 #[cfg(windows)]
@@ -52,7 +53,9 @@ pub fn run() {
     {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             use tauri::{Emitter, Manager};
-            if let Some(w) = app.get_webview_window("main") {
+            // 模型 A 任一时刻只有一个窗口（启动窗 XOR 编辑窗，label 'launch'/'editor'），
+            // 聚焦现存的那个（不再按固定 label 'main'——默认窗已改名 'launch'，get('main') 恒为 None）。
+            if let Some(w) = app.webview_windows().values().next() {
                 let _ = w.set_focus();
             }
             if let Some(path) = kiw_arg(&argv) {
@@ -63,6 +66,8 @@ pub fn run() {
 
     builder
         .manage(LaunchProject(Mutex::new(None)))
+        .manage(external_control::PendingReplies::default())
+        .manage(external_control::ControlHandle::default())
         // 运行时错误收集：日志插件 release 也启用，写 appLogDir、单文件 5MB 轮转、保留当前+1 归档。
         .plugin(
             tauri_plugin_log::Builder::new()
@@ -83,7 +88,10 @@ pub fn run() {
             kip::export_kip,
             webpage::export_webpage,
             take_launch_project,
-            allow_project_dir
+            allow_project_dir,
+            external_control::start_external_control,
+            external_control::stop_external_control,
+            external_control::external_control_reply
         ])
         .setup(|_app| {
             // 启动行：定位版本 / 平台；Rust 端 panic 也经 log 插件落同一文件。
@@ -92,6 +100,9 @@ pub fn run() {
                 env!("CARGO_PKG_VERSION"),
                 std::env::consts::OS
             );
+            // 陈旧控制文件清理：上次异常退出可能残留指向死端口的 control.json，启动先删；
+            // 若本次开启外部控制，start 会写新的（保证「文件存在 ⟺ 端口在监听」）。
+            external_control::delete_control_file(_app.handle());
             // 冷启动（OS 双击 .kiw 首次拉起）：命令行参数带 .kiw → 暂存 state，前端 mount 后 take_launch_project 取走
             // （不 emit：setup 期前端 listener 尚未注册，emit 会丢）。
             #[cfg(desktop)]

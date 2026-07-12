@@ -1,7 +1,7 @@
 import { findManifest } from '@kiny/engine'
 import type { ResolveAsset } from '@kiny/player'
 import {
-  type FileGateway, type LoadedProject, type Manifest, type ProjectFileEntry,
+  type FileGateway, type LoadedProject, type Manifest, type ProjectFileEntry, type WindowMode,
   STARTER_MAIN_KIN, STARTER_NEW_FILE, normalizeKinName, starterManifest, projectFileName, projectFolderName, assertSafeRelPath,
 } from './gateway'
 import { type DraftStore, emptyDraftStore } from '../state/drafts'
@@ -32,6 +32,18 @@ export interface MemoryGatewayInit {
   launchProject?: string | null
   /** pickDirectory 返回的注入父目录；缺省回退 pickedDir，再缺省 null。 */
   newParent?: string | null
+  /** currentWindowMode 返回值（模拟 Tauri 窗口角色）；缺省 null（走 SPA 切换，web 行为）。 */
+  windowMode?: WindowMode
+  /** currentWindowProject 返回值（模拟编辑窗 URL ?project）；缺省 null。 */
+  windowProject?: string | null
+  /** 记录 openEditorWindow / openLaunchWindow / closeWindow 的调用序列（供窗口交接断言）。 */
+  windowSink?: string[]
+  /** 令 openEditorWindow / openLaunchWindow 抛错（模拟权限缺失 / 创建失败），验证交接不留空窗。 */
+  windowOpenFails?: boolean
+  /** currentMonitorSize 返回的屏幕逻辑分辨率（模拟 Tauri 显示器）；缺省 null（回落 LAUNCH_WINDOW）。 */
+  monitorSize?: { width: number; height: number } | null
+  /** 记录 setWindowSize 调用（供启动窗按分辨率定尺寸断言）。 */
+  sizeSink?: { width: number; height: number }[]
 }
 
 /** 内存 FileGateway：纯 Map 支撑，前端逻辑可在 jsdom 全单测、不碰 Tauri。 */
@@ -159,8 +171,19 @@ export function createMemoryGateway(init: MemoryGatewayInit): FileGateway {
       return dest
     },
     confirm: async () => init.confirmResult ?? true,
-    closeWindow: async () => { /* 内存桩：无窗口可关 */ },
-    setWindowSize: async () => { /* 内存桩：无窗口可调 */ },
+    closeWindow: async () => { init.windowSink?.push('close') },
+    openEditorWindow: async (projectDir) => {
+      if (init.windowOpenFails) { init.windowSink?.push('openEditor:FAIL'); throw new Error('模拟创建编辑窗失败') }
+      init.windowSink?.push(`openEditor:${projectDir}`)
+    },
+    openLaunchWindow: async () => {
+      if (init.windowOpenFails) { init.windowSink?.push('openLaunch:FAIL'); throw new Error('模拟创建启动窗失败') }
+      init.windowSink?.push('openLaunch')
+    },
+    currentWindowMode: () => init.windowMode ?? null,
+    currentWindowProject: () => init.windowProject ?? null,
+    currentMonitorSize: async () => init.monitorSize ?? null,
+    setWindowSize: async (width, height) => { init.sizeSink?.push({ width, height }) },
     onWindowResize: async (handler) => {
       if (init.resizeHook) init.resizeHook.fire = handler
       return () => { if (init.resizeHook) init.resizeHook.fire = undefined }

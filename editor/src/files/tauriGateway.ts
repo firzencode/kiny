@@ -1,15 +1,17 @@
 import { open, ask, save } from '@tauri-apps/plugin-dialog'
 import { readTextFile, writeTextFile, readDir, mkdir, exists, rename, remove, copyFile, BaseDirectory } from '@tauri-apps/plugin-fs'
 import { convertFileSrc, invoke } from '@tauri-apps/api/core'
-import { getCurrentWindow, LogicalSize } from '@tauri-apps/api/window'
+import { getCurrentWindow, currentMonitor, LogicalSize } from '@tauri-apps/api/window'
+import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { listen } from '@tauri-apps/api/event'
 import { join, dirname } from '@tauri-apps/api/path'
 import { findManifest } from '@kiny/engine'
 import type { ResolveAsset } from '@kiny/player'
 import {
-  type FileGateway, type LoadedProject, type Manifest, type ProjectFileEntry,
+  type FileGateway, type LoadedProject, type Manifest, type ProjectFileEntry, type WindowMode,
   STARTER_MAIN_KIN, STARTER_NEW_FILE, normalizeKinName, starterManifest, projectFileName, projectFolderName, assertSafeRelPath,
 } from './gateway'
+import { loadWorkbenchSize, computeLaunchSize, LAUNCH_WINDOW, WORKBENCH_WINDOW, WORKBENCH_MIN_SIZE } from '../state/windowSize'
 import { type DraftStore, parseDraftStore, emptyDraftStore } from '../state/drafts'
 import { type ChatStore, parseChatStore } from '../state/chatStore'
 import { MEDIA_EXTS } from './importAssets'
@@ -22,9 +24,43 @@ const DRAFTS_PATH = `${DRAFTS_DIR}/drafts.json`
 const CHATS_DIR = 'ai-chats'
 const chatPath = (key: string) => `${CHATS_DIR}/${key}.json`
 
+// 外部控制信息落 app-data（T040）：CLI/skill 按同一路径发现端口 + token，identifier 见 tauri.conf.json。
+
 async function pickDir(): Promise<string | null> {
   const picked = await open({ directory: true, multiple: false })
   return typeof picked === 'string' ? picked : null
+}
+
+/**
+ * spawn 一个 label 已知的 WebviewWindow 并**等待创建完成**（成功 resolve / 失败 reject）。
+ * 构造函数本身不抛错——失败经 `tauri://error` 事件回报；等到 created 再返回，让调用方
+ * 能先确认新窗已起再关旧窗（互斥交接不留空窗），失败也能弹 notice 而非静默。
+ */
+function spawnWindow(
+  label: 'launch' | 'editor',
+  opts: { url: string; width: number; height: number; minWidth?: number; minHeight?: number; resizable?: boolean; maximizable?: boolean },
+): Promise<void> {
+  const w = new WebviewWindow(label, {
+    url: opts.url,
+    title: 'Kiny Editor',
+    width: opts.width, height: opts.height,
+    minWidth: opts.minWidth, minHeight: opts.minHeight,
+    center: true,
+    resizable: opts.resizable ?? true,
+    maximizable: opts.maximizable ?? true,
+  })
+  return new Promise<void>((resolve, reject) => {
+    void w.once('tauri://created', () => resolve())
+    void w.once('tauri://error', (e) => reject(new Error(`创建窗口失败：${String(e.payload)}`)))
+  })
+}
+
+/** 当前显示器逻辑分辨率（物理尺寸 / 缩放因子）；取不到 → null。启动窗按屏分辨率定尺寸用。 */
+async function monitorLogicalSize(): Promise<{ width: number; height: number } | null> {
+  const m = await currentMonitor()
+  if (!m) return null
+  const scale = m.scaleFactor || 1
+  return { width: Math.round(m.size.width / scale), height: Math.round(m.size.height / scale) }
 }
 
 /**
@@ -184,6 +220,34 @@ export const tauriFileGateway: FileGateway = {
   async closeWindow() {
     // destroy（非 close）：不再触发 onCloseRequested，避免守卫死循环
     await getCurrentWindow().destroy()
+  },
+  async openEditorWindow(projectDir) {
+    // 编辑窗初始尺寸优先用记忆的 workbench 尺寸（用户上次手动调整的），未记过用默认。
+    const size = loadWorkbenchSize() ?? WORKBENCH_WINDOW
+    await spawnWindow('editor', {
+      url: `index.html?project=${encodeURIComponent(projectDir)}`,
+      width: size.width, height: size.height,
+      minWidth: WORKBENCH_MIN_SIZE.width, minHeight: WORKBENCH_MIN_SIZE.height,
+    })
+  },
+  async openLaunchWindow() {
+    // 启动窗按屏幕分辨率定固定尺寸，且禁止用户最大化 / 调整尺寸（是入口页、非工作区）。
+    const monitor = await monitorLogicalSize()
+    const size = monitor ? computeLaunchSize(monitor) : LAUNCH_WINDOW
+    await spawnWindow('launch', {
+      url: 'index.html', width: size.width, height: size.height,
+      resizable: false, maximizable: false,
+    })
+  },
+  currentWindowMode(): WindowMode {
+    const label = getCurrentWindow().label
+    return label === 'editor' || label === 'launch' ? label : null
+  },
+  currentWindowProject() {
+    return new URLSearchParams(window.location.search).get('project')
+  },
+  async currentMonitorSize() {
+    return monitorLogicalSize()
   },
   async setWindowSize(width, height) {
     // 逻辑尺寸（DPI 无关，与 tauri.conf width/height 同单位）；改尺寸后居中，避免从角部放大而溢出屏幕

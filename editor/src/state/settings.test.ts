@@ -62,6 +62,10 @@ describe('settings', () => {
     expect(sanitizeFontName('Fira; }<x>')).toBe('Fira x')
   })
 
+  it('externalControl 非布尔回落默认 false', () => {
+    expect(clampSettings({ ...DEFAULT_SETTINGS, externalControl: 'x' as never }).externalControl).toBe(false)
+  })
+
   describe('aiChatRetentionDays', () => {
     it('默认 30 天', () => {
       expect(DEFAULT_SETTINGS.aiChatRetentionDays).toBe(30)

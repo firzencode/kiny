@@ -29,10 +29,11 @@ function makeHarness(files: Record<string, string> = {}) {
   })
   const validator = createIncrementalValidator()
   const previewCalls: unknown[][] = []
-  const snap: PreviewSnapshot = { play: null, stale: false, choiceSeq: [] }
+  const snap: PreviewSnapshot = { play: null, stale: false, interactionSeq: [] }
   const preview: PreviewPort = {
     snapshot: () => { previewCalls.push(['snapshot']); return snap },
-    choose: (pos) => { previewCalls.push(['choose', pos]); return { play: null, stale: false, choiceSeq: [pos] } },
+    choose: (pos) => { previewCalls.push(['choose', pos]); return { play: null, stale: false, interactionSeq: [{ kind: 'choice', pos }] } },
+    submitInput: (text) => { previewCalls.push(['submitInput', text]); return { play: null, stale: false, interactionSeq: [{ kind: 'input', text }] } },
     restart: () => { previewCalls.push(['restart']); return snap },
   }
   const ctx: ActionContext = { getState: () => state, dispatch, gateway, validator, preview }
@@ -200,14 +201,16 @@ describe('动作层 · 校验 / 诊断', () => {
 })
 
 describe('动作层 · 预览 / 运行', () => {
-  it('preview / choose / restart 委派给预览端口', async () => {
+  it('preview / choose / submitInput / restart 委派给预览端口', async () => {
     const h = makeHarness()
     await loadProject(h)
     await runCommand(h.ctx, { name: 'preview' })
     const c = await runCommand(h.ctx, { name: 'choose', pos: 1 })
+    const s = await runCommand(h.ctx, { name: 'submitInput', text: '旅人' })
     await runCommand(h.ctx, { name: 'restart' })
-    expect(c.choiceSeq).toEqual([1])
-    expect(h.previewCalls).toEqual([['snapshot'], ['choose', 1], ['restart']])
+    expect(c.interactionSeq).toEqual([{ kind: 'choice', pos: 1 }])
+    expect(s.interactionSeq).toEqual([{ kind: 'input', text: '旅人' }])
+    expect(h.previewCalls).toEqual([['snapshot'], ['choose', 1], ['submitInput', '旅人'], ['restart']])
   })
 })
 
@@ -262,5 +265,12 @@ describe('动作层 · 语言规范查询', () => {
   it('readKinSpec 未知 id 抛错', async () => {
     const h = makeHarness()
     await expect(runCommand(h.ctx, { name: 'readKinSpec', id: '999' })).rejects.toThrow(/未知章节/)
+  })
+
+  // T039 验证点：AI 编排 @input 靠 readKinSpec 查语义，§11 命令表须能读到 @input（T037 已补入正本）。
+  it('readKinSpec §11.1 命令集含 @input 语义（AI 编排 @input 的语言规范来源）', async () => {
+    const h = makeHarness()
+    const r = await runCommand(h.ctx, { name: 'readKinSpec', id: '11.1' })
+    expect(r.content).toContain('@input')
   })
 })

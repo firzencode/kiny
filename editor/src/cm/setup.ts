@@ -11,7 +11,11 @@ import {
   drawSelection, dropCursor, rectangularSelection, crosshairCursor,
 } from '@codemirror/view'
 import { EditorState, Compartment, Annotation, type Extension } from '@codemirror/state'
-import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
+import { defaultKeymap, history, historyKeymap, indentWithTab, toggleComment } from '@codemirror/commands'
+import type { KeyBinding } from '@codemirror/view'
+import { dispatchMap, type Overrides } from '../shortcuts/bindings'
+import { toCmKey } from '../shortcuts/keys'
+import type { CommandId } from '../shortcuts/registry'
 import {
   syntaxHighlighting, foldGutter, codeFolding, foldKeymap, bracketMatching,
 } from '@codemirror/language'
@@ -30,6 +34,23 @@ export const External = Annotation.define<boolean>()
 
 /** 语义着色的 compartment（view 菜单 highlight 开关热切换）。 */
 export const highlightCompartment = new Compartment()
+
+/** editor 域快捷键的 compartment（快捷键设置页改绑定时热更）。 */
+export const shortcutsCompartment = new Compartment()
+
+/** CM 命令注册表：editor 域命令 id → CM Command（部分——只有可绑的 editor 命令有实现）。 */
+const EDITOR_COMMANDS: Partial<Record<CommandId, KeyBinding['run']>> = { toggleComment }
+
+/** 由生效绑定构建 editor 域 keymap（覆盖变更时经 compartment 重配）。 */
+export function editorKeymapFor(overrides: Overrides = {}): Extension {
+  const bindings: KeyBinding[] = []
+  for (const [keys, id] of dispatchMap('editor', overrides)) {
+    const run = EDITOR_COMMANDS[id]
+    if (run) bindings.push({ key: toCmKey(keys), run })
+  }
+  // 高优先级：置于 defaultKeymap 之前，让注册表成为 editor 域绑定的唯一真相源。
+  return keymap.of(bindings)
+}
 
 /** highlight 开 = 语义着色；关 = 空（纯文本，退回 --s-text）。 */
 export function highlightExtensionFor(on: boolean): Extension {
@@ -52,7 +73,7 @@ function gotoAt(view: EditorView, pos: number, cb: KinEditorCallbacks): boolean 
   return true
 }
 
-export function kinSetup(cb: KinEditorCallbacks, highlightOn: boolean): Extension[] {
+export function kinSetup(cb: KinEditorCallbacks, highlightOn: boolean, shortcuts: Overrides = {}): Extension[] {
   return [
     lineNumbers(),
     highlightActiveLineGutter(),
@@ -76,9 +97,12 @@ export function kinSetup(cb: KinEditorCallbacks, highlightOn: boolean): Extensio
     autocompletion({ override: [kinCompletionSource] }),
     kinTheme,
     EditorView.lineWrapping,
+    // editor 域快捷键（注册表驱动，可重配）——置于 defaultKeymap 前取更高优先级。
+    shortcutsCompartment.of(editorKeymapFor(shortcuts)),
     keymap.of([
       ...closeBracketsKeymap,
-      ...defaultKeymap,
+      // 摘掉 defaultKeymap 自带的 Mod-/ → toggleComment，改由注册表 compartment 统管（可自定义）。
+      ...defaultKeymap.filter((b) => b.key !== 'Mod-/'),
       ...searchKeymap,
       ...historyKeymap,
       ...foldKeymap,

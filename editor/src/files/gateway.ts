@@ -27,6 +27,14 @@ export interface LoadedProject {
 }
 
 /**
+ * 当前 OS 窗口的角色（Tauri 多窗模型 A · 互斥交接）：
+ * - 'launch' → 启动窗（只渲染 LaunchScreen，永不进 workbench）
+ * - 'editor' → 编辑窗（只渲染 workbench，从 URL ?project 载入项目；结构上坐实「始终已打开项目」）
+ * - null → 非 Tauri（web / 测试）无 OS 窗口概念，走单页 SPA 切换（projectDir 有无翻转）
+ */
+export type WindowMode = 'launch' | 'editor' | null
+
+/**
  * 文件 IO 隔离层。真实现走 Tauri 插件（tauriFileGateway），
  * 测试实现走内存表（memoryFileGateway），让前端逻辑全程可单测、不碰 Tauri。
  */
@@ -74,6 +82,16 @@ export interface FileGateway {
   confirm(message: string): Promise<boolean>
   /** 强制关闭窗口（destroy，绕过 close-requested 守卫，避免自触发死循环）。 */
   closeWindow(): Promise<void>
+  /** spawn 编辑窗（label 'editor'，URL 带 ?project=<dir>，尺寸用记忆的 workbench 尺寸）；失败抛错（调用方弹 notice，不静默）。非 Tauri 桩为 no-op。 */
+  openEditorWindow(projectDir: string): Promise<void>
+  /** spawn 启动窗（label 'launch'，紧凑固定尺寸）；失败抛错（调用方弹 notice，不静默）。非 Tauri 桩为 no-op。 */
+  openLaunchWindow(): Promise<void>
+  /** 本窗角色：读 Tauri 窗口 label → 'launch' / 'editor'；非 Tauri 返 null（走 SPA 切换）。同步读取。 */
+  currentWindowMode(): WindowMode
+  /** 本窗 URL 的 ?project 参数（编辑窗启动时用来载入项目）；无则 null。同步读取。 */
+  currentWindowProject(): string | null
+  /** 当前显示器逻辑分辨率（宽 × 高，逻辑像素）；非 Tauri / 取不到 → null。启动窗按屏分辨率定尺寸用。 */
+  currentMonitorSize(): Promise<{ width: number; height: number } | null>
   /** 设置窗口逻辑尺寸并居中（启动页 ↔ workbench 切换时调整观感）；非 Tauri 环境 no-op。 */
   setWindowSize(width: number, height: number): Promise<void>
   /** 订阅窗口尺寸变化（记忆用户手动调整的 workbench 尺寸）；回调收到逻辑尺寸。返回退订函数。 */

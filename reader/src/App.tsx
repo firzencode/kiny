@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ask } from '@tauri-apps/plugin-dialog'
 import type { Story, ValidatedProgram } from '@kiny/engine'
-import { advance, initialState, type PlayState, type ResolveAsset } from '@kiny/player'
+import { type PlayState, type ResolveAsset } from '@kiny/player'
 import { listLibrary, importKip, deleteStory, pickKipFile } from './library/store'
 import { loadStory } from './reading/loadStory'
 import { subscribeKipDrop } from './library/importDrop'
@@ -14,7 +14,7 @@ import { AUTO_SAVE_ID } from './saves/types'
 import type { LibraryItem } from './types'
 import { logErrorEntry, ErrorDetailsDialog, type ErrorSource } from '@kiny/error-report'
 
-type Reading = { story: Story; program: ValidatedProgram; storyId: string; resolveAsset: ResolveAsset; first: PlayState; title: string }
+type Reading = { story: Story; program: ValidatedProgram; storyId: string; resolveAsset: ResolveAsset; initial?: PlayState; title: string }
 type View = { kind: 'library' } | { kind: 'reading'; reading: Reading }
 
 export function App() {
@@ -98,20 +98,20 @@ export function App() {
   async function openStory(item: LibraryItem, mode: OpenMode) {
     const out = await loadStory(item.dir)
     if (!out.ok) { logErrorEntry({ source: 'operation:openStory', message: out.message }); setError(out.message); return }
-    const enter = (story: Story, first: PlayState) =>
-      setView({ kind: 'reading', reading: { story, program: out.program, storyId: item.id, resolveAsset: out.resolveAsset, first, title: out.title } })
+    const enter = (story: Story, initial?: PlayState) =>
+      setView({ kind: 'reading', reading: { story, program: out.program, storyId: item.id, resolveAsset: out.resolveAsset, initial, title: out.title } })
     try {
       if (mode === 'continue') {
         const save = await readSave(item.id, AUTO_SAVE_ID)
         if (save) {
           const res = restoreSave(out.program, save)
-          if (res.ok) { enter(res.story, res.play); return }
+          if (res.ok) { enter(res.story, res.play); return } // 从续读存档态起（已在暂停点）
           // 故事更新过 / 存档损坏：优雅降级，从头开始并提示。
           setError(res.reason === 'fingerprint-mismatch' ? '存档对应的故事已更新，已从头开始。' : '存档已损坏，已从头开始。')
         }
       }
-      // 在用户手势内算首帧（StrictMode 安全 + 尽量解锁音频）
-      enter(out.story, advance(out.story, initialState, out.resolveAsset).state)
+      // 从头开始：首帧推进 + 逐字揭示由 usePlayback 持有（StrictMode 安全）
+      enter(out.story)
     } catch (e) {
       fail(e, 'operation:openStory', '打开故事失败')
     }

@@ -118,6 +118,12 @@ const SECTIONS: Section[] = [
   { cat: '宿主', id: 'cmd', gl: '@', zh: '内置命令', en: 'Command',
     desc: '<code>@命令(参数)</code> 独占一行、行首顶格，向宿主（编辑器 / 阅读器）下达副作用指令，<b>不产出叙事文本</b>。参数是 JS 表达式（可动态），资源用项目根相对路径。引擎只认内置命令集，未知命令报错。',
     code: '@bg_show("assets/tavern_interior.jpg")  // 显示背景图\n@bg_hide()                              // 隐藏背景图\n@bgm_play("assets/tavern_loop.mp3")     // 播放背景音乐\n@bgm_pause()  @bgm_stop()               // 暂停 / 停止' },
+  { cat: '宿主', id: 'pacing', gl: '@⏱', zh: '正文推进节奏', en: 'Pacing',
+    desc: '<code>@clear()</code> 清除已显示正文（背景 / BGM 不受影响）。<code>@step_mode(mode)</code> 切换正文推进方式：<code>"line"</code> 逐段点击才出下一行（打字中点击立即整段显示，等待点击时正文下方有推进提示三角），<code>"flow"</code> 恢复默认连续流动。<code>@text_speed(cps)</code> 调打字机出字速度（字/秒，默认 <code>80</code>，<code>0</code>=整行瞬显）；<code>@text_fade(ms)</code> 调每字淡入时长（毫秒，默认 <code>300</code>，<code>0</code>=无淡入）。三者都是有状态设定，持续生效到下次改写或故事重开；读者开启「减弱动态效果」时整行瞬显，覆盖以上设定。',
+    code: '@step_mode("line")     // 像视觉小说一样点一下出一段\n@text_speed(20)        // 出字放慢营造凝重感（默认 80 字/秒）\n@text_fade(600)        // 淡入更绵长（默认 300ms）\n@clear()               // 清屏，背景与 BGM 不受影响' },
+  { cat: '宿主', id: 'input', gl: '@⌨', zh: '读者输入', en: 'Input',
+    desc: '<code>@input(变量, 提示?)</code> 是唯一的<b>交互命令</b>——暂停故事、请读者输入一段文本，写回变量供后续插值 <code>{变量}</code> 或 <code>@if</code> 条件使用。第一个参数是<b>变量名本身</b>（写入目标，须先声明），第二个提示可省、作输入框 placeholder。读者留空提交则保留变量原值（充当默认）。',
+    code: '~ let player_name = "旅人"\n@input(player_name, "请输入你的名字")\n你好，{player_name}。   // 读者填「阿光」→「你好，阿光。」；留空→「你好，旅人。」' },
 ]
 
 function AboutScreen() {

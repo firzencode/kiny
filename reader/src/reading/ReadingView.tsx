@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Story, ValidatedProgram } from '@kiny/engine'
-import { Player, choose, type PlayState, type ResolveAsset } from '@kiny/player'
+import { Player, usePlayback, initialState, type PlayState, type ResolveAsset } from '@kiny/player'
 import { listSaves, writeSave, deleteSave, genSaveId } from '../saves/store'
 import { captureSave, restoreSave } from '../saves/snapshot'
 import { AUTO_SAVE_ID, type SaveRecord } from '../saves/types'
@@ -17,19 +17,21 @@ function fmtTime(ts: number): string {
  * 「存档 / 读档」面板可手动存多份、择一读取、删除。storyId 缺省时禁用存档（如纯渲染测试）。
  */
 export function ReadingView({
-  story, program, storyId, resolveAsset, first, title, onBack,
+  story, program, storyId, resolveAsset, initial, title, onBack,
 }: {
   story: Story
   program?: ValidatedProgram
   storyId?: string
   resolveAsset: ResolveAsset
-  first: PlayState
+  /** 起始播放态：缺省 = 从头（逐字揭示开场）；「继续」入口传入续读存档态。 */
+  initial?: PlayState
   title: string
   onBack: () => void
 }) {
-  const storyRef = useRef<Story>(story)
-  const [state, setState] = useState<PlayState>(first)
-  const [sfx, setSfx] = useState<string[]>([])
+  // 驱动交给 usePlayback（逐行揭示 + stepMode）；读档时整体换 story + 从存档态续。
+  const [driven, setDriven] = useState<{ story: Story; initial: PlayState }>({ story, initial: initial ?? initialState })
+  const pb = usePlayback(driven.story, resolveAsset, driven.initial)
+  const state = pb.state
   const [saves, setSaves] = useState<SaveRecord[]>([])
   const [panelOpen, setPanelOpen] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
@@ -55,32 +57,37 @@ export function ReadingView({
     (st: PlayState, kind: SaveRecord['kind'], id: string) => {
       if (!storyId || st.error) return
       try {
-        const save = captureSave(storyRef.current, st, kind, id, Date.now())
+        const save = captureSave(driven.story, st, kind, id, Date.now())
         void writeSave(storyId, save).then(refreshSaves).catch(() => {})
       } catch {
         /* 非稳定边界等：忽略 */
       }
     },
-    [storyId, refreshSaves],
+    [storyId, refreshSaves, driven.story],
   )
 
-  // 自动存档代表「已提交的阅读位置」：仅开局写一次、之后每次做选择时写（见 onChoose）。
-  // 读档「不」写 auto——故 auto 始终停在最靠前的进度，误读可经它回退。
-  const started = useRef(false)
+  // 自动存档代表「已提交的阅读位置」：开局写一次、之后每次做选择时写；读档「不」写 auto
+  // （故 auto 始终停在最靠前的进度，误读可经它回退）。用 pendingAuto 标记「下个暂停点应写 auto」。
+  const pendingAuto = useRef(true)
   useEffect(() => {
-    if (started.current) return
-    started.current = true
-    putSave(state, 'auto', AUTO_SAVE_ID)
+    const atPause = state.choices.length > 0 || state.input !== null || state.ended
+    if (atPause && pendingAuto.current) {
+      pendingAuto.current = false
+      putSave(state, 'auto', AUTO_SAVE_ID)
+    }
   }, [state, putSave])
 
   // 首次拉存档列表。
   useEffect(() => { refreshSaves() }, [refreshSaves])
 
   const onChoose = (pos: number) => {
-    const r = choose(storyRef.current, state, state.choices[pos].index, resolveAsset)
-    setState(r.state)
-    setSfx(r.sfx)
-    putSave(r.state, 'auto', AUTO_SAVE_ID) // 做选择 = 提交进度 → 前移 auto
+    pendingAuto.current = true // 做选择 = 提交进度 → 抵下个暂停点时前移 auto
+    pb.onChoose(pos)
+  }
+
+  const onSubmitInput = (text: string) => {
+    pendingAuto.current = true // 提交输入 = 推进进度 → 抵下个暂停点时前移 auto
+    pb.onSubmitInput(text)
   }
 
   const onSaveManual = () => {
@@ -96,9 +103,8 @@ export function ReadingView({
       setNotice(res.reason === 'fingerprint-mismatch' ? '该存档对应的故事已更新，无法读取此存档。' : '存档已损坏，无法读取。')
       return
     }
-    storyRef.current = res.story
-    setSfx([])
-    setState(res.play) // 仅切渲染态；不写 auto（在此位置做选择时才前移）
+    pendingAuto.current = false // 读档不写 auto（auto 停在最靠前进度）
+    setDriven({ story: res.story, initial: res.play }) // usePlayback 换档：重置到存档态并落回同一暂停点
     setPanelOpen(false)
   }
 
@@ -122,7 +128,14 @@ export function ReadingView({
           <button className="saves-btn" onClick={() => { refreshSaves(); setConfirmDelId(null); setPanelOpen(true) }}>存档 / 读档</button>
         )}
       </div>
-      <Player state={state} sfx={sfx} onChoose={onChoose} />
+      <Player
+        state={state}
+        sfx={pb.sfx}
+        onChoose={onChoose}
+        onSubmitInput={onSubmitInput}
+        reveal={pb.reveal}
+        onContentClick={pb.onContentClick}
+      />
 
       {toast && <div className="reading-toast" role="status">{toast}</div>}
 

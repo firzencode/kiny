@@ -4,7 +4,8 @@ import { EditorView } from '@codemirror/view'
 import { selectAll as cmSelectAll } from '@codemirror/commands'
 import { setDiagnostics } from '@codemirror/lint'
 import type { ValidatedProgram, Diagnostic as KinDiagnostic } from '@kiny/engine'
-import { kinSetup, External, highlightCompartment, highlightExtensionFor } from '../cm/setup'
+import type { ShortcutOverrides } from '../state/settings'
+import { kinSetup, External, highlightCompartment, highlightExtensionFor, shortcutsCompartment, editorKeymapFor } from '../cm/setup'
 import { setKinContext } from '../cm/context'
 import { toCmDiagnostics } from '../cm/lint'
 import { readClipboardText } from '../clipboard'
@@ -32,6 +33,8 @@ interface EditorPaneProps {
   activeFile?: string | null
   /** 关闭语义着色（视图菜单）。默认 true。 */
   highlight?: boolean
+  /** 快捷键自定义覆盖（editor 域绑定由此构建，变更热更 keymap compartment）。 */
+  shortcuts?: ShortcutOverrides
 }
 
 /**
@@ -40,7 +43,7 @@ interface EditorPaneProps {
  * 补全、跳转、折叠、查找替换、多光标、撤销、IME、原生剪贴板均由 CM6 扩展提供。
  */
 export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(function EditorPane(
-  { source, onChange, caretLine, onCaretConsumed, onCaretMove, onGoto, diagnostics, program, activeFile, highlight = true },
+  { source, onChange, caretLine, onCaretConsumed, onCaretMove, onGoto, diagnostics, program, activeFile, highlight = true, shortcuts },
   ref,
 ) {
   const hostRef = useRef<HTMLDivElement>(null)
@@ -65,6 +68,7 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(function Edi
             onGoto: (f, l) => cbRef.current.onGoto?.(f, l),
           },
           highlight,
+          shortcuts ?? {},
         ),
       }),
     })
@@ -112,6 +116,13 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(function Edi
     if (!view) return
     view.dispatch({ effects: highlightCompartment.reconfigure(highlightExtensionFor(highlight)) })
   }, [highlight])
+
+  // 快捷键覆盖变更：热更 editor 域 keymap compartment。
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view) return
+    view.dispatch({ effects: shortcutsCompartment.reconfigure(editorKeymapFor(shortcuts ?? {})) })
+  }, [shortcuts])
 
   // 外部请求移光标到某行（Outline / 诊断跳转）。一次性：消费后通知 App 清回 null，
   // 否则切档重挂时这个常驻行号会把新文件光标拽到旧行。

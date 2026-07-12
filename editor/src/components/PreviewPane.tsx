@@ -1,12 +1,12 @@
 import { useEffect, useRef, type CSSProperties } from 'react'
-import { Player, type PlayState } from '@kiny/player'
+import { Player, type PlayState, type RevealBinding } from '@kiny/player'
 
 /**
  * 预览区：受控驱动 <Player>。
  * - stale：program 当前无效，画面冻结在上一帧，显示角标（spec §5.2）。
  * - play.error：编辑器侧的运行时错误横幅（停在出错点，不崩）。spec §6。
  *   错误原始 message 由 <Player> 自身渲染（单一真相源），此处只标「运行时错误」+ 定位。
- * onChoose(pos) 上抛给预览控制器（把 pos 追加进 choiceSeq 重算）。
+ * onChoose(pos) / onSubmitInput(text) 上抛给预览控制器（把对应交互步追加进交互序列重算）。
  */
 export function PreviewPane({
   play,
@@ -14,7 +14,10 @@ export function PreviewPane({
   sfx,
   seed,
   onChoose,
+  onSubmitInput,
   onRestart,
+  reveal,
+  onContentClick,
   style,
 }: {
   play: PlayState | null
@@ -22,7 +25,11 @@ export function PreviewPane({
   sfx?: string[]
   seed: number
   onChoose: (pos: number) => void
+  onSubmitInput: (text: string) => void
   onRestart: () => void
+  /** 打字机揭示绑定；只有人工点选项/重开预览时有值(usePreviewPlayback)，编辑重算/AI 校验时为 undefined。 */
+  reveal?: RevealBinding
+  onContentClick?: () => void
   /** 作为 workbench grid 子项时的外部样式（如显式 grid-column 定位）。 */
   style?: CSSProperties
 }) {
@@ -56,7 +63,7 @@ export function PreviewPane({
             </p>
           )}
           <div className="preview-stage" ref={stageRef}>
-            <Player state={play} sfx={sfx} onChoose={onChoose} />
+            <Player state={play} sfx={sfx} onChoose={onChoose} onSubmitInput={onSubmitInput} reveal={reveal} onContentClick={onContentClick} />
           </div>
         </>
       )}

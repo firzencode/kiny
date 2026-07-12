@@ -5,15 +5,21 @@ import {
   type FontPreset, sanitizeFontName,
 } from '../state/settings'
 import { type AiConfig, DEFAULT_AI_CONFIG } from '../ai/aiConfig'
+import { ShortcutsSettings } from './ShortcutsSettings'
+import { openUrl } from '@tauri-apps/plugin-opener'
+
+/** 外部控制的 CLI/skill 文档仓（GitHub）。 */
+const KINY_CLI_DOCS_URL = 'https://github.com/firzencode/kiny-cli'
 
 type Theme = 'dark' | 'light'
 
-// 设置分类 tab：数组描述便于扩展（T031 的「快捷键」作为第 5 项追加，无需动骨架/保存逻辑）。
-type TabId = 'typography' | 'appearance' | 'editor' | 'ai'
+// 设置分类 tab：数组描述便于扩展。
+type TabId = 'typography' | 'appearance' | 'editor' | 'ai' | 'shortcuts'
 const TABS: { id: TabId; label: string }[] = [
   { id: 'typography', label: '排版' },
   { id: 'appearance', label: '外观' },
   { id: 'editor', label: '编辑器' },
+  { id: 'shortcuts', label: '快捷键' },
   { id: 'ai', label: 'AI' },
 ]
 
@@ -22,11 +28,21 @@ export interface SettingsDialogProps {
   settings: Settings
   theme: Theme
   aiConfig: AiConfig
+  /** 外部控制运行态（T040）：非 null 时显示「运行中 · 端口 N」，仅只读展示，不受此弹窗控制。 */
+  controlInfo: { port: number } | null
   onSave: (next: Settings, theme: Theme, aiConfig: AiConfig) => void
   onCancel: () => void
 }
 
 const decimals = (step: number) => (step.toString().split('.')[1] || '').length
+
+/** 快捷键覆盖分片语义相等（键集与值均同）。 */
+function shortcutsEq(a: Settings['shortcuts'], b: Settings['shortcuts']): boolean {
+  const ak = Object.keys(a)
+  const bk = Object.keys(b)
+  if (ak.length !== bk.length) return false
+  return ak.every((k) => a[k as keyof typeof a] === b[k as keyof typeof b])
+}
 
 /** 数值步进器：±step 并夹紧到 [min,max]，对外回 number。 */
 function Stepper({ label, unit, bounds, value, onChange }: {
@@ -79,7 +95,7 @@ function FontRow({ label, value, presets, fallback, onChange }: {
   )
 }
 
-export function SettingsDialog({ open, settings, theme, aiConfig, onSave, onCancel }: SettingsDialogProps) {
+export function SettingsDialog({ open, settings, theme, aiConfig, controlInfo, onSave, onCancel }: SettingsDialogProps) {
   const [draft, setDraft] = useState<Settings>(settings)
   const [draftTheme, setDraftTheme] = useState<Theme>(theme)
   const [draftAi, setDraftAi] = useState<AiConfig>(aiConfig)
@@ -104,13 +120,15 @@ export function SettingsDialog({ open, settings, theme, aiConfig, onSave, onCanc
     draft.proseFont !== settings.proseFont || draft.proseSize !== settings.proseSize || draft.proseLh !== settings.proseLh
   const dirtyAppearance = draftTheme !== theme
   const dirtyEditor = draft.autosaveRecovery !== settings.autosaveRecovery || draft.previewRandomSeed !== settings.previewRandomSeed
-  const dirtyAi = !aiEq || draft.aiChatRetentionDays !== settings.aiChatRetentionDays
-  const tabDirty: Record<TabId, boolean> = { typography: dirtyTypo, appearance: dirtyAppearance, editor: dirtyEditor, ai: dirtyAi }
-  const dirty = dirtyTypo || dirtyAppearance || dirtyEditor || dirtyAi
+  const dirtyShortcuts = !shortcutsEq(draft.shortcuts, settings.shortcuts)
+  const dirtyAi = !aiEq || draft.aiChatRetentionDays !== settings.aiChatRetentionDays || draft.externalControl !== settings.externalControl
+  const tabDirty: Record<TabId, boolean> = { typography: dirtyTypo, appearance: dirtyAppearance, editor: dirtyEditor, shortcuts: dirtyShortcuts, ai: dirtyAi }
+  const dirty = dirtyTypo || dirtyAppearance || dirtyEditor || dirtyShortcuts || dirtyAi
 
   return (
-    <div className="settings-scrim" onClick={onCancel}>
-      <div className="settings-dlg" role="dialog" aria-modal="true" aria-label="设置" onClick={(e) => e.stopPropagation()}>
+    // 点遮罩空白处不关闭（避免误触丢失未保存改动）——仅 ×／取消／Esc 可关。
+    <div className="settings-scrim">
+      <div className="settings-dlg" role="dialog" aria-modal="true" aria-label="设置">
         <button className="settings-close" aria-label="关闭" onClick={onCancel}>×</button>
         <div className="settings-head">
           <span className="settings-title"><b>设置</b></span>
@@ -207,6 +225,13 @@ export function SettingsDialog({ open, settings, theme, aiConfig, onSave, onCanc
               </div>
             )}
 
+            {activeTab === 'shortcuts' && (
+              <ShortcutsSettings
+                overrides={draft.shortcuts}
+                onChange={(next) => setDraft({ ...draft, shortcuts: next })}
+              />
+            )}
+
             {activeTab === 'ai' && (
               <div className="settings-grp">
                 <div className="settings-row">
@@ -268,6 +293,37 @@ export function SettingsDialog({ open, settings, theme, aiConfig, onSave, onCanc
                   </div>
                 </div>
                 <div className="settings-help">距今超过设定天数没有新增内容的 AI 对话，会在下次启动时自动删除；关闭则永久保留。对话历史仅存本机（app 数据目录），含 key 的请求不入库。</div>
+
+                <div className="settings-cat">外部控制</div>
+                <div className="settings-row">
+                  <span className="settings-label">启用外部控制</span>
+                  <button
+                    className={'settings-toggle' + (draft.externalControl ? ' on' : '')}
+                    role="switch" aria-checked={draft.externalControl} aria-label="启用外部控制"
+                    onClick={() => setDraft({ ...draft, externalControl: !draft.externalControl })}
+                  >
+                    <span className="settings-toggle-knob" />
+                  </button>
+                </div>
+                <div className="settings-help">
+                  开启后，会在本机 127.0.0.1 上开启一个 REST 服务，外部 AI Agent 可以使用 API
+                  来驱动编辑器，进行完整的项目编写和编辑器控制。详情内容请查看：
+                  <a
+                    href={KINY_CLI_DOCS_URL}
+                    onClick={(e) => {
+                      e.preventDefault()
+                      void openUrl(KINY_CLI_DOCS_URL)
+                    }}
+                  >
+                    {KINY_CLI_DOCS_URL}
+                  </a>
+                </div>
+                {controlInfo !== null && (
+                  <div className="settings-row">
+                    <span className="settings-label">运行状态</span>
+                    <span className="settings-control-status">运行中 · 端口 {controlInfo.port}</span>
+                  </div>
+                )}
               </div>
             )}
           </div>
