@@ -47,4 +47,11 @@ describe('App', () => {
     render(<App />)
     await waitFor(() => expect(screen.getByText(/加载失败/)).toBeInTheDocument())
   })
+
+  it('loadStory promise reject → 显示错误而非永久卡「加载中……」', async () => {
+    vi.mocked(loadStory).mockRejectedValue(new TypeError('Object.entries called on undefined'))
+    render(<App />)
+    await waitFor(() => expect(screen.getByText(/出错|失败/)).toBeInTheDocument())
+    expect(screen.queryByText('加载中……')).not.toBeInTheDocument()
+  })
 })

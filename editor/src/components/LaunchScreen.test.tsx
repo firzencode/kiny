@@ -12,6 +12,7 @@ function renderLaunch(over: Partial<React.ComponentProps<typeof LaunchScreen>> =
   const onNewProject = vi.fn()
   const onOpenProject = vi.fn()
   const onOpenRecent = vi.fn()
+  const onRemoveRecent = vi.fn()
   render(
     <LaunchScreen
       theme="dark"
@@ -19,10 +20,11 @@ function renderLaunch(over: Partial<React.ComponentProps<typeof LaunchScreen>> =
       onNewProject={onNewProject}
       onOpenProject={onOpenProject}
       onOpenRecent={onOpenRecent}
+      onRemoveRecent={onRemoveRecent}
       {...over}
     />,
   )
-  return { onNewProject, onOpenProject, onOpenRecent }
+  return { onNewProject, onOpenProject, onOpenRecent, onRemoveRecent }
 }
 
 describe('LaunchScreen', () => {
@@ -47,6 +49,22 @@ describe('LaunchScreen', () => {
     renderLaunch({ recent: [] })
     expect(screen.getByText(/还没有项目/)).toBeInTheDocument()
     expect(screen.queryByRole('listitem')).toBeNull()
+  })
+
+  it('每个最近项目渲染删除按钮，点击回调带对应项目', async () => {
+    const { onRemoveRecent, onOpenRecent } = renderLaunch()
+    const del = screen.getByRole('button', { name: '从最近项目移除 雾港之夜' })
+    await userEvent.click(del)
+    expect(onRemoveRecent).toHaveBeenCalledWith({
+      dir: 'D:\\projects\\fog-harbor', name: '雾港之夜', ts: 200,
+    })
+    // 点删除不应触发打开项目
+    expect(onOpenRecent).not.toHaveBeenCalled()
+  })
+
+  it('最近项目为空 → 无删除按钮', () => {
+    renderLaunch({ recent: [] })
+    expect(screen.queryByRole('button', { name: /从最近项目移除/ })).toBeNull()
   })
 })
 

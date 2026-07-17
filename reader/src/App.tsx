@@ -26,9 +26,10 @@ export function App() {
   const [error, setError] = useState<string | null>(null)
   const [showErrorDetails, setShowErrorDetails] = useState(false)
 
-  /** 设错误提示并记进运行时错误日志（带来源与 stack），便于事后排查。 */
+  /** 设错误提示并记进运行时错误日志（带来源与 stack），便于事后排查。
+   * Tauri v2 的 invoke 失败时 reject 的是裸字符串（Rust 侧 Result<_, String>），须原样透传诊断。 */
   const fail = (e: unknown, source: ErrorSource, fallback: string) => {
-    const msg = e instanceof Error ? e.message : fallback
+    const msg = typeof e === 'string' && e.trim() !== '' ? e : e instanceof Error ? e.message : fallback
     logErrorEntry({ source, message: msg, stack: e instanceof Error ? e.stack : undefined })
     setError(msg)
   }

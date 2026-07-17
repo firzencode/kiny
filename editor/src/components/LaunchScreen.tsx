@@ -13,6 +13,7 @@ export interface LaunchScreenProps {
   onNewProject: () => void
   onOpenProject: () => void
   onOpenRecent: (dir: string) => void
+  onRemoveRecent: (project: RecentProject) => void
 }
 
 /** 时间戳 → 相对时间（刚刚 / N 分钟前 / N 小时前 / 昨天 / N 天前）。 */
@@ -38,12 +39,17 @@ const OpenIcon = () => (
     <path d="M3 7h6l2 2h10v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z" />
   </svg>
 )
+const CloseIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden={true}>
+    <line x1="6" y1="6" x2="18" y2="18" /><line x1="18" y1="6" x2="6" y2="18" />
+  </svg>
+)
 
 /**
  * 编辑器启动页：冷启动 / 关闭项目后展示，替代「无项目空状态」。
  * 上方 banner 图（随主题切换）+ 下方操作区（新建 / 打开 + 最近项目）。
  */
-export function LaunchScreen({ theme, recent, onNewProject, onOpenProject, onOpenRecent }: LaunchScreenProps) {
+export function LaunchScreen({ theme, recent, onNewProject, onOpenProject, onOpenRecent, onRemoveRecent }: LaunchScreenProps) {
   const now = Date.now()
   const banner = theme === 'light' ? bannerLight : bannerNight
   return (
@@ -80,14 +86,23 @@ export function LaunchScreen({ theme, recent, onNewProject, onOpenProject, onOpe
               <ul className="launch-recent-list">
                 {recent.map((r) => (
                   <li key={r.dir}>
-                    <button className="launch-recent-item" onClick={() => onOpenRecent(r.dir)}>
-                      <span className="thumb">{[...r.name][0] ?? '·'}</span>
-                      <span className="meta">
-                        <span className="nm">{r.name}</span>
-                        <span className="pt">{r.dir}</span>
-                      </span>
-                      <span className="when">{formatRelative(r.ts, now)}</span>
-                    </button>
+                    <div className="launch-recent-row">
+                      <button className="launch-recent-item" onClick={() => onOpenRecent(r.dir)}>
+                        <span className="thumb">{[...r.name][0] ?? '·'}</span>
+                        <span className="meta">
+                          <span className="nm">{r.name}</span>
+                          <span className="pt">{r.dir}</span>
+                        </span>
+                        <span className="when">{formatRelative(r.ts, now)}</span>
+                      </button>
+                      <button
+                        className="launch-recent-del"
+                        aria-label={`从最近项目移除 ${r.name}`}
+                        onClick={() => onRemoveRecent(r)}
+                      >
+                        <CloseIcon />
+                      </button>
+                    </div>
                   </li>
                 ))}
               </ul>

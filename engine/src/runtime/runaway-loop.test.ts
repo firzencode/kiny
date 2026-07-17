@@ -59,4 +59,25 @@ describe('运行时死循环兜底', () => {
     expect(() => drive(s, [])).not.toThrow()
     expect(s.hasEnded).toBe(true)
   })
+
+  it('停在选项 park 点反复读 canContinue 不烧步数预算（宿主轮询式 UI）', () => {
+    const s = build(STICKY)
+    while (s.canContinue) s.continue()
+    expect(s.currentChoices.length).toBe(1)
+    expect(() => {
+      for (let i = 0; i < 10001; i++) void s.canContinue
+    }).not.toThrow()
+    expect(s.currentChoices.length).toBe(1) // park 态未被破坏
+  })
+
+  it('停在命令 park 点反复读 canContinue 不烧步数预算', () => {
+    const src = ['=== 开场 ===', '一段。', '@bg_show("码头")', '-> END'].join('\n')
+    const s = build(src)
+    expect(s.continue().kind).toBe('text') // flush 正文，随后停在命令上
+    expect(() => {
+      for (let i = 0; i < 10001; i++) void s.canContinue
+    }).not.toThrow()
+    const ev = s.continue()
+    expect(ev.kind).toBe('command') // park 的命令仍能正常产出
+  })
 })

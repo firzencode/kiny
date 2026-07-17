@@ -20,6 +20,11 @@ export function App() {
       if (!alive) return
       if (out.ok) document.title = out.value.title // 导出网页 / demo 标签页标题取故事名
       setPhase(out.ok ? { kind: 'ready', loaded: out.value } : { kind: 'error', message: out.message })
+    }).catch((e: unknown) => {
+      // 加载链路的未预期抛错（loadStory 正常路径返回 ok:false，这里是最后防线）——
+      // 不兜住会永久卡在「加载中……」且读者拿不到任何诊断。
+      if (!alive) return
+      setPhase({ kind: 'error', message: `加载出错：${e instanceof Error ? e.message : String(e)}` })
     })
     return () => { alive = false }
   }, [])

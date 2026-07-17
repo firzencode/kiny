@@ -321,6 +321,18 @@ export class Story {
    */
   private advanceToEvent(): void {
     if (this.pendingInput !== null) return // 已停在输入框：不再推进，等 submitInput（幂等，避免重复求值 placeholder）
+    // 其余 park 态同样幂等早退：canContinue 是宿主每帧都可能轮询的 getter，停在选项/命令上
+    // 反复调用不得累积 autoSteps 烧掉死循环预算（否则停留 1 万次轮询即被误判死循环）。
+    if (this.pendingChoices.length > 0) {
+      this.settleBufferIntoLine() // 与循环内 park 行为一致：残留 glue 缓冲定型成行交 continue flush
+      return
+    }
+    const parked = this.parkedCommand()
+    if (this.pendingDivert === null && parked !== null && parked.name !== 'input') {
+      // @input 例外：它虽是 command 元素但由循环转成 pendingInput 暂停态，不能在此拦下。
+      this.settleBufferIntoLine()
+      return
+    }
     for (;;) {
       if (++this.autoSteps > STEP_BUDGET) {
         throw new RuntimeError(
@@ -484,7 +496,7 @@ export class Story {
       case 'logicLine':
       case 'logicBlock': {
         frame.index++
-        this.runLogic(el.code, false, undefined, el.line)
+        this.runLogic(el.code, false, this.currentFile, el.line)
         return null
       }
       case 'conditional': {
@@ -529,7 +541,8 @@ export class Story {
       const knot = this.program.knots.get(parent)
       const stitch = this.program.stitches.get(parent)?.get(child)
       if (!knot || !stitch) throw new RuntimeError(`跳转目标不存在：「${target}」`)
-      this.switchKnot(knot) // 跨 knot：换新 L、记访问
+      // 同 knot 限定名自跳保留 L（与非限定同级跳转语义一致：参数/局部变量不清、不重记访问）
+      if (knot !== this.currentKnot) this.switchKnot(knot)
       this.enterStitch(stitch)
       return null
     }

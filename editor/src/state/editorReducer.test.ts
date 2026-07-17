@@ -154,11 +154,31 @@ describe('editorReducer 多文件', () => {
     expect(after.runId).toBe(before.runId)
   })
 
-  it('saved / saved_all 清 dirty', () => {
+  it('saved / saved_all 清 dirty（written 与当前 source 一致的正常路径）', () => {
     const dirty = editorReducer(loaded, { type: 'source_changed', path: 'main.kin', source: 'X' })
-    expect(editorReducer(dirty, { type: 'saved', path: 'main.kin' }).files['main.kin'].dirty).toBe(false)
+    expect(editorReducer(dirty, { type: 'saved', path: 'main.kin', written: 'X' }).files['main.kin'].dirty).toBe(false)
     const d2 = editorReducer(dirty, { type: 'source_changed', path: '末.kin', source: 'Y' })
-    expect(anyDirty(editorReducer(d2, { type: 'saved_all' }))).toBe(false)
+    expect(anyDirty(editorReducer(d2, { type: 'saved_all', written: { 'main.kin': 'X', '末.kin': 'Y' } }))).toBe(false)
+  })
+
+  it('saved：写盘期间又输入（source 已超前于写盘内容）→ 保存后仍 dirty、基线为实际写盘文本', () => {
+    // 场景：saveBuffer 捕获 source='V1' → await 写盘期间用户继续输入 'V2' → saved 到达。
+    const v1 = editorReducer(loaded, { type: 'source_changed', path: 'main.kin', source: 'V1' })
+    const v2 = editorReducer(v1, { type: 'source_changed', path: 'main.kin', source: 'V2' })
+    const s = editorReducer(v2, { type: 'saved', path: 'main.kin', written: 'V1' })
+    expect(s.files['main.kin'].dirty).toBe(true) // V2 尚未落盘，不得清脏
+    expect(s.files['main.kin'].savedSource).toBe('V1') // 基线 = 磁盘实际内容
+    expect(s.files['main.kin'].source).toBe('V2') // 缓冲不动
+  })
+
+  it('saved_all：写盘期间某文件又输入 → 该文件仍 dirty，其余正常清脏', () => {
+    const a = editorReducer(loaded, { type: 'source_changed', path: 'main.kin', source: 'A1' })
+    const b = editorReducer(a, { type: 'source_changed', path: '末.kin', source: 'B1' })
+    const bLate = editorReducer(b, { type: 'source_changed', path: '末.kin', source: 'B2' }) // 写盘期间的追加输入
+    const s = editorReducer(bLate, { type: 'saved_all', written: { 'main.kin': 'A1', '末.kin': 'B1' } })
+    expect(s.files['main.kin'].dirty).toBe(false)
+    expect(s.files['末.kin'].dirty).toBe(true)
+    expect(s.files['末.kin'].savedSource).toBe('B1')
   })
 
   it('project_loaded：savedSource 记录磁盘内容（= source）', () => {
@@ -177,7 +197,7 @@ describe('editorReducer 多文件', () => {
 
   it('discard_tab：saved 更新基线后，回退到该次保存的内容', () => {
     const v1 = editorReducer(loaded, { type: 'source_changed', path: 'main.kin', source: 'V1' })
-    const saved = editorReducer(v1, { type: 'saved', path: 'main.kin' })
+    const saved = editorReducer(v1, { type: 'saved', path: 'main.kin', written: 'V1' })
     const v2 = editorReducer(saved, { type: 'source_changed', path: 'main.kin', source: 'V2' })
     const s = editorReducer(v2, { type: 'discard_tab', path: 'main.kin' })
     expect(s.files['main.kin'].source).toBe('V1')

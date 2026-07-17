@@ -11,7 +11,9 @@ export function Choices({
   return (
     <div className="choices">
       {items.map((c) => (
-        <button key={c.index} className="choice" onClick={() => onChoose(c.index)}>
+        // stopPropagation：选项点击不得冒泡到 .player-content 的推进/跳过 handler
+        //（chooseStep 同步开始新行揭示后，冒泡会递增 skipToken 把新行瞬显；与 InputBox 防御一致）。
+        <button key={c.index} className="choice" onClick={(e) => { e.stopPropagation(); onChoose(c.index) }}>
           <RichText spans={c.spans} />
         </button>
       ))}

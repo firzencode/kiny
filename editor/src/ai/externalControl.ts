@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
 import { runCommand, type ActionCommand, type ActionContext } from './actions'
-import { ACTION_MANIFEST } from './actionManifest'
+import { ACTION_MANIFEST, validateCommandArgs } from './actionManifest'
 
 /**
  * webview 侧外部请求路由（T040b-web，spec 2026-07-xx-editor-external-control-design）。
@@ -46,6 +46,11 @@ export async function handleExternalRequest(deps: HandleDeps, req: ExternalReque
     const cmd = req.body as ActionCommand
     if (!cmd || typeof (cmd as { name?: unknown }).name !== 'string') {
       return json(req.id, 400, { ok: false, error: '缺少命令名 name' })
+    }
+    // 外部输入不可信：执行前按 ACTION_MANIFEST 校验参数（与 agent 循环同一校验）。
+    const invalid = validateCommandArgs(cmd as { name: string } & Record<string, unknown>)
+    if (invalid) {
+      return json(req.id, 400, { ok: false, error: `参数校验失败：${invalid}` })
     }
     try {
       const result = await runCommand(ctx, cmd)

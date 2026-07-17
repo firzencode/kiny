@@ -229,6 +229,10 @@ describe('assertSafeRelPath 守卫', () => {
     const gw = createMemoryGateway({ files: { '/p/kiny.json': JSON.stringify({ name: 'P', version: '1', engine: '0.1.0', entry: 'main.kin' }), '/p/main.kin': '', '/p/a.kin': 'A' } })
     await expect(gw.renamePath('/p', 'a.kin', '../a.kin')).rejects.toThrow('非法路径')
   })
+  it('deletePath 拒绝 .. 穿越', async () => {
+    const gw = createMemoryGateway({ files: { '/p/kiny.json': JSON.stringify({ name: 'P', version: '1', engine: '0.1.0', entry: 'main.kin' }), '/p/main.kin': '', '/danger/x.txt': 'X' } })
+    await expect(gw.deletePath('/p', '../danger')).rejects.toThrow('非法路径')
+  })
 })
 
 describe('memoryGateway 导出相关', () => {

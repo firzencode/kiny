@@ -264,17 +264,19 @@ export async function runCommand<C extends ActionCommand>(
     case 'saveFile': {
       const dir = projectDir(ctx)
       const buf = buffer(ctx, cmd.path)
-      await ctx.gateway.writeFile(dir, cmd.path, buf.source)
-      ctx.dispatch({ type: 'saved', path: cmd.path })
+      const written = buf.source // 捕获实际写盘文本；写盘期间的并发编辑由 reducer 按 written 对账保脏
+      await ctx.gateway.writeFile(dir, cmd.path, written)
+      ctx.dispatch({ type: 'saved', path: cmd.path, written })
       return { path: cmd.path } as ResultFor<C['name']>
     }
     case 'saveAll': {
       const dir = projectDir(ctx)
       const saved: string[] = []
+      const written: Record<string, string> = {}
       for (const f of Object.values(ctx.getState().files)) {
-        if (f.dirty) { await ctx.gateway.writeFile(dir, f.path, f.source); saved.push(f.path) }
+        if (f.dirty) { await ctx.gateway.writeFile(dir, f.path, f.source); saved.push(f.path); written[f.path] = f.source }
       }
-      ctx.dispatch({ type: 'saved_all' })
+      ctx.dispatch({ type: 'saved_all', written })
       return { saved } as ResultFor<C['name']>
     }
     // ---- 语言规范查询 ----

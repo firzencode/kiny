@@ -1224,6 +1224,31 @@ describe('App 启动页 / 关闭项目（T034）', () => {
     await waitFor(() => expect(screen.queryByText('/gone')).toBeNull())
   })
 
+  it('启动页最近项目：点删除 → 确认 → 从列表与会话存储移除（不影响另一项）', async () => {
+    localStorage.setItem(SESSION_KEY, JSON.stringify({
+      version: 1,
+      projects: {
+        '/proj/a': { openTabs: [], activeFile: null, ts: 200, name: '雾港之夜' },
+        '/proj/b': { openTabs: [], activeFile: null, ts: 100, name: '星辰彼端' },
+      },
+    }))
+    render(<App gateway={gw()} />)
+    // 启动页列出两项
+    expect(await screen.findByText('雾港之夜')).toBeInTheDocument()
+    expect(screen.getByText('星辰彼端')).toBeInTheDocument()
+    // 点「雾港之夜」的删除键 → 弹确认框
+    await userEvent.click(screen.getByRole('button', { name: '从最近项目移除 雾港之夜' }))
+    expect(await screen.findByRole('dialog', { name: '从最近项目中移除' })).toBeInTheDocument()
+    // 确认删除
+    await userEvent.click(screen.getByRole('button', { name: '删除' }))
+    // 列表只剩「星辰彼端」，会话存储也移除了 /proj/a
+    await waitFor(() => expect(screen.queryByText('雾港之夜')).toBeNull())
+    expect(screen.getByText('星辰彼端')).toBeInTheDocument()
+    const store = JSON.parse(localStorage.getItem(SESSION_KEY) || '{}')
+    expect(store.projects['/proj/a']).toBeUndefined()
+    expect(store.projects['/proj/b']).toBeDefined()
+  })
+
   it('启动页按 Ctrl+, 不武装设置弹窗（进项目后不意外弹出）', async () => {
     render(<App gateway={gw()} />)
     fireEvent.keyDown(window, { key: ',', ctrlKey: true }) // 启动页，无 workbench

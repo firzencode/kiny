@@ -150,6 +150,7 @@ export function createMemoryGateway(init: MemoryGatewayInit): FileGateway {
       emptyDirs.set(dir, list.map((d) => (d === from ? to : d.startsWith(`${from}/`) ? to + d.slice(from.length) : d)))
     },
     deletePath: async (dir, relPath) => {
+      assertSafeRelPath(relPath)
       const abs = `${dir}/${relPath}`
       files.delete(abs)
       const prefix = `${abs}/`

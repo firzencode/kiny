@@ -43,7 +43,8 @@ import { useExternalControl } from './ai/externalControl'
 import { runExternalControlStart } from './ai/externalControlLifecycle'
 import { invoke } from '@tauri-apps/api/core'
 import { loadSession, saveSession, resolveSession, listRecentProjects, removeSession } from './state/session'
-import { LaunchScreen } from './components/LaunchScreen'
+import { LaunchScreen, type RecentProject } from './components/LaunchScreen'
+import { RemoveRecentDialog } from './components/RemoveRecentDialog'
 import { logErrorEntry, ErrorDetailsDialog } from '@kiny/error-report'
 
 // 确定性模式的固定种子（默认行为）。随机模式下由 randomSeed() 每次 ↺ 重掷。
@@ -183,6 +184,7 @@ export function App({ gateway }: { gateway: FileGateway }) {
   }, [state.projectDir, state.openTabs, state.activeFile, state.manifest?.name])
   // 最近项目：随打开 / 关闭项目（projectDir 变）与失效移除（recentTick）刷新。
   const [recentTick, setRecentTick] = useState(0)
+  const [removeTarget, setRemoveTarget] = useState<RecentProject | null>(null)
   const recentProjects = useMemo(() => listRecentProjects(), [state.projectDir, recentTick])
 
   // 派生量
@@ -412,15 +414,19 @@ export function App({ gateway }: { gateway: FileGateway }) {
   const saveBuffer = async (path: string): Promise<boolean> => {
     const buf = state.files[path]
     if (!state.projectDir || !buf) return false
-    try { await gateway.writeFile(state.projectDir, path, buf.source); dispatch({ type: 'saved', path }); return true }
+    const written = buf.source // 捕获实际写盘文本；await 期间的输入由 reducer 按 written 对账保脏
+    try { await gateway.writeFile(state.projectDir, path, written); dispatch({ type: 'saved', path, written }); return true }
     catch (e) { setNotice(`保存失败：${errMsg(e)}`); return false }
   }
   // 写回所有脏文件。成功返 true，失败弹 notice 返 false。
   const saveAllDirty = async (): Promise<boolean> => {
     if (!state.projectDir) return false
     try {
-      for (const f of Object.values(state.files)) if (f.dirty) await gateway.writeFile(state.projectDir, f.path, f.source)
-      dispatch({ type: 'saved_all' }); return true
+      const written: Record<string, string> = {}
+      for (const f of Object.values(state.files)) {
+        if (f.dirty) { await gateway.writeFile(state.projectDir, f.path, f.source); written[f.path] = f.source }
+      }
+      dispatch({ type: 'saved_all', written }); return true
     } catch (e) { setNotice(`保存失败：${errMsg(e)}`); return false }
   }
   const onSave = () => { if (active) void saveBuffer(active.path) }
@@ -964,6 +970,14 @@ export function App({ gateway }: { gateway: FileGateway }) {
         onCreate={onCreateProject}
         onCancel={() => setNewProjectOpen(false)}
       />
+      <RemoveRecentDialog
+        target={removeTarget}
+        onConfirm={() => {
+          if (removeTarget) { removeSession(removeTarget.dir); setRecentTick((t) => t + 1) }
+          setRemoveTarget(null)
+        }}
+        onCancel={() => setRemoveTarget(null)}
+      />
       {editorBooting ? (
       <div className="editor-booting" role="status">正在打开项目…</div>
       ) : showLaunch ? (
@@ -973,6 +987,7 @@ export function App({ gateway }: { gateway: FileGateway }) {
         onNewProject={onNewProject}
         onOpenProject={onOpenProject}
         onOpenRecent={onOpenRecent}
+        onRemoveRecent={setRemoveTarget}
       />
       ) : (
       <>

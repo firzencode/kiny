@@ -230,3 +230,34 @@ describe('runAgentLoop · 可停止', () => {
     expect(calls).toBe(0)
   })
 })
+
+describe('executeTool · LLM 工具参数运行时校验（不可信输入）', () => {
+  it('insertText 缺 offset → tool-result 报错、文档不被翻倍污染', async () => {
+    const h = makeCtx()
+    await loadProject(h)
+    const before = h.getState().files['main.kin']!.source
+    const { provider } = scriptedProvider([
+      asst('', [{ id: 'c1', name: 'insertText', arguments: { path: 'main.kin', text: '新增一行' } }]),
+      asst('好的。'),
+    ])
+    const res = await runAgentLoop('插入文本', { provider, ctx: h.ctx, model: 'm' })
+    // 文档必须原封不动（bug 形态：slice(0, undefined) 拼接出双倍文档且报 ok:true）
+    expect(h.getState().files['main.kin']!.source).toBe(before)
+    // tool-result 是校验错误、点名缺失参数
+    expect(res.toolRuns[0].ok).toBe(false)
+    expect(res.toolRuns[0].result).toMatch(/offset/)
+  })
+
+  it('replaceRange 缺 start/end → 报错不执行', async () => {
+    const h = makeCtx()
+    await loadProject(h)
+    const before = h.getState().files['main.kin']!.source
+    const { provider } = scriptedProvider([
+      asst('', [{ id: 'c1', name: 'replaceRange', arguments: { path: 'main.kin', text: 'x' } }]),
+      asst('好的。'),
+    ])
+    const res = await runAgentLoop('替换', { provider, ctx: h.ctx, model: 'm' })
+    expect(h.getState().files['main.kin']!.source).toBe(before)
+    expect(res.toolRuns[0].ok).toBe(false)
+  })
+})

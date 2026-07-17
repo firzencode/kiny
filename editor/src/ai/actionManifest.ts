@@ -57,6 +57,31 @@ export const ACTION_MANIFEST: readonly CommandSpec[] = [
   { name: 'readKinSpec', desc: '按章节 id 读取 Kin 规范某章 / 节的完整原文（规则、示例、边界），并返回其直接子节清单；取章只回章引言，子节经各自 id 再取。先用 listKinSpec 查 id。', params: { id: s('章节 id，如 5 或 5.3') } },
 ]
 
+/**
+ * 用 ACTION_MANIFEST 对一条命令做运行时参数校验。LLM tool call 与外部控制 HTTP 都是
+ * **不可信输入**——缺参时 `undefined < 0` 这类边界检查会静默通过（曾致 insertText 缺
+ * offset 把整份文档翻倍拼接），故必须在执行前按真相源校验。
+ * 通过返回 null；否则返回聚合的人类可读错误（点名每个问题参数）。多余的未知参数不拒绝。
+ */
+export function validateCommandArgs(cmd: { name: string } & Record<string, unknown>): string | null {
+  const spec = ACTION_MANIFEST.find((c) => c.name === cmd.name)
+  if (!spec) return `未知命令: ${cmd.name}`
+  const errors: string[] = []
+  for (const [key, p] of Object.entries(spec.params)) {
+    const v = cmd[key]
+    if (v === undefined || v === null) {
+      if (p.required) errors.push(`缺少必填参数 ${key}（${p.desc}）`)
+      continue
+    }
+    if (p.type === 'string' && typeof v !== 'string') {
+      errors.push(`参数 ${key} 应为 string，收到 ${typeof v}`)
+    } else if (p.type === 'integer' && (typeof v !== 'number' || !Number.isInteger(v))) {
+      errors.push(`参数 ${key} 应为整数，收到 ${JSON.stringify(v)}`)
+    }
+  }
+  return errors.length > 0 ? errors.join('；') : null
+}
+
 /** 把一条命令的参数规格派生成 JSON Schema（供 LLM tool-definition 与 REST 文档用）。 */
 export function manifestToJsonSchema(c: CommandSpec) {
   const properties: Record<string, { type: string; description?: string }> = {}

@@ -1,4 +1,5 @@
 import { runCommand, type ActionContext, type ActionCommand } from './actions'
+import { validateCommandArgs } from './actionManifest'
 import type { ChatRequest, Message, ToolCall, ToolDefinition } from './provider'
 import { TOOL_DEFINITIONS } from './toolDefinitions'
 import { KIN_KNOWLEDGE } from './kinKnowledge'
@@ -84,6 +85,10 @@ export function buildSystemPrompt(ctx: ActionContext, kinKnowledge: string = KIN
 /** 把一次 toolCall 映射成动作层命令并执行，结果序列化为 tool-result 文本；失败则回错误文本。 */
 async function executeTool(ctx: ActionContext, call: ToolCall): Promise<ToolRunRecord> {
   try {
+    // LLM 参数是不可信输入：执行前按 ACTION_MANIFEST 校验，缺参/类型错直接回错误 tool-result
+    // （模型可据此修正重试），绝不带着 undefined 进命令边界检查。
+    const invalid = validateCommandArgs({ name: call.name, ...call.arguments })
+    if (invalid) return { call, result: JSON.stringify({ error: `参数校验失败：${invalid}` }), ok: false }
     const cmd = { name: call.name, ...call.arguments } as unknown as ActionCommand
     const out = await runCommand(ctx, cmd)
     return { call, result: JSON.stringify(out ?? null), ok: true }

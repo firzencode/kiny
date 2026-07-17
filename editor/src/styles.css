@@ -936,7 +936,7 @@ button {
    限高使操作区保持紧凑、把窗口高度让给 banner。 */
 .launch-recent-list { flex: 1; min-height: 0; max-height: 178px; overflow-y: auto; list-style: none; margin: 4px 0 0; padding: 0; }
 .launch-recent-item {
-  display: flex; align-items: center; gap: 11px; width: 100%; text-align: left; cursor: pointer;
+  display: flex; align-items: center; gap: 11px; flex: 1; min-width: 0; text-align: left; cursor: pointer;
   padding: 9px 8px; border-radius: 8px; border: none; background: transparent; color: var(--text); font: inherit;
 }
 .launch-recent-item:hover { background: var(--accent-soft); }
@@ -948,6 +948,16 @@ button {
 .launch-recent-item .meta .nm { font-size: 13px; font-weight: 500; }
 .launch-recent-item .meta .pt { font-family: ui-monospace, monospace; font-size: 10px; color: var(--text-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .launch-recent-item .when { font-size: 10.5px; color: var(--text-faint); flex: 0 0 auto; }
+.launch-recent-row { display: flex; align-items: center; }
+.launch-recent-del {
+  flex: 0 0 auto; display: none; align-items: center; justify-content: center;
+  width: 24px; height: 24px; margin-left: 2px; border-radius: 6px;
+  border: none; background: transparent; color: var(--text-faint); cursor: pointer;
+}
+.launch-recent-del svg { width: 15px; height: 15px; }
+.launch-recent-del:hover { background: var(--bg-3); color: var(--text); }
+.launch-recent-row:hover .launch-recent-del,
+.launch-recent-row:focus-within .launch-recent-del { display: flex; }
 
 /* =========================================================================
    帮助浮层 —— 关于 Kiny Editor / Kiny 语法参考

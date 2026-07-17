@@ -20,4 +20,12 @@ describe('runtime 3a② —— 跳转', () => {
     const s = story(['=== A ===', '-> B.s', '=== B ===', '-> END', '= s', '丁', '-> END'].join('\n'))
     expect(drain(s).map((e) => (e.kind === 'text' ? plainText(e.spans) : ''))).toEqual(['丁'])
   })
+  it('带参 knot 内限定名跳自己的 stitch 保留参数', () => {
+    const s = story(['=== A ===', '-> shop("灯笼")', '=== shop(item) ===', '-> shop.detail', '= detail', '详情:{item}', '-> END'].join('\n'))
+    expect(drain(s).map((e) => (e.kind === 'text' ? plainText(e.spans) : '')).filter(Boolean)).toEqual(['详情:灯笼'])
+  })
+  it('knot 内限定名自跳保留局部变量', () => {
+    const s = story(['=== A ===', '~ let n = 7', '-> A.s', '= s', '数{n}', '-> END'].join('\n'))
+    expect(drain(s).map((e) => (e.kind === 'text' ? plainText(e.spans) : '')).filter(Boolean)).toEqual(['数7'])
+  })
 })

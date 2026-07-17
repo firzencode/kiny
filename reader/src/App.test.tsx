@@ -85,6 +85,15 @@ describe('App', () => {
     expect(await screen.findByText('雾港之夜')).toBeInTheDocument()
   })
 
+  it('Tauri 字符串 rejection 透传具体诊断文案（invoke 失败 reject 的是 string 非 Error）', async () => {
+    listLibrary.mockResolvedValue([])
+    pickKipFile.mockResolvedValue('/d/x.kip')
+    importKip.mockRejectedValueOnce('不是合法的 zip / .kip：坏包')
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: /导入故事/ }))
+    expect(await screen.findByText('不是合法的 zip / .kip：坏包')).toBeInTheDocument()
+  })
+
   it('冷启动被「打开 .kip」意图拉起 → 导入并入库', async () => {
     listLibrary.mockResolvedValueOnce([]).mockResolvedValueOnce([ITEM])
     getOpenedUris.mockResolvedValue(['content://kip/1'])

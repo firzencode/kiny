@@ -19,6 +19,18 @@ describe('runtime 3b② —— 插值 + 节点局部作用域', () => {
     const s = story('~ let x = null\n=== A ===\n[{x}]\n-> END')
     expect(texts(s)).toEqual(['[]'])
   })
+  it('逻辑行求值抛错时 RuntimeError 带 file + line 源定位', () => {
+    const s = story('~ let o = null\n=== A ===\n~ o.x = 1\n-> END')
+    let err: unknown
+    try {
+      texts(s)
+    } catch (e) {
+      err = e
+    }
+    expect(err).toBeInstanceOf(RuntimeError)
+    expect((err as RuntimeError).file).toBe('main.kin')
+    expect((err as RuntimeError).line).toBe(3)
+  })
   it('插值求值抛错时 RuntimeError 带 file + line 源定位', () => {
     const s = story('~ let o = null\n=== A ===\n值{o.x}\n-> END')
     let err: unknown

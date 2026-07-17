@@ -64,9 +64,16 @@ export function RevealingLine({
     fireComplete()
   }, [fireComplete])
 
+  // skip 判定基线（声明须先于重置 effect，见下）。
+  const lastSkip = useRef(skipToken)
+
   // 每行（spans 变）重置并驱动逐字揭示；全字出完后等末字淡完（拖尾）再定格。
   useEffect(() => {
     clearTimers()
+    // 换行即同步 skip 基线：skip 只对「同一行内的 token 变化」生效。否则 StoryLog 按下标
+    // 复用实例时（@clear 后新行下标重合、换 story 时 token 重置 0），token 值变化会被误判
+    // 为跳过，把新行整段瞬显。
+    lastSkip.current = skipToken
     if (instant) {
       setCount(total)
       setSettled(true)
@@ -91,7 +98,6 @@ export function RevealingLine({
 
   // skip：点击跳过打字 → 立即整行显示。按「token 值变化」判定而非「effect 首跑」——
   // StrictMode 开发态双跑 effect 时 ref 不重置，布尔首跑标记会在第二跑误触 finish（整段瞬显）。
-  const lastSkip = useRef(skipToken)
   useEffect(() => {
     if (skipToken === lastSkip.current) return
     lastSkip.current = skipToken

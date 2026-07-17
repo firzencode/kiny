@@ -15,13 +15,22 @@ export interface InlineProject {
   assetBase?: string
 }
 
-/** 读取并校验 `window.__KINY_PROJECT__`；非合法内联对象（含未注入的占位字符串）返回 null。 */
-function inlineProject(): InlineProject | null {
+/** 内联数据探测结果：无注入（占位/缺 manifest）| 合法 | 有 manifest 但形状损坏。 */
+type InlineProbe = { kind: 'none' } | { kind: 'ok'; project: InlineProject } | { kind: 'corrupt' }
+
+/** 读取并校验 `window.__KINY_PROJECT__`；非对象 / 缺 manifest（含未注入的占位字符串）视为无注入；
+ * 有 manifest 但 `files` 缺失或非 string→string 表则判「损坏」——不得静默回退 fetch 掩盖问题，
+ * 更不能带着 undefined 进 `Object.entries` 抛 TypeError（导出网页白屏无诊断）。 */
+function inlineProject(): InlineProbe {
   const p = (window as unknown as { __KINY_PROJECT__?: unknown }).__KINY_PROJECT__
-  if (p && typeof p === 'object' && typeof (p as InlineProject).manifest === 'string') {
-    return p as InlineProject
+  if (!p || typeof p !== 'object' || typeof (p as InlineProject).manifest !== 'string') {
+    return { kind: 'none' }
   }
-  return null
+  const files = (p as InlineProject).files
+  if (!files || typeof files !== 'object' || Object.values(files).some((v) => typeof v !== 'string')) {
+    return { kind: 'corrupt' }
+  }
+  return { kind: 'ok', project: p as InlineProject }
 }
 
 /**
@@ -30,8 +39,12 @@ function inlineProject(): InlineProject | null {
  * 同一份 web-reader 既服务线上 demo 又服务导出网页。
  */
 export async function loadStory(seed = randomSeed()): Promise<LoadOutcome> {
-  const inline = inlineProject()
-  if (inline) {
+  const probe = inlineProject()
+  if (probe.kind === 'corrupt') {
+    return { ok: false, message: '导出数据损坏：__KINY_PROJECT__ 的 files 缺失或格式非法，请用编辑器重新导出独立网页。' }
+  }
+  if (probe.kind === 'ok') {
+    const inline = probe.project
     const files = new Map(Object.entries(inline.files))
     return buildStory(inline.manifest, files, inline.assetBase ?? '', seed)
   }

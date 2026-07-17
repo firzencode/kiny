@@ -195,6 +195,7 @@ export const tauriFileGateway: FileGateway = {
     await rename(await join(dir, from), absTo)
   },
   async deletePath(dir, relPath) {
+    assertSafeRelPath(relPath)
     await remove(await join(dir, relPath), { recursive: true })
   },
   async writeManifest(dir, manifest, manifestFile) {

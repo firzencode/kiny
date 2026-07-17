@@ -78,6 +78,17 @@ describe('handleExternalRequest', () => {
     const r = await handleExternalRequest({ ctx }, { id: '5', method: 'GET', path: '/nope', body: null })
     expect(r.status).toBe(404)
   })
+
+  it('POST /command 参数校验失败（insertText 缺 offset）→ 400 + 点名参数，命令不执行', async () => {
+    const { ctx } = await makeCtx()
+    const before = ctx.getState().files['main.kin']!.source
+    const r = await handleExternalRequest({ ctx }, { id: '6', method: 'POST', path: '/command', body: { name: 'insertText', path: 'main.kin', text: 'x' } })
+    expect(r.status).toBe(400)
+    const j = JSON.parse(r.body)
+    expect(j.ok).toBe(false)
+    expect(j.error).toMatch(/offset/)
+    expect(ctx.getState().files['main.kin']!.source).toBe(before)
+  })
 })
 
 describe('useExternalControl', () => {

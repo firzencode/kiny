@@ -19,11 +19,38 @@ pub(crate) fn is_valid_story_id(id: &str) -> bool {
     !id.is_empty() && id.chars().all(|c| c.is_ascii_hexdigit())
 }
 
-/// 解压 .kip（zip）到 dest 目录的核心：从任意 reader（文件或内存字节）读 zip。
+/// 解压资源上限（防 zip bomb / 磁盘耗尽）：.kip 是不受信输入，几 KB 的高压缩比包
+/// 可解出 GB 级文件写满磁盘（Android 上更易打爆应用私有存储）。
+pub(crate) struct ZipLimits {
+    pub max_entries: usize,
+    pub max_file_bytes: u64,
+    pub max_total_bytes: u64,
+}
+
+/// 默认上限：足够容纳含音视频素材的大型故事包，又能挡住恶意构造。
+pub(crate) const DEFAULT_ZIP_LIMITS: ZipLimits = ZipLimits {
+    max_entries: 10_000,
+    max_file_bytes: 256 * 1024 * 1024,  // 单文件 256MB
+    max_total_bytes: 512 * 1024 * 1024, // 解压总量 512MB
+};
+
+/// 解压 .kip（zip）到 dest 目录的核心：从任意 reader（文件或内存字节）读 zip，按默认上限设防。
 /// 要求 zip 根部直接是 manifest（`<名>.kiw` 或旧 kiny.json），不套外层目录。
 pub(crate) fn extract_zip_reader<R: std::io::Read + std::io::Seek>(reader: R, dest: &Path) -> Result<(), String> {
+    extract_zip_reader_limited(reader, dest, &DEFAULT_ZIP_LIMITS)
+}
+
+/// 上限参数化的解压实现（单测用小上限验证）。用 `Read::take` 限量拷贝而非信任
+/// zip 头部声明的 size——声明值可造假。超限即 Err，交调用方（import_from_reader）清理临时目录。
+pub(crate) fn extract_zip_reader_limited<R: std::io::Read + std::io::Seek>(
+    reader: R, dest: &Path, limits: &ZipLimits,
+) -> Result<(), String> {
     let mut archive = zip::ZipArchive::new(reader).map_err(|_| "不是合法的 zip / .kip".to_string())?;
+    if archive.len() > limits.max_entries {
+        return Err(format!("包内条目过多（{} > 上限 {}），拒绝解压", archive.len(), limits.max_entries));
+    }
     fs::create_dir_all(dest).map_err(|e| e.to_string())?;
+    let mut total: u64 = 0;
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i).map_err(|e| e.to_string())?;
         let rel = match entry.enclosed_name() { Some(p) => p, None => continue }; // 防 zip-slip
@@ -33,7 +60,14 @@ pub(crate) fn extract_zip_reader<R: std::io::Read + std::io::Seek>(reader: R, de
         } else {
             if let Some(parent) = out.parent() { fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
             let mut f = fs::File::create(&out).map_err(|e| e.to_string())?;
-            std::io::copy(&mut entry, &mut f).map_err(|e| e.to_string())?;
+            // 允许写入量 = min(单文件上限, 总量剩余)；多 take 1 字节用于探测超限。
+            let allowed = limits.max_file_bytes.min(limits.max_total_bytes.saturating_sub(total));
+            let copied = std::io::copy(&mut std::io::Read::take(&mut entry, allowed + 1), &mut f)
+                .map_err(|e| e.to_string())?;
+            if copied > allowed {
+                return Err("解压体积超出上限（疑似 zip bomb），拒绝导入".to_string());
+            }
+            total += copied;
         }
     }
     Ok(())
@@ -263,13 +297,24 @@ fn saves_dir(app: &tauri::AppHandle, story_id: &str) -> Result<PathBuf, String> 
 // 纯 IO 助手（不依赖 AppHandle，可单测）：
 
 /// 写一条存档到 dir/<id>.json（id 取自 save["id"]，须合法）。
+/// 原子写：先写 <id>.json.tmp 再同目录 rename——auto 存档的使命就是抗崩溃续读，
+/// 直接覆盖写在掉电/被杀时会截断 JSON，读档侧当「无存档」静默丢进度。
 pub(crate) fn write_save_in(dir: &Path, save: &serde_json::Value) -> Result<(), String> {
     let id = save.get("id").and_then(|v| v.as_str()).ok_or("save 缺 id 字段")?;
     if !is_valid_save_id(id) {
         return Err("非法 save id".to_string());
     }
     let text = serde_json::to_string(save).map_err(|e| e.to_string())?;
-    fs::write(dir.join(format!("{id}.json")), text).map_err(|e| e.to_string())
+    let tmp = dir.join(format!("{id}.json.tmp"));
+    let final_path = dir.join(format!("{id}.json"));
+    fs::write(&tmp, text).map_err(|e| e.to_string())?;
+    // Windows 上 rename 到已存在路径会失败：先试直接 rename，失败则删旧再 rename
+    //（删+改名间的窗口极小，且 tmp 内容完整，最差情形是旧档缺失、绝不会出现半截 JSON）。
+    if fs::rename(&tmp, &final_path).is_err() {
+        fs::remove_file(&final_path).map_err(|e| e.to_string())?;
+        fs::rename(&tmp, &final_path).map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 /// 列 dir 下全部 .json 存档（解析失败的跳过）。
@@ -528,5 +573,66 @@ mod tests {
         assert!(super::write_save_in(&dir, &bad).is_err());
         // 缺 id 字段也拒。
         assert!(super::write_save_in(&dir, &serde_json::json!({"kind":"manual"})).is_err());
+    }
+
+    #[test]
+    fn write_save_overwrites_and_leaves_no_tmp() {
+        // 原子写（tmp + rename）：覆盖已有存档必须生效（Windows rename 到已存在路径会失败，须处理），
+        // 且成功后目录里不残留 .tmp 中间文件。
+        let dir = tmp();
+        super::write_save_in(&dir, &serde_json::json!({"id":"auto","n":1})).unwrap();
+        super::write_save_in(&dir, &serde_json::json!({"id":"auto","n":2})).unwrap();
+        let got = super::read_save_in(&dir, "auto").unwrap().unwrap();
+        assert_eq!(got["n"], 2, "覆盖写必须生效");
+        let residues: Vec<_> = fs::read_dir(&dir).unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().contains(".tmp"))
+            .collect();
+        assert!(residues.is_empty(), "不应残留临时文件");
+    }
+
+    #[test]
+    fn zip_entry_count_limit_rejected() {
+        let dest = tmp().join("out");
+        let owned: Vec<(String, String)> = (0..12).map(|i| (format!("f{i}.txt"), "x".to_string())).collect();
+        let entries: Vec<(&str, &str)> = owned.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+        let limits = super::ZipLimits { max_entries: 10, max_file_bytes: 1024, max_total_bytes: 8192 };
+        let err = super::extract_zip_reader_limited(Cursor::new(make_kip_bytes(&entries)), &dest, &limits).unwrap_err();
+        assert!(err.contains("条目"), "err={err}");
+    }
+
+    #[test]
+    fn zip_single_file_size_limit_rejected() {
+        let dest = tmp().join("out");
+        let big = "0".repeat(4096); // 高压缩比内容：几十字节 zip 解出 4KB
+        let limits = super::ZipLimits { max_entries: 100, max_file_bytes: 1024, max_total_bytes: 1024 * 1024 };
+        let err = super::extract_zip_reader_limited(
+            Cursor::new(make_kip_bytes(&[("kiny.json", GOOD_MANIFEST), ("big.bin", &big)])),
+            &dest, &limits,
+        ).unwrap_err();
+        assert!(err.contains("上限"), "err={err}");
+    }
+
+    #[test]
+    fn zip_total_size_limit_rejected_across_entries() {
+        let dest = tmp().join("out");
+        let chunk = "0".repeat(2048); // 单文件 2KB 都在单文件限内，累计超总限
+        let limits = super::ZipLimits { max_entries: 100, max_file_bytes: 4096, max_total_bytes: 3000 };
+        let err = super::extract_zip_reader_limited(
+            Cursor::new(make_kip_bytes(&[("a.bin", &chunk), ("b.bin", &chunk)])),
+            &dest, &limits,
+        ).unwrap_err();
+        assert!(err.contains("上限"), "err={err}");
+    }
+
+    #[test]
+    fn zip_within_limits_ok() {
+        let dest = tmp().join("out");
+        let limits = super::ZipLimits { max_entries: 100, max_file_bytes: 4096, max_total_bytes: 8192 };
+        super::extract_zip_reader_limited(
+            Cursor::new(make_kip_bytes(&[("kiny.json", GOOD_MANIFEST), ("main.kin", "=== 开场\n你好")])),
+            &dest, &limits,
+        ).unwrap();
+        assert!(dest.join("main.kin").is_file());
     }
 }

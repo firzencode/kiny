@@ -34,8 +34,8 @@ export type EditorAction =
   | { type: 'close_tab'; path: string }
   | { type: 'discard_tab'; path: string }
   | { type: 'validated'; runId: number; diagnostics: Diagnostic[] }
-  | { type: 'saved'; path: string }
-  | { type: 'saved_all' }
+  | { type: 'saved'; path: string; written: string }
+  | { type: 'saved_all'; written: Record<string, string> }
   | { type: 'path_renamed'; from: string; to: string }
   | { type: 'path_deleted'; path: string }
   | { type: 'folder_created'; relDir: string }
@@ -115,13 +115,18 @@ export function editorReducer(s: EditorState, a: EditorAction): EditorState {
       if (a.runId !== s.runId) return s
       return { ...s, diagnostics: a.diagnostics }
     case 'saved': {
+      // 基线 = 实际写盘的文本（action 携带），dirty 按当前缓冲与之对账——
+      // await 写盘期间用户继续输入时，缓冲已超前于磁盘，不得误清脏（否则退出时静默丢数据）。
       const cur = s.files[a.path]
       if (!cur) return s
-      return { ...s, files: { ...s.files, [a.path]: { ...cur, dirty: false, savedSource: cur.source } } }
+      return { ...s, files: { ...s.files, [a.path]: { ...cur, dirty: cur.source !== a.written, savedSource: a.written } } }
     }
     case 'saved_all': {
       const files: Record<string, FileBuffer> = {}
-      for (const [k, v] of Object.entries(s.files)) files[k] = v.dirty ? { ...v, dirty: false, savedSource: v.source } : v
+      for (const [k, v] of Object.entries(s.files)) {
+        const written = a.written[k]
+        files[k] = written !== undefined ? { ...v, dirty: v.source !== written, savedSource: written } : v
+      }
       return { ...s, files }
     }
     case 'path_renamed': {

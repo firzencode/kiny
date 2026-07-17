@@ -4,6 +4,7 @@ import { loadProjectFromFiles, analyze, resolveStart, createStory } from '@kiny/
 import type { Story } from '@kiny/engine'
 import { usePlayback } from './usePlayback'
 import { Player } from '../components/Player'
+import { initialState } from '../driver/storyDriver'
 import type { ResolveAsset } from '../host/commands'
 
 const RESOLVE: ResolveAsset = (name) => 'demo/assets/' + name
@@ -131,5 +132,38 @@ describe('usePlayback', () => {
     act(() => { fireEvent.submit(field.closest('form')!) }) // 空提交
     pump()
     expect(container.textContent).toContain('你好，旅人。')
+  })
+
+  it('点选项不冒泡到正文区点击（与 InputBox 的防御一致）', () => {
+    const spy = vi.fn()
+    const state = { ...initialState, choices: [{ spans: [{ text: '走' }], index: 0 }] }
+    render(<Player state={state} onChoose={() => {}} onContentClick={spy} />)
+    fireEvent.click(screen.getByRole('button', { name: '走' }))
+    expect(spy).not.toHaveBeenCalled()
+  })
+
+  it('选项后紧跟 @clear：新行落在与旧行相同的 log 下标，仍逐字打出而非瞬显', () => {
+    const kin = '@text_speed(20)\n开场的问题行。\n* [选它] -> 后\n=== 后 ===\n@clear()\n选后很长的一行文字。\n-> END\n'
+    const { container } = render(<Harness story={makeStory(kin)} />)
+    pump()
+    expect(container.textContent).toContain('开场的问题行。')
+    act(() => { fireEvent.click(screen.getByRole('button', { name: '选它' })) })
+    act(() => { vi.advanceTimersByTime(30) }) // 20 字/秒 → 30ms 至多 1 字
+    expect(container.textContent).not.toContain('选后很长的一行文字。') // 打字中，不得整行瞬显
+    pump()
+    expect(container.textContent).toContain('选后很长的一行文字。')
+  })
+
+  it('换 story 后第一行仍逐字打出（skipToken 重置不被误判为跳过）', () => {
+    const { container, rerender } = render(<Harness story={makeStory('@text_speed(20)\n很长的第一行文字内容。\n-> END\n')} />)
+    act(() => { vi.advanceTimersByTime(30) })
+    act(() => { fireEvent.click(content(container)) }) // 打字中点击跳过 → skipToken 递增
+    expect(container.textContent).toContain('很长的第一行文字内容。')
+    // 换新故事（重开 / 读档路径）：skipToken 重置为 0，首行 log 下标与旧首行重合 → 实例复用
+    rerender(<Harness story={makeStory('@text_speed(20)\n新故事的开场长行。\n-> END\n')} />)
+    act(() => { vi.advanceTimersByTime(30) })
+    expect(container.textContent).not.toContain('新故事的开场长行。') // 应在打字中
+    pump()
+    expect(container.textContent).toContain('新故事的开场长行。')
   })
 })

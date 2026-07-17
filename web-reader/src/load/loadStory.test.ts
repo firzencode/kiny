@@ -63,6 +63,21 @@ describe('loadStory', () => {
     if (out.ok) expect(out.value.assetBase).toBe('demo/')
   })
 
+  it('内联对象缺 files / files 非法 → ok:false 带「损坏」诊断，不抛 TypeError 也不静默回退 fetch', async () => {
+    ;(window as unknown as { __KINY_PROJECT__?: unknown }).__KINY_PROJECT__ = { manifest: MANIFEST } // 无 files
+    const out1 = await loadStory(1)
+    expect(out1.ok).toBe(false)
+    if (!out1.ok) expect(out1.message).toMatch(/损坏/)
+    ;(window as unknown as { __KINY_PROJECT__?: unknown }).__KINY_PROJECT__ = { manifest: MANIFEST, files: 'oops' }
+    const out2 = await loadStory(1)
+    expect(out2.ok).toBe(false)
+    if (!out2.ok) expect(out2.message).toMatch(/损坏/)
+    ;(window as unknown as { __KINY_PROJECT__?: unknown }).__KINY_PROJECT__ = { manifest: MANIFEST, files: { 'main.kin': 42 } }
+    const out3 = await loadStory(1)
+    expect(out3.ok).toBe(false)
+    if (!out3.ok) expect(out3.message).toMatch(/损坏/)
+  })
+
   it('占位字符串（导出模板未注入数据）→ 当作无内联，回退 fetch', async () => {
     ;(window as unknown as { __KINY_PROJECT__?: unknown }).__KINY_PROJECT__ = '__KINY_PROJECT_DATA__'
     stubFetch({ 'kiny.json': MANIFEST, 'files.json': '["kiny.json","main.kin"]', 'main.kin': MAIN })
