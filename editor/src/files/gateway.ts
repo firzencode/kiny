@@ -140,6 +140,17 @@ export function assertSafeRelPath(rel: string): void {
   }
 }
 
+/**
+ * renamePath 的共享前置守卫：源 / 目标均须安全相对路径，且目标不得是源自身或源的子树
+ * （否则会把目录移入自己）。两 gateway 实现共用此单点，杜绝守卫口径漂移（audit b1）。
+ * 「目标已存在」检测因后端不同（FS exists / 内存 Map 查表）由各实现自行做。
+ */
+export function assertRenameSafe(from: string, to: string): void {
+  assertSafeRelPath(from)
+  assertSafeRelPath(to)
+  if (to === from || to.startsWith(`${from}/`)) throw new Error(`不能移入自身: ${to}`)
+}
+
 /** 把文件名归一为合法 .kin 名：去空白、补 .kin 后缀。空名抛错。 */
 export function normalizeKinName(raw: string): string {
   const t = raw.trim()

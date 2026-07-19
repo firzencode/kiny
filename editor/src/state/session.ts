@@ -1,5 +1,6 @@
 // 每个项目的编辑器会话（打开的 tab 集合 + 活动 tab），按项目路径持久化到 localStorage。
 // 仿 settings.ts：纯函数 + 损坏降级 + 单 key。LRU 上限防止无限增长。
+import { basename } from '../util/paths'
 
 export interface ProjectSession {
   openTabs: string[]
@@ -36,12 +37,6 @@ function loadStore(): SessionStore {
 /** 读单个项目会话；无 / 损坏 / 版本不符 → null。 */
 export function loadSession(projectDir: string): ProjectSession | null {
   return loadStore().projects[projectDir] ?? null
-}
-
-/** 目录路径末段作显示名（兼容 / 与 \ 分隔），供缺 name 的旧会话降级。 */
-function basename(dir: string): string {
-  const i = Math.max(dir.lastIndexOf('/'), dir.lastIndexOf('\\'))
-  return i >= 0 ? dir.slice(i + 1) : dir
 }
 
 /** 最近项目列表：按 ts 降序（最近打开在前）；name 缺失降级为目录 basename。 */

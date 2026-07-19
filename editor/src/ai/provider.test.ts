@@ -232,6 +232,18 @@ describe('openAiCompatibleAdapter.decodeResponse', () => {
     }
     expect(() => adapter.decodeResponse(raw)).toThrow()
   })
+
+  it('a8：畸形 tool_call 缺 function 字段 → 可读报错，不抛裸 TypeError', () => {
+    const raw = {
+      choices: [
+        {
+          message: { role: 'assistant', content: null, tool_calls: [{ id: 'call_x', type: 'function' }] },
+          finish_reason: 'tool_calls',
+        },
+      ],
+    }
+    expect(() => adapter.decodeResponse(raw)).toThrow(/缺少 function 字段/)
+  })
 })
 
 describe('tool call 往返（IR 边界保真）', () => {

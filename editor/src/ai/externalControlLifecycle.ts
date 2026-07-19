@@ -5,6 +5,8 @@
 // 补偿 stop 带上它——dev StrictMode 双挂载下，落后一代的 start resolve 时若效果已 cancelled，
 // 其补偿 stop 只停「自己那一代」（Rust stop_matches 保证不误杀更新的一代的 server）。
 
+import { errMsg } from '../util/errMsg'
+
 /** start 分支依赖的最小接口：与真实 invoke 的形状对齐，测试可注入桩。 */
 export interface ExternalControlStartDeps {
   invoke: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>
@@ -30,7 +32,7 @@ export async function runExternalControlStart(deps: ExternalControlStartDeps): P
   try {
     info = await deps.invoke<{ port: number; generation: number }>('start_external_control')
   } catch (e) {
-    return { kind: 'error', message: e instanceof Error ? e.message : String(e) }
+    return { kind: 'error', message: errMsg(e) }
   }
   if (deps.isCancelled()) {
     try {

@@ -1,4 +1,5 @@
 import { runCommand, type ActionContext, type ActionCommand } from './actions'
+import { errMsg } from '../util/errMsg'
 import { validateCommandArgs } from './actionManifest'
 import type { ChatRequest, Message, ToolCall, ToolDefinition } from './provider'
 import { TOOL_DEFINITIONS } from './toolDefinitions'
@@ -64,6 +65,8 @@ export interface AgentRunResult {
   rounds: number
   /** 是否因 abort 提前停止。 */
   stopped: boolean
+  /** 是否因触顶 maxRounds 工具调用轮数上限被截断（回复可能「说到一半」，UI 应提示）。 */
+  truncated?: boolean
 }
 
 /** 组系统提示：精简 Kin 语言知识 + 当前项目上下文。 */
@@ -93,7 +96,7 @@ async function executeTool(ctx: ActionContext, call: ToolCall): Promise<ToolRunR
     const out = await runCommand(ctx, cmd)
     return { call, result: JSON.stringify(out ?? null), ok: true }
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e)
+    const message = errMsg(e)
     return { call, result: JSON.stringify({ error: message }), ok: false }
   }
 }
@@ -165,7 +168,8 @@ export async function runAgentLoop(
     }
 
     if (rounds >= maxRounds) {
-      return { reply: lastContent, messages, toolRuns, rounds, stopped: false }
+      // 触顶工具调用轮数上限：回复可能「说到一半」，标 truncated 供 UI 提示，避免呈现得像正常结束。
+      return { reply: lastContent, messages, toolRuns, rounds, stopped: false, truncated: true }
     }
   }
 }

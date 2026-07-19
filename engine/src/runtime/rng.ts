@@ -1,3 +1,9 @@
+/**
+ * 黄金比例散列常量（2³²/φ）。作默认 / restore 占位种子——两处都会在真正使用前被覆盖
+ * 或只作确定性起点，具体值无关紧要，收敛到单一常量避免魔数重复。
+ */
+export const GOLDEN_SEED = 0x9e3779b9
+
 export interface Rng {
   next(): number      // [0,1)
   reseed(n: number): void

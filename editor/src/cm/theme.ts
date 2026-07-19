@@ -5,7 +5,28 @@
  */
 import { EditorView } from '@codemirror/view'
 
-export const kinTheme = EditorView.theme({
+/**
+ * 选中背景选择器（聚焦态 CM 绘制层 + 未聚焦 + 原生 ::selection 回退）。
+ *
+ * ⚠ 特指度必须压过 `drawSelection()` 的 baseTheme：后者对聚焦态选中层用
+ * `&{light|dark}.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground`
+ * ——**5 个 class** 的高特指度规则（@codemirror/view）。若这里只写
+ * `&.cm-focused .cm-selectionBackground`（前缀展开后仅 3 个 class），CSS 特指度上
+ * 反被 baseTheme 盖过，聚焦选文字时根本不走 `--sel-bg`，而是显 CM 默认灰/浅紫
+ * ——且 kinTheme 未声明 `{dark:true}`，CM 始终按 `&light` 取默认色，暗色下尤其明显
+ * “选中色没生效”。故聚焦分支补齐到同样 5 个 class（`.cm-scroller .cm-selectionLayer`）：
+ * 特指度持平后，theme 比 baseTheme 后挂载（后者 `Prec.lowest`），同分靠挂载序取胜。
+ * 未聚焦分支 `.cm-selectionLayer .cm-selectionBackground`（3 class）亦压过 baseTheme 的
+ * 未聚焦 2-class 规则。
+ */
+export const SELECTION_SELECTOR =
+  '&.cm-focused .cm-scroller .cm-selectionLayer .cm-selectionBackground, .cm-selectionLayer .cm-selectionBackground, .cm-content ::selection'
+
+/**
+ * 主题样式规格（`EditorView.theme` 的入参）。抽成具名对象供 theme.test.ts 断言
+ * 关键不变量（如选中背景不得再用 accent 着色）。
+ */
+export const kinThemeSpec = {
   '&': {
     height: '100%',
     color: 'var(--s-text)',
@@ -37,8 +58,11 @@ export const kinTheme = EditorView.theme({
     backgroundColor: 'var(--bg-2)',
     boxShadow: 'inset 2px 0 0 var(--accent-line)',
   },
-  '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection': {
-    backgroundColor: 'color-mix(in srgb, var(--accent) 28%, transparent)',
+  // 选中背景走中性不透明的 `--sel-bg`（非 accent 着色）：金色系语法 token（node/interp
+  // 同取 --accent）在 accent 色相的选中层上会撞色、文字看不清；中性 slate 与所有色相 token
+  // 都拉开对比，且不透明使对比度恒定、不因选中落在活动行(bg-2)而退化。
+  [SELECTION_SELECTOR]: {
+    backgroundColor: 'var(--sel-bg)',
   },
   '.cm-selectionMatch': { backgroundColor: 'color-mix(in srgb, var(--accent) 16%, transparent)' },
   '.cm-matchingBracket': {
@@ -73,4 +97,6 @@ export const kinTheme = EditorView.theme({
   '.cm-searchMatch.cm-searchMatch-selected': {
     backgroundColor: 'color-mix(in srgb, var(--accent) 40%, transparent)',
   },
-})
+} as const
+
+export const kinTheme = EditorView.theme(kinThemeSpec)

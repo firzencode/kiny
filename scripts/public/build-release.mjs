@@ -67,10 +67,12 @@ function appResources(app) {
 // 而非散落到当前目录）。
 function zipDir(srcDir, destZip) {
   rmSync(destZip, { force: true })
+  // PowerShell 单引号字符串里的 ' 需写成 ''（否则路径含 ' 会截断字符串、命令碎）。
+  const q = (s) => s.replace(/'/g, "''")
   const ps = [
     'Add-Type -AssemblyName System.IO.Compression.FileSystem;',
     '[System.IO.Compression.ZipFile]::CreateFromDirectory(',
-    `'${srcDir}', '${destZip}',`,
+    `'${q(srcDir)}', '${q(destZip)}',`,
     '[System.IO.Compression.CompressionLevel]::Optimal, $true,',
     '(New-Object System.Text.UTF8Encoding($false)))',
   ].join(' ')

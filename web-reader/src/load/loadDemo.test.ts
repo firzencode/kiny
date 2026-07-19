@@ -43,6 +43,19 @@ describe('loadDemo', () => {
     if (!out.ok) expect(out.message).toContain('.kiw')
   })
 
+  it('多 .kin 文件：并行 fetch、全部加载、Story 建出（每文件仅一趟，Q5）', async () => {
+    const main = '开场。\n-> 二\n'
+    const two = '=== 二 ===\n第二节。\n-> END\n'
+    stubFetch({ '小样.kiw': MANIFEST, 'files.json': '["小样.kiw","main.kin","two.kin"]', 'main.kin': main, 'two.kin': two })
+    const fetchSpy = globalThis.fetch as unknown as ReturnType<typeof vi.fn>
+    const out = await loadDemo()
+    expect(out.ok).toBe(true)
+    // files.json + manifest + 2 个 .kin，各恰一趟（并行不重复抓）。
+    expect(fetchSpy).toHaveBeenCalledTimes(4)
+    const fetched = fetchSpy.mock.calls.map((c) => (c[0] as string).replace(/^demo\//, ''))
+    expect(fetched).toEqual(expect.arrayContaining(['files.json', '小样.kiw', 'main.kin', 'two.kin']))
+  })
+
   it('manifest 非法 → 返回 ok:false 带消息', async () => {
     stubFetch({ 'kiny.json': 'not json', 'files.json': '["kiny.json"]' })
     const out = await loadDemo()

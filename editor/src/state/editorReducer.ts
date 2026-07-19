@@ -1,5 +1,6 @@
 import type { Diagnostic } from '@kiny/engine'
 import type { LoadedProject, Manifest, ProjectFileEntry } from '../files/gateway'
+import { underPath, entryAfterRename } from '../util/paths'
 
 export interface FileBuffer { path: string; source: string; savedSource: string; dirty: boolean }
 
@@ -44,9 +45,8 @@ export type EditorAction =
 
 const sortNames = (ns: string[]) => [...ns].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
 const byPath = (a: ProjectFileEntry, b: ProjectFileEntry) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)
-const renameKey = (key: string, from: string, to: string): string =>
-  key === from ? to : key.startsWith(`${from}/`) ? to + key.slice(from.length) : key
-const underPath = (key: string, p: string): boolean => key === p || key.startsWith(`${p}/`)
+// key 在 from 子树下则改名，否则原样返回（entryAfterRename 返回 null 即不在子树下）。
+const renameKey = (key: string, from: string, to: string): string => entryAfterRename(key, from, to) ?? key
 
 export function editorReducer(s: EditorState, a: EditorAction): EditorState {
   switch (a.type) {

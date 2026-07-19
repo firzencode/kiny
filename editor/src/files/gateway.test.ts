@@ -6,8 +6,25 @@ import {
   starterManifest,
   sanitizeProjectBase,
   projectFolderName,
+  assertRenameSafe,
   type Manifest,
 } from './gateway'
+
+describe('assertRenameSafe（两 gateway 共享的 renamePath 前置守卫）', () => {
+  it('合法改名不抛', () => {
+    expect(() => assertRenameSafe('a/x.kin', 'a/y.kin')).not.toThrow()
+    expect(() => assertRenameSafe('sub', 'renamed')).not.toThrow()
+  })
+  it('非法路径（.. 穿越 / 绝对 / 空）抛', () => {
+    expect(() => assertRenameSafe('../x', 'y')).toThrow()
+    expect(() => assertRenameSafe('x', '/abs')).toThrow()
+    expect(() => assertRenameSafe('', 'y')).toThrow()
+  })
+  it('目标是源自身或源子树 → 抛「不能移入自身」', () => {
+    expect(() => assertRenameSafe('a', 'a')).toThrow('不能移入自身')
+    expect(() => assertRenameSafe('a', 'a/b')).toThrow('不能移入自身')
+  })
+})
 
 describe('defaultKipName', () => {
   it('正常故事名加 .kip 后缀', () => {

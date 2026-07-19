@@ -9,7 +9,7 @@ import { findManifest } from '@kiny/engine'
 import type { ResolveAsset } from '@kiny/player'
 import {
   type FileGateway, type LoadedProject, type Manifest, type ProjectFileEntry, type WindowMode,
-  STARTER_MAIN_KIN, STARTER_NEW_FILE, normalizeKinName, starterManifest, projectFileName, projectFolderName, assertSafeRelPath,
+  STARTER_MAIN_KIN, STARTER_NEW_FILE, normalizeKinName, starterManifest, projectFileName, projectFolderName, assertSafeRelPath, assertRenameSafe,
 } from './gateway'
 import { loadWorkbenchSize, computeLaunchSize, LAUNCH_WINDOW, WORKBENCH_WINDOW, WORKBENCH_MIN_SIZE } from '../state/windowSize'
 import { type DraftStore, parseDraftStore, emptyDraftStore } from '../state/drafts'
@@ -160,7 +160,10 @@ export const tauriFileGateway: FileGateway = {
     await writeTextFile(abs, STARTER_NEW_FILE)
     return { path: rel, isKin: true, source: STARTER_NEW_FILE }
   },
-  writeFile: async (dir, rel, text) => { await writeTextFile(await join(dir, rel), text) },
+  writeFile: async (dir, rel, text) => {
+    assertSafeRelPath(rel)
+    await writeTextFile(await join(dir, rel), text)
+  },
   async pickImportFiles() {
     const picked = await open({ multiple: true, filters: [{ name: '媒体资源', extensions: MEDIA_EXTS }] })
     if (picked === null) return null
@@ -183,9 +186,7 @@ export const tauriFileGateway: FileGateway = {
     await mkdir(await join(dir, relDir), { recursive: true })
   },
   async renamePath(dir, from, to) {
-    assertSafeRelPath(from)
-    assertSafeRelPath(to)
-    if (to === from || to.startsWith(`${from}/`)) throw new Error(`不能移入自身: ${to}`)
+    assertRenameSafe(from, to)
     const absTo = await join(dir, to)
     if (await exists(absTo)) throw new Error(`目标已存在: ${to}`)
     if (to.includes('/')) {
@@ -199,6 +200,7 @@ export const tauriFileGateway: FileGateway = {
     await remove(await join(dir, relPath), { recursive: true })
   },
   async writeManifest(dir, manifest, manifestFile) {
+    assertSafeRelPath(manifestFile)
     await writeTextFile(await join(dir, manifestFile), JSON.stringify(manifest, null, 2))
   },
   async pickSaveKipPath(defaultName) {

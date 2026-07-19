@@ -1,10 +1,11 @@
 import type { ProjectFile } from '../../parser/ast'
 import type { Diagnostic } from '../types'
+import { sortByPath } from '../../order'
 
 /** 节点全局重名 + 子节点同父内重名。按文件名字典序遍历，报在后出现的那个。 */
 export function checkNames(files: ProjectFile[]): Diagnostic[] {
   const out: Diagnostic[] = []
-  const sorted = [...files].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+  const sorted = sortByPath(files)
 
   const seenKnot = new Set<string>()
   for (const file of sorted) {

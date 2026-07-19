@@ -1,21 +1,20 @@
 import { parse as acornParse } from 'acorn'
 import type { Rng } from './rng'
+import { forEachChild, type AstNode } from '../js-ast'
 
 const VARIANT_NAMES = new Set(['seq', 'cycle', 'once', 'shuffle'])
-type N = any
 
 /** 给片段里每个变体调用插一个稳定 site-id 作首实参。fragKey 用于使 id 跨片段唯一。 */
 export function tagVariants(code: string, fragKey: string): string {
-  let program: N
+  let program: AstNode
   try {
-    program = acornParse(code, { ecmaVersion: 'latest' })
+    program = acornParse(code, { ecmaVersion: 'latest' }) as AstNode
   } catch {
     return code
   }
   const inserts: { pos: number; id: string }[] = []
   let counter = 0
-  const walk = (node: N): void => {
-    if (!node || typeof node.type !== 'string') return
+  const walk = (node: AstNode): void => {
     if (
       node.type === 'CallExpression' &&
       node.callee?.type === 'Identifier' &&
@@ -25,12 +24,7 @@ export function tagVariants(code: string, fragKey: string): string {
       const parenPos = code.indexOf('(', node.callee.end)
       inserts.push({ pos: parenPos + 1, id })
     }
-    for (const k of Object.keys(node)) {
-      if (k === 'type' || k === 'start' || k === 'end') continue
-      const v = node[k]
-      if (Array.isArray(v)) for (const c of v) walk(c)
-      else if (v && typeof v.type === 'string') walk(v)
-    }
+    forEachChild(node, walk)
   }
   walk(program)
   if (inserts.length === 0) return code

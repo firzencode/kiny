@@ -12,7 +12,7 @@ import type {
 import { FrameStack, type Frame } from './frames'
 import { evalExpr, makeScope, runStatement } from './env'
 import type { Scope } from './env'
-import { makeRng } from './rng'
+import { makeRng, GOLDEN_SEED } from './rng'
 import type { Rng } from './rng'
 import { makeVariants } from './variants'
 import type { Variants } from './variants'
@@ -22,12 +22,13 @@ import type { RichSpan } from './spans'
 import { makeTextSpan, mergeSpans } from './spans'
 import { buildBlockPaths, enumerateChoices, fingerprint } from './snapshot'
 import type { StorySnapshot, RestoreData } from './snapshot'
+import { sortByPath } from '../order'
 
 // 无玩家交互的累计自动推进步数上限（仅 choose() 清零）。取值是「尽早报错」与
 // 「不误伤合法长自动段」的折中：互动小说两次交互间极少处理上万个内容元素，
 // 故 1 万足够安全，同时让无停顿环远早于 reader 堆积海量日志前就抛错。
 const STEP_BUDGET = 10_000
-const DEFAULT_SEED = 0x9e3779b9
+const DEFAULT_SEED = GOLDEN_SEED
 
 export class Story {
   private readonly stack = new FrameStack()
@@ -38,7 +39,7 @@ export class Story {
   private currentStitch: string | null = null // 当前所在 stitch 名（栈根定位用，knot 顶层为 null）
   private currentFile?: string // 当前 knot 所属文件路径（错误源定位用）
   private readonly knotFile = new Map<string, string>() // knot 名 → 文件路径
-  private readonly B: Scope = {} // 内置函数层：变体 / random / seed_random / turns / turns_since
+  private readonly B: Scope = makeScope() // 内置函数层：变体 / random / seed_random / turns / turns_since（与 G/L 一致用 null 原型，避免 Object.prototype 泄进脚本作用域）
   private readonly G: Scope = makeScope() // 全局
   private L: Scope | null = null // 当前节点局部作用域（每次进 knot 上下文重建）
   private readonly rng: Rng // 可复现 PRNG（变体 shuffle / random / seed_random 共用）
@@ -160,9 +161,7 @@ export class Story {
 
   /** 启动时按文件名字典序执行各文件 preamble 的 ~ / ~~~ 建全局；跳过「起点正是其开场 knot」的文件（其 preamble 在进入开场 knot 时按序执行）。 */
   private buildGlobals(): void {
-    const files = [...this.program.files].sort((a, b) =>
-      a.path < b.path ? -1 : a.path > b.path ? 1 : 0,
-    )
+    const files = sortByPath(this.program.files)
     for (const f of files) {
       if (openingKnotName(f.path) === this.start) continue // 入口开场 knot 的 preamble 留待进入时按序执行
       for (const el of f.preamble) {

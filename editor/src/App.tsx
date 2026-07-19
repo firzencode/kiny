@@ -27,6 +27,10 @@ import { HelpDialog, type HelpScreen } from './components/HelpDialog'
 import { ConfirmCloseDialog, type CloseIntent } from './components/ConfirmCloseDialog'
 import { ImportConflictDialog, type ConflictChoice } from './components/ImportConflictDialog'
 import { basename, destPath, uniqueName } from './files/importAssets'
+import { underPath, entryAfterRename } from './util/paths'
+import { errMsg } from './util/errMsg'
+import { useViewPrefs, type Theme } from './hooks/useViewPrefs'
+import { useWindowLifecycle } from './hooks/useWindowLifecycle'
 import { RecoveryDialog } from './components/RecoveryDialog'
 import { SettingsDialog } from './components/SettingsDialog'
 import { ProjectSettingsDialog } from './components/ProjectSettingsDialog'
@@ -34,14 +38,11 @@ import { NewProjectDialog } from './components/NewProjectDialog'
 import { useAutosave } from './hooks/useAutosave'
 import { detectRecoverable, type RecoverableItem } from './state/drafts'
 import { loadSettings, saveSettings, applySettingsVars, clampSettings, DEFAULT_SETTINGS, SETTINGS_BOUNDS, type Settings } from './state/settings'
-import { loadWorkbenchSize, saveWorkbenchSize, computeLaunchSize, LAUNCH_WINDOW, WORKBENCH_WINDOW } from './state/windowSize'
 import { AiPanel } from './components/ai/AiPanel'
 import { useAiSession, cleanupExpiredChats } from './ai/useAiSession'
 import { loadAiConfig, saveAiConfig, isConfigured, type AiConfig } from './ai/aiConfig'
 import type { ActionContext, PreviewPort, PreviewSnapshot } from './ai/actions'
-import { useExternalControl } from './ai/externalControl'
-import { runExternalControlStart } from './ai/externalControlLifecycle'
-import { invoke } from '@tauri-apps/api/core'
+import { useExternalControlToggle } from './hooks/useExternalControlToggle'
 import { loadSession, saveSession, resolveSession, listRecentProjects, removeSession } from './state/session'
 import { LaunchScreen, type RecentProject } from './components/LaunchScreen'
 import { RemoveRecentDialog } from './components/RemoveRecentDialog'
@@ -53,54 +54,7 @@ const SESSION_SEED = 0x5eed
 const randomSeed = () => Math.floor(Math.random() * 0x1_0000_0000) >>> 0
 const idResolve: ResolveAsset = (n: string) => n
 
-/** 取异常的可读信息（用于「<动作>失败：<具体>」通知）。 */
-const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
-/** 从文件绝对路径派生父目录（跨平台：兼容 / 与 \ 分隔）。 */
-const parentDir = (p: string): string => {
-  const i = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'))
-  return i >= 0 ? p.slice(0, i) : p
-}
-
-type Theme = 'dark' | 'light'
-interface ViewPrefs {
-  sidebar: boolean; preview: boolean; highlight: boolean; ai: boolean
-  /** 三个面板各自的折叠态（头部 ▾ 控制）。 */
-  explorerCollapsed: boolean
-  outlineCollapsed: boolean
-  diagnosticsCollapsed: boolean
-  /** Explorer 面板像素高度（拖拽分隔条设定）；0 表示用 CSS 默认 52%。 */
-  explorerHeight: number
-  /** 侧栏（资源管理器）列宽 px（横向拖拽设定）。 */
-  sidebarWidth: number
-  /** AI 面板列宽 px（横向拖拽设定）。 */
-  aiWidth: number
-  /** 中间区里编辑列占比 0..1（其余给右侧面板列）；拖中线设定，默认 0.5。 */
-  editorRatio: number
-  /** 右侧面板当前标签页：预览 / 结构图（二者共用同一列，tab 切换，一次只显示一个）。 */
-  rightTab: 'preview' | 'graph'
-}
-const DEFAULT_VIEW: ViewPrefs = {
-  sidebar: true, preview: true, highlight: true, ai: false,
-  explorerCollapsed: false, outlineCollapsed: false, diagnosticsCollapsed: false,
-  explorerHeight: 0,
-  sidebarWidth: 232, aiWidth: 360, editorRatio: 0.5,
-  rightTab: 'preview',
-}
-
-function loadTheme(): Theme {
-  try { return localStorage.getItem('kiny-editor-theme') === 'light' ? 'light' : 'dark' } catch { return 'dark' }
-}
-function loadView(): ViewPrefs {
-  try { return { ...DEFAULT_VIEW, ...JSON.parse(localStorage.getItem('kiny-editor-view') || '{}') } } catch { return { ...DEFAULT_VIEW } }
-}
-// 「我的布局」快照：用户显式保存的一份 ViewPrefs；未存过返回 null。
-function loadSavedView(): ViewPrefs | null {
-  try {
-    const raw = localStorage.getItem('kiny-editor-view-saved')
-    return raw == null ? null : { ...DEFAULT_VIEW, ...JSON.parse(raw) }
-  } catch { return null }
-}
-
+// 主题 / 布局偏好（面板显隐·尺寸·「我的布局」）的状态与持久化见 ./hooks/useViewPrefs。
 // 记忆用户手动调整过的 workbench 窗口尺寸：读写 + 退化尺寸守卫见 ./state/windowSize。
 
 export function App({ gateway }: { gateway: FileGateway }) {
@@ -120,17 +74,15 @@ export function App({ gateway }: { gateway: FileGateway }) {
     if (msg != null && tone === 'error') logErrorEntry({ source: 'operation:editor', message: msg })
     setNoticeRaw(msg == null ? null : { text: msg, tone })
   }
-  const [theme, setTheme] = useState<Theme>(loadTheme)
-  const [view, setView] = useState<ViewPrefs>(loadView)
-  const [savedView, setSavedView] = useState<ViewPrefs | null>(loadSavedView)
-  const hasSavedLayout = savedView !== null
+  const {
+    theme, setTheme, view, setView, hasSavedLayout,
+    onSaveLayout, onRestoreMyLayout, onRestoreDefaultLayout,
+    cols, explorerStyle, onResizeSidebar, onResizeAi, onResizeEditorPreview, onResizeExplorer,
+  } = useViewPrefs(() => setNotice('已保存当前布局', 'success'))
   // 预览随机种子会话态：编辑期恒稳定（recompute 读 seedRef），仅显式 ↺ 重开预览时按设置重掷。
   const [previewSeed, setPreviewSeed] = useState(SESSION_SEED)
   const seedRef = useRef(SESSION_SEED)
   const [settings, setSettings] = useState<Settings>(loadSettings)
-  // 外部控制运行态（T040）：非 null = 服务已起，含端口；随 settings.externalControl 联动 start/stop。
-  const [controlInfo, setControlInfo] = useState<{ port: number } | null>(null)
-  const controlGenRef = useRef<number | null>(null) // 当前在跑服务的代际号；关闭时据此代际安全地停自己那一代
   const [aiConfig, setAiConfig] = useState<AiConfig>(loadAiConfig)
   useEffect(() => { saveAiConfig(aiConfig) }, [aiConfig])
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -169,14 +121,6 @@ export function App({ gateway }: { gateway: FileGateway }) {
   useEffect(() => { committedStateRef.current = state }, [state])
   const staleRef = useRef(false)
 
-  // 主题 / 视图持久化
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme
-    try { localStorage.setItem('kiny-editor-theme', theme) } catch { /* ignore */ }
-  }, [theme])
-  useEffect(() => {
-    try { localStorage.setItem('kiny-editor-view', JSON.stringify(view)) } catch { /* ignore */ }
-  }, [view])
   useEffect(() => { applySettingsVars(settings); saveSettings(settings) }, [settings])
   // 会话持久化：记住当前项目打开的 tab 集合与活动 tab、项目名（启动页最近项目显示用）
   useEffect(() => {
@@ -254,44 +198,11 @@ export function App({ gateway }: { gateway: FileGateway }) {
   // 外部控制只在真正的编辑窗（T038 的 'editor' 窗口）参与：启动窗（'launch'）与 web/SPA（null，
   // 无 Tauri、invoke 不可用）都不起服务、不挂处理器——否则启动窗会随共享的 localStorage 设置
   // 二次 invoke('start_external_control')，重复起服务并以空 editor 状态错误应答外部请求。
-  const externalControlActive = settings.externalControl && windowMode === 'editor'
-  useExternalControl({ ctx: externalCtx, enabled: externalControlActive })
-
-  // 外部控制开关联动：开→起 Rust HTTP 服务（Rust 侧写 control.json，CLI 据此发现端口+token）；
-  // 关→代际安全地停服务（Rust 侧删文件）。仅在「本次会话确实起过」时才发 stop（避免冷启动默认关时误调用）。
-  // control.json 生命周期由 Rust 持有（文件存在 ⟺ 端口在监听）；start/stop 带代际号，令 dev
-  // StrictMode 双挂载下旧代际的补偿 stop 不误杀新代际的 server（详见 externalControlLifecycle.ts）。
-  useEffect(() => {
-    let cancelled = false
-    if (externalControlActive) {
-      void (async () => {
-        const result = await runExternalControlStart({ invoke, isCancelled: () => cancelled })
-        if (result.kind === 'started') {
-          controlGenRef.current = result.info.generation
-          if (!cancelled) setControlInfo({ port: result.info.port })
-        } else if (result.kind === 'error' && !cancelled) {
-          // 仅对「本效果仍在生效」的失败弹通知：dev StrictMode 双挂载下，被清理的那一代
-          // start 会因自我超代返回良性 error（已被更新的一代取代），此时 cancelled=true，
-          // 不该弹「启用失败」误导用户——真正的 bind 失败发生在未被取消的当代，仍会弹。
-          setNotice(`启用外部控制失败：${result.message}`)
-        }
-        // 'cancelled'：runExternalControlStart 内部已发代际安全的补偿 stop（Rust 删文件），此处无需再做。
-      })()
-    } else if (controlGenRef.current !== null) {
-      const gen = controlGenRef.current
-      controlGenRef.current = null
-      void (async () => {
-        try {
-          await invoke('stop_external_control', { generation: gen })
-        } catch (e) {
-          console.error('停止外部控制失败', e)
-        } finally {
-          if (!cancelled) setControlInfo(null)
-        }
-      })()
-    }
-    return () => { cancelled = true }
-  }, [externalControlActive])
+  const { controlInfo } = useExternalControlToggle(
+    externalCtx,
+    settings.externalControl && windowMode === 'editor',
+    setNotice,
+  )
 
   // 启动期按日期清理全部项目的过期 AI 对话记录（spec §5），跑一次。
   const chatCleanupRan = useRef(false)
@@ -387,6 +298,12 @@ export function App({ gateway }: { gateway: FileGateway }) {
         return true
       } catch (e) { setNotice(`打开编辑窗口失败：${errMsg(e)}`); return false }
     }
+    // 编辑窗就地换项目：脏缓冲或 AI 在跑 → 先确认（真正 loadDir 交给对话框解析器，先停 AI 后离），
+    // 否则直接换。返回 true 表「已受理」（交给对话框也算，避免 onOpenRecent 误把有效项目当失败删掉）。
+    if (anyDirty(state) || ai.running) {
+      setPendingClose({ kind: 'switchProject', dir })
+      return true
+    }
     return loadDir(dir)
   }
 
@@ -419,12 +336,15 @@ export function App({ gateway }: { gateway: FileGateway }) {
     catch (e) { setNotice(`保存失败：${errMsg(e)}`); return false }
   }
   // 写回所有脏文件。成功返 true，失败弹 notice 返 false。
+  // 读 committedStateRef（最新已提交态）而非闭包 state：解析器里 `await ai.stop()` 后 AI 收尾写
+  // 已落进 reducer，闭包 state 却停在点击时的快照——读 ref 才能保存到 AI 停止后的最终内容。
   const saveAllDirty = async (): Promise<boolean> => {
-    if (!state.projectDir) return false
+    const cur = committedStateRef.current
+    if (!cur.projectDir) return false
     try {
       const written: Record<string, string> = {}
-      for (const f of Object.values(state.files)) {
-        if (f.dirty) { await gateway.writeFile(state.projectDir, f.path, f.source); written[f.path] = f.source }
+      for (const f of Object.values(cur.files)) {
+        if (f.dirty) { await gateway.writeFile(cur.projectDir, f.path, f.source); written[f.path] = f.source }
       }
       dispatch({ type: 'saved_all', written }); return true
     } catch (e) { setNotice(`保存失败：${errMsg(e)}`); return false }
@@ -471,15 +391,17 @@ export function App({ gateway }: { gateway: FileGateway }) {
   // 真正关闭窗口。destroy 不再触发 onCloseRequested。失败（如缺权限）弹 notice，不静默吞。
   // 干净退出（走守卫保存/丢弃后）清空本项目草稿，下次开不误报恢复；清草稿失败不阻断退出。
   const doExit = async () => {
+    // 关窗口用 destroy() 硬关、不给防抖 flush 机会，先显式落盘当前对话，防丢最后一轮（a6）。
+    await ai.flush().catch(() => { /* 落盘失败不阻断退出 */ })
     if (settings.autosaveRecovery && state.projectDir) {
       try { await autosave.clearProjectDrafts(state.projectDir) } catch { /* 清草稿失败不阻断退出 */ }
     }
     try { await gateway.closeWindow() }
     catch (e) { setNotice(`退出失败：${errMsg(e)}`) }
   }
-  // 退出守卫：有脏则弹确认框，否则直接退。
+  // 退出守卫：有脏或 AI 在跑则弹确认框，否则直接退。
   const requestExit = () => {
-    if (anyDirty(state)) setPendingClose({ kind: 'exit' })
+    if (anyDirty(state) || ai.running) setPendingClose({ kind: 'exit' })
     else void doExit()
   }
 
@@ -487,6 +409,8 @@ export function App({ gateway }: { gateway: FileGateway }) {
   // - 编辑窗（'editor'）：开启动窗 → 关本编辑窗（互斥交接，不留空编辑窗）。
   // - web（null）：就地 dispatch project_closed 回启动页（单页 SPA）。
   const doCloseProject = async () => {
+    // 编辑窗关项目也走 destroy() 硬关窗口；先显式落盘当前对话，防丢最后一轮（a6）。
+    await ai.flush().catch(() => { /* 落盘失败不阻断关闭 */ })
     if (settings.autosaveRecovery && state.projectDir) {
       try { await autosave.clearProjectDrafts(state.projectDir) } catch { /* 清草稿失败不阻断关闭 */ }
     }
@@ -500,28 +424,41 @@ export function App({ gateway }: { gateway: FileGateway }) {
     dispatch({ type: 'project_closed' })
     setRecentTick((t) => t + 1)
   }
-  // 关闭项目守卫：有脏则弹确认框，否则直接关。
+  // 关闭项目守卫：有脏或 AI 在跑则弹确认框，否则直接关。
   const requestCloseProject = () => {
-    if (anyDirty(state)) setPendingClose({ kind: 'closeProject' })
+    if (anyDirty(state) || ai.running) setPendingClose({ kind: 'closeProject' })
     else void doCloseProject()
   }
 
+  // 执行「离开当前项目」的实际动作（切换 / 关闭 / 退出）。tab 不走此处。
+  const leaveProject = async (intent: CloseIntent) => {
+    if (intent.kind === 'switchProject') {
+      // 与 doExit/doCloseProject 一致：换项目前显式落盘当前对话，防丢最后一轮 AI 对话
+      //（chat 持久化靠 1s 防抖，loadDir 改 projectDir 会取消未触发的防抖写）。此刻仍是旧项目，flush 写旧项目。
+      await ai.flush().catch(() => { /* 落盘失败不阻断切换 */ })
+      await loadDir(intent.dir)
+    } else if (intent.kind === 'closeProject') await doCloseProject()
+    else if (intent.kind === 'exit') await doExit()
+  }
   // 对话框三解析器：消费 pendingClose 后置空。
+  // 项目级动作的正确性核心：**先 await ai.stop()（等 AI 真正停下、in-flight dispatch 全落旧项目）
+  // → 再保存 → 再离开**——保证 AI 的写入绝不跨到新项目。ai.stop() 未跑时是即时 resolve 的 no-op。
   const onCloseDialogSave = async () => {
     const intent = pendingClose
     setPendingClose(null)
     if (!intent) return
-    if (intent.kind === 'tab') { if (await saveBuffer(intent.path)) dispatch({ type: 'close_tab', path: intent.path }) }
-    else if (intent.kind === 'closeProject') { if (await saveAllDirty()) await doCloseProject() }
-    else { if (await saveAllDirty()) await doExit() }
+    if (intent.kind === 'tab') { if (await saveBuffer(intent.path)) dispatch({ type: 'close_tab', path: intent.path }); return }
+    await ai.stop()
+    if (!(await saveAllDirty())) return // 保存失败：停在当前项目，不离开
+    await leaveProject(intent)
   }
   const onCloseDialogDiscard = async () => {
     const intent = pendingClose
     setPendingClose(null)
     if (!intent) return
-    if (intent.kind === 'tab') dispatch({ type: 'discard_tab', path: intent.path })
-    else if (intent.kind === 'closeProject') await doCloseProject()
-    else await doExit()
+    if (intent.kind === 'tab') { dispatch({ type: 'discard_tab', path: intent.path }); return }
+    await ai.stop()
+    await leaveProject(intent) // 丢弃：不保存直接离开
   }
   const onCloseDialogCancel = () => setPendingClose(null)
 
@@ -557,86 +494,16 @@ export function App({ gateway }: { gateway: FileGateway }) {
   // 新建项目弹窗同理：打开时拦全局快捷键。
   const newProjectOpenRef = useRef(newProjectOpen)
   newProjectOpenRef.current = newProjectOpen
-  useEffect(() => {
-    let unlisten: (() => void) | undefined
-    gateway
-      .onWindowCloseRequest(() => requestExitRef.current())
-      .then((u) => { unlisten = u })
-      .catch(() => { /* 非 Tauri 环境忽略 */ })
-    return () => unlisten?.()
-  }, [gateway])
-  // OS 双击 / 关联打开 .kiw：single-instance 转发的路径 → 派生父目录 → enterProject（模型 A 分流：
-  // 启动窗开编辑窗、编辑窗就地换项目、web 原地 loadDir）。
-  useEffect(() => {
-    let unlisten: (() => void) | undefined
-    gateway
-      .onOpenProjectFile((path) => { void enterProjectRef.current(parentDir(path)) })
-      .then((u) => { unlisten = u })
-      .catch(() => { /* 非 Tauri 环境忽略 */ })
-    return () => unlisten?.()
-  }, [gateway])
-  // 窗口尺寸随启动页 ↔ workbench 切换调整（**仅 web / 单页 SPA**，windowMode===null）：Tauri 多窗下
-  // 尺寸随窗创建即给定（openLaunchWindow / openEditorWindow），窗内不再翻转。仅在 projectDir 的
-  // 「有↔无」真正翻转时改尺寸并居中；冷启动首帧、项目间切换都不动窗。
-  const prevProjectDirRef = useRef(state.projectDir)
-  useEffect(() => {
-    if (windowMode !== null) return // Tauri 多窗：尺寸随窗创建给定，不在窗内翻转
-    const prev = prevProjectDirRef.current
-    const cur = state.projectDir
-    if (prev === cur) return
-    prevProjectDirRef.current = cur
-    // 只在「有项目 ↔ 无项目」边界翻转时调整；项目间切换（都非空）不动窗、不重复居中。
-    // 进 workbench 优先用记忆的尺寸（用户上次手动调整的），未记过用默认；回启动页用固定尺寸。
-    const size = prev === null && cur !== null ? (loadWorkbenchSize() ?? WORKBENCH_WINDOW) : prev !== null && cur === null ? LAUNCH_WINDOW : null
-    if (size) void gateway.setWindowSize(size.width, size.height).catch((e) => console.error('调整窗口尺寸失败', e))
-  }, [state.projectDir, gateway, windowMode])
-  // 记忆用户手动调整的 workbench 尺寸：订阅窗口 resize，仅在有项目时落库（启动页固定尺寸不记，
-  // 含切回启动页时我们自己触发的程序化 resize）。订阅只建一次。
-  useEffect(() => {
-    let unlisten: (() => void) | undefined
-    gateway
-      .onWindowResize((w, h) => { if (committedStateRef.current.projectDir !== null) saveWorkbenchSize(w, h) })
-      .then((u) => { unlisten = u })
-      .catch(() => { /* 非 Tauri 环境忽略 */ })
-    return () => unlisten?.()
-  }, [gateway])
-  // 冷启动（OS 双击 .kiw 首次拉起）：mount 后主动取走 Rust 暂存的启动路径（emit 会早于订阅而丢，故用拉取）。
-  // 经 enterProject：启动窗下开编辑窗直达项目（不停在启动窗），web 下原地 loadDir。编辑窗自身不跑
-  // （它由 ?project 载入，见下方 boot effect），避免与之重复。
-  useEffect(() => {
-    if (windowMode === 'editor') return
-    gateway
-      .takeLaunchProject()
-      .then((path) => { if (path) void enterProjectRef.current(parentDir(path)) })
-      .catch(() => { /* 非 Tauri 环境忽略 */ })
-  }, [gateway, windowMode])
-  // 启动窗：按屏幕分辨率定固定尺寸并居中（tauri.conf 默认尺寸只是首帧兜底；冷启动与 spawn 的启动窗
-  // 都经此对齐到依分辨率算出的尺寸）。启动窗禁止用户最大化 / 调整尺寸由窗口创建选项 resizable/maximizable:false
-  // 保证，此处只定尺寸。仅 launch 窗跑一次。
-  const launchSizedRef = useRef(false)
-  useEffect(() => {
-    if (windowMode !== 'launch' || launchSizedRef.current) return
-    launchSizedRef.current = true
-    void (async () => {
-      const monitor = await gateway.currentMonitorSize().catch(() => null)
-      const size = monitor ? computeLaunchSize(monitor) : LAUNCH_WINDOW
-      await gateway.setWindowSize(size.width, size.height).catch((e) => console.error('调整启动窗尺寸失败', e))
-    })()
-  }, [gateway, windowMode])
-  // 编辑窗启动：从 URL ?project 载入项目。载入失败 / 无 ?project → 不留空编辑窗，回退开启动窗 + 关本窗。
-  const editorBootedRef = useRef(false)
-  useEffect(() => {
-    if (windowMode !== 'editor' || editorBootedRef.current) return
-    editorBootedRef.current = true
-    const dir = gateway.currentWindowProject()
-    void (async () => {
-      if (dir !== null && (await loadDirRef.current(dir))) return
-      // 启动窗没起来则不关本窗（保留过渡占位，用户可退出/重试），避免零窗口不可恢复——同 doCloseProject。
-      try { await gateway.openLaunchWindow() }
-      catch (e) { setNotice(`打开启动窗口失败：${errMsg(e)}`); return }
-      await gateway.closeWindow().catch(() => { /* 关窗失败无从恢复，静默 */ })
-    })()
-  }, [gateway, windowMode])
+  useWindowLifecycle({
+    gateway,
+    windowMode,
+    projectDir: state.projectDir,
+    requestExitRef,
+    enterProjectRef,
+    loadDirRef,
+    committedStateRef,
+    setNotice,
+  })
 
   const onCreateFile = async (rawName: string) => {
     if (!state.projectDir) return
@@ -653,8 +520,11 @@ export function App({ gateway }: { gateway: FileGateway }) {
     try {
       await gateway.renamePath(state.projectDir, from, to)
       dispatch({ type: 'path_renamed', from, to })
-      if (state.manifest && state.manifestFile && state.entry && (state.entry === from || state.entry.startsWith(`${from}/`))) {
-        const newEntry = state.entry === from ? to : to + state.entry.slice(from.length)
+      const newEntry =
+        state.manifest && state.manifestFile && state.entry
+          ? entryAfterRename(state.entry, from, to)
+          : null
+      if (newEntry !== null && state.manifest && state.manifestFile) {
         try {
           await gateway.writeManifest(state.projectDir, { ...state.manifest, entry: newEntry }, state.manifestFile)
         } catch {
@@ -665,7 +535,7 @@ export function App({ gateway }: { gateway: FileGateway }) {
   }
   const onDelete = async (path: string) => {
     if (!state.projectDir) return
-    if (state.entry && (state.entry === path || state.entry.startsWith(`${path}/`))) { setNotice('入口文件不可删除'); return }
+    if (state.entry && underPath(state.entry, path)) { setNotice('入口文件不可删除'); return }
     const ok = await gateway.confirm(`确认删除 ${path}？此操作不可撤销。`)
     if (!ok) return
     try { await gateway.deletePath(state.projectDir, path); dispatch({ type: 'path_deleted', path }) }
@@ -774,14 +644,6 @@ export function App({ gateway }: { gateway: FileGateway }) {
 
   // 布局快照：保存当前 view 到「我的布局」槽 / 恢复我的或出厂布局。
   // 恢复统一走 { ...DEFAULT_VIEW, ...target } 合并，保证将来 ViewPrefs 新增字段时旧快照缺的字段自动取默认。
-  const onSaveLayout = () => {
-    try { localStorage.setItem('kiny-editor-view-saved', JSON.stringify(view)) } catch { /* ignore */ }
-    setSavedView(view)
-    setNotice('已保存当前布局', 'success')
-  }
-  const onRestoreMyLayout = () => { if (savedView) setView({ ...DEFAULT_VIEW, ...savedView }) }
-  const onRestoreDefaultLayout = () => setView({ ...DEFAULT_VIEW })
-
   // 全局键盘快捷键：由中央注册表（shortcuts/registry）驱动，查表派发；菜单 sc 与此同源。
   // 编辑类（Ctrl+X/C/V/A）与 editor 域命令（注释）由 CodeMirror 处理，不在此重绑。
   // 命令 handler 与生效绑定放 ref，监听器只注册一次；各 handler 自带空操作 / 项目守卫。
@@ -857,56 +719,12 @@ export function App({ gateway }: { gateway: FileGateway }) {
     return m
   }, [state.files])
 
-  const cols: React.CSSProperties = {
-    ['--col-sidebar' as string]: view.sidebar ? `${view.sidebarWidth}px` : '0px',
-    // 预览显示时 editor+preview 两条 fr 之和 = 1，正常按比例分；预览隐藏时 editor 必须用 1fr
-    // 而非 editorRatio fr——否则孤立的 `<1fr`（如 0.5fr）按 CSS Grid 的 max(1, Σfr) 基数只填一半、右侧留空。
-    ['--col-editor' as string]: view.preview ? `${view.editorRatio}fr` : '1fr',
-    ['--col-preview' as string]: view.preview ? `${1 - view.editorRatio}fr` : '0px',
-    ['--col-ai' as string]: view.ai ? `${view.aiWidth}px` : '0px',
-  }
-
   // 顶层渲染分流（模型 A）：
   // - 编辑窗启动、项目尚未载入完 → 过渡态占位（编辑窗永不停在「无项目」）。
   // - 启动窗，或 web/SPA 且无项目 → LaunchScreen。
   // - 其余（有项目，或编辑窗已载入）→ workbench。
   const editorBooting = windowMode === 'editor' && state.projectDir === null
   const showLaunch = windowMode === 'launch' || (windowMode === null && state.projectDir === null)
-
-  // 横向拖拽列宽：从指针 clientX 相对 workbench 边缘换算，夹紧到合理区间。
-  const onResizeSidebar = (clientX: number) => {
-    const wb = document.querySelector('.workbench')?.getBoundingClientRect()
-    if (!wb) return
-    setView((v) => ({ ...v, sidebarWidth: Math.max(160, Math.min(480, Math.round(clientX - wb.left))) }))
-  }
-  const onResizeAi = (clientX: number) => {
-    const wb = document.querySelector('.workbench')?.getBoundingClientRect()
-    if (!wb) return
-    setView((v) => ({ ...v, aiWidth: Math.max(260, Math.min(640, Math.round(wb.right - clientX))) }))
-  }
-  // 拖编辑/预览中线：在「中间区」（去掉左右栏后）按指针位置定编辑占比，夹在 [0.2, 0.8]。
-  const onResizeEditorPreview = (clientX: number) => {
-    const wb = document.querySelector('.workbench')?.getBoundingClientRect()
-    if (!wb) return
-    const midLeft = wb.left + (view.sidebar ? view.sidebarWidth : 0)
-    const midRight = wb.right - (view.ai ? view.aiWidth : 0)
-    const span = midRight - midLeft
-    if (span <= 0) return
-    const r = (clientX - midLeft) / span
-    setView((v) => ({ ...v, editorRatio: Math.max(0.2, Math.min(0.8, r)) }))
-  }
-
-  // 拖拽分隔条：设定 Explorer 像素高度，夹在 [130, sidebarH - 105]（CSS 双保险同值）
-  const onResizeExplorer = (height: number) => {
-    const sidebarEl = document.querySelector('.sidebar')
-    const sidebarH = sidebarEl ? sidebarEl.getBoundingClientRect().height : 800
-    const h = Math.max(130, Math.min(sidebarH - 105, height))
-    setView((v) => ({ ...v, explorerHeight: h }))
-  }
-  // Explorer 的 flex-basis：未拖拽（0）时不设，沿用 CSS 默认 max-height:52%
-  const explorerStyle: React.CSSProperties | undefined = view.explorerHeight > 0
-    ? { flexBasis: `${view.explorerHeight}px`, maxHeight: 'none' }
-    : undefined
 
   return (
     <div className="app">
@@ -1043,23 +861,29 @@ export function App({ gateway }: { gateway: FileGateway }) {
             onClose={requestCloseTab}
           />
           {active ? (
-            <EditorPane
-              // 每个文件一个独立 EditorView：切档重挂，撤销历史天然隔离，
-              // 避免在文件 B 里 Ctrl+Z 撤回成文件 A 内容、doc 与 React state 串档。
-              key={state.activeFile ?? ''}
-              ref={editorRef}
-              source={active.source}
-              onChange={(s) => dispatch({ type: 'source_changed', path: active.path, source: s })}
-              caretLine={caretLine}
-              onCaretConsumed={() => setCaretLine(null)}
-              onCaretMove={setActiveLine}
-              onGoto={onJumpDiagnostic}
-              diagnostics={currentDiags}
-              program={program}
-              activeFile={state.activeFile}
-              highlight={view.highlight}
-              shortcuts={settings.shortcuts}
-            />
+            <>
+              {ai.running && (
+                <div className="editor-readonly-banner" role="status">AI 正在修改，编辑区暂时只读</div>
+              )}
+              <EditorPane
+                // 每个文件一个独立 EditorView：切档重挂，撤销历史天然隔离，
+                // 避免在文件 B 里 Ctrl+Z 撤回成文件 A 内容、doc 与 React state 串档。
+                key={state.activeFile ?? ''}
+                ref={editorRef}
+                source={active.source}
+                onChange={(s) => dispatch({ type: 'source_changed', path: active.path, source: s })}
+                caretLine={caretLine}
+                onCaretConsumed={() => setCaretLine(null)}
+                onCaretMove={setActiveLine}
+                onGoto={onJumpDiagnostic}
+                diagnostics={currentDiags}
+                program={program}
+                activeFile={state.activeFile}
+                highlight={view.highlight}
+                shortcuts={settings.shortcuts}
+                readOnly={ai.running}
+              />
+            </>
           ) : (
             <div className="editor-empty">未打开文件</div>
           )}
@@ -1148,6 +972,7 @@ export function App({ gateway }: { gateway: FileGateway }) {
       <ConfirmCloseDialog
         intent={pendingClose}
         dirtyCount={dirtyCount}
+        aiRunning={ai.running}
         onSave={onCloseDialogSave}
         onDiscard={onCloseDialogDiscard}
         onCancel={onCloseDialogCancel}

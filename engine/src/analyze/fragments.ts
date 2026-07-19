@@ -1,5 +1,6 @@
 import type { ProjectFile, ContentBlock, InlineSegment } from '../parser/ast'
 import type { Scope } from './types'
+import { visitBlockTree } from '../parser/visit'
 
 export interface RawFragment {
   code: string
@@ -23,48 +24,38 @@ export function collectFragments(file: ProjectFile): RawFragment[] {
     for (const s of segs) if (s.kind === 'interp') pushExpr(s.code, line, scope)
   }
 
-  const walkBlock = (block: ContentBlock, scope: Scope) => {
-    for (const el of block) {
-      switch (el.kind) {
-        case 'text':
-          fromSegments(el.segments, el.line, scope)
-          break
-        case 'divert':
-        case 'command':
-          for (const a of el.args) pushExpr(a, el.line, scope)
-          break
-        case 'logicLine':
-          pushStmt(el.code, el.line, scope)
-          break
-        case 'logicBlock':
-          pushStmt(el.code, el.line, scope)
-          break
-        case 'choiceGroup':
-          for (const c of el.choices) {
-            if (c.condition !== null) pushExpr(c.condition, c.line, scope)
-            fromSegments(c.before, c.line, scope)
-            if (c.inner !== null) fromSegments(c.inner, c.line, scope)
-            fromSegments(c.after, c.line, scope)
-            if (c.resultDivert !== null) {
-              for (const a of c.resultDivert.args) pushExpr(a, c.line, scope)
-            }
-            walkBlock(c.body, scope)
-          }
-          break
-        case 'conditional':
-          for (const b of el.branches) {
-            if (b.condition !== null) pushExpr(b.condition, b.line, scope)
-            walkBlock(b.body, scope)
-          }
-          break
-        default: {
-          const _exhaustive: never = el
-          void _exhaustive
-          break
+  // scope 在一棵 knot 树内恒定，闭包捕获即可。叶元素在 element、choice/branch 的内联片段在对应钩子提取，
+  // choiceGroup/conditional 的下钻交给 visitBlockTree。
+  const walkBlock = (block: ContentBlock, scope: Scope) =>
+    visitBlockTree<void>(block, undefined, {
+      element: (el) => {
+        switch (el.kind) {
+          case 'text':
+            fromSegments(el.segments, el.line, scope)
+            break
+          case 'divert':
+          case 'command':
+            for (const a of el.args) pushExpr(a, el.line, scope)
+            break
+          case 'logicLine':
+          case 'logicBlock':
+            pushStmt(el.code, el.line, scope)
+            break
         }
-      }
-    }
-  }
+      },
+      choice: (c) => {
+        if (c.condition !== null) pushExpr(c.condition, c.line, scope)
+        fromSegments(c.before, c.line, scope)
+        if (c.inner !== null) fromSegments(c.inner, c.line, scope)
+        fromSegments(c.after, c.line, scope)
+        if (c.resultDivert !== null) {
+          for (const a of c.resultDivert.args) pushExpr(a, c.line, scope)
+        }
+      },
+      branch: (b) => {
+        if (b.condition !== null) pushExpr(b.condition, b.line, scope)
+      },
+    })
 
   walkBlock(file.preamble, { kind: 'global' })
   for (const knot of file.knots) {

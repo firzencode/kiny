@@ -17,3 +17,6 @@ export { assembleProject } from './project/assemble'
 export { loadProjectFromFiles } from './project/memory'
 export { findManifest } from './project/locate'
 export type { KinyMeta, LoadResult, ProjectError } from './project/types'
+// 公共装配流水线（manifest 文本 + 文件集 → Story），三端薄封装共用
+export { assembleFromFiles } from './assemble-story'
+export type { AssembleOptions, AssembleResult, AssembleWarning } from './assemble-story'

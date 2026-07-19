@@ -8,11 +8,12 @@ import { AUTO_SAVE_ID } from '../saves/types'
 import { ReadingView } from './ReadingView'
 
 const listSaves = vi.fn()
-const writeSave = vi.fn()
+const writeSave = vi.fn() // ReadingView 实际走 writeSaveSerial（下方接同一 fn），断言仍以此追踪落盘调用
 const deleteSave = vi.fn()
 vi.mock('../saves/store', () => ({
   listSaves: (...a: unknown[]) => listSaves(...a),
   writeSave: (...a: unknown[]) => writeSave(...a),
+  writeSaveSerial: (...a: unknown[]) => writeSave(...a),
   deleteSave: (...a: unknown[]) => deleteSave(...a),
   genSaveId: () => 'cafe',
 }))
@@ -140,5 +141,15 @@ describe('ReadingView 存档 / 读档', () => {
     await userEvent.click(screen.getByRole('button', { name: '存档 / 读档' }))
     await userEvent.click(screen.getByRole('button', { name: /存档当前进度/ }))
     expect(await screen.findByText('已存档')).toBeInTheDocument()
+  })
+
+  // B5：手动存档写盘失败时据实反馈「存档失败」，不谎报「已存档」。
+  it('手动存档写盘失败 → 出现「存档失败」提示（不谎报已存档）', async () => {
+    writeSave.mockReset().mockRejectedValue(new Error('IPC 挂了'))
+    renderRV()
+    await userEvent.click(screen.getByRole('button', { name: '存档 / 读档' }))
+    await userEvent.click(screen.getByRole('button', { name: /存档当前进度/ }))
+    expect(await screen.findByText(/存档失败/)).toBeInTheDocument()
+    expect(screen.queryByText('已存档')).not.toBeInTheDocument()
   })
 })

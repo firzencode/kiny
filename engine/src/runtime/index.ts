@@ -3,6 +3,7 @@ import { Story } from './story'
 import type { StoryOptions } from './types'
 import { enumerateChoices, resolveBlock, fingerprint } from './snapshot'
 import type { StorySnapshot, RestoreData } from './snapshot'
+import { GOLDEN_SEED } from './rng'
 import type { Frame } from './frames'
 
 export { Story } from './story'
@@ -17,7 +18,7 @@ export function createStory(program: ValidatedProgram, options: StoryOptions): S
 }
 
 // restore 分支会 rng.setState 覆盖，故此 seed 值无关紧要。
-const RESTORE_SEED = 0x9e3779b9
+const RESTORE_SEED = GOLDEN_SEED
 
 /**
  * 从快照重建 Story：先校验版本与 program 指纹，再把序号 / 路径解码回 AST 引用。

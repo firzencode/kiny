@@ -18,6 +18,14 @@ export async function play(story: Story, term: Term): Promise<'ended' | 'quit'> 
       term.write('—— 故事结束 ——')
       return 'ended'
     }
+    // 停在 @input：读一行自由文本回写变量后继续（否则 canContinue/hasEnded/choices 三态皆空、
+    // 含 @input 的故事会被下方 `cs.length === 0` 静默截断成 'ended'）。
+    const input = story.currentInput
+    if (input !== null) {
+      const text = await term.readLine(input.placeholder ? `${input.placeholder}: ` : '(输入) > ')
+      story.submitInput(text)
+      continue
+    }
     const cs = story.currentChoices
     if (cs.length === 0) return 'ended'
     cs.forEach((c, i) => term.write(`  ${i + 1}) ${plainText(c.spans)}`))

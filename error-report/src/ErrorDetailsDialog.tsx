@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { getErrorEntries } from './errorLog'
 import { buildCopyText, githubIssueUrl, FEEDBACK_FORM_URL } from './format'
 import { copyText, openExternalUrl, openLogDir, readRecentLog } from './platform'
@@ -10,6 +10,22 @@ import { copyText, openExternalUrl, openLogDir, readRecentLog } from './platform
  */
 export function ErrorDetailsDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [copied, setCopied] = useState(false)
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const closeBtnRef = useRef<HTMLButtonElement>(null)
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const prevFocusRef = useRef<HTMLElement | null>(null)
+
+  // 焦点管理（X3，崩溃取证面板须键盘可用）：打开时记住先前焦点并移焦到关闭按钮；关闭 / 卸载还焦。
+  useEffect(() => {
+    if (!open) return
+    prevFocusRef.current = document.activeElement as HTMLElement | null
+    closeBtnRef.current?.focus()
+    return () => prevFocusRef.current?.focus?.()
+  }, [open])
+
+  // 复制反馈的 setTimeout 清理（A6）：卸载时清，防 setState-on-unmounted / 定时器叠加。
+  useEffect(() => () => { if (copyTimerRef.current) clearTimeout(copyTimerRef.current) }, [])
+
   if (!open) return null
   const entries = getErrorEntries()
 
@@ -18,7 +34,22 @@ export function ErrorDetailsDialog({ open, onClose }: { open: boolean; onClose: 
     const log = await readRecentLog()
     await copyText(buildCopyText(entries, log))
     setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+    if (copyTimerRef.current) clearTimeout(copyTimerRef.current)
+    copyTimerRef.current = setTimeout(() => setCopied(false), 2000)
+  }
+
+  // 键盘：Esc 关闭；Tab 在面板内可聚焦元素间循环（focus trap）。
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') { onClose(); return }
+    if (e.key !== 'Tab') return
+    const nodes = dialogRef.current?.querySelectorAll<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+    )
+    const list = nodes ? Array.from(nodes).filter((el) => !el.hasAttribute('disabled')) : []
+    if (list.length === 0) return
+    const first = list[0], last = list[list.length - 1]
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus() }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus() }
   }
 
   return (
@@ -29,11 +60,12 @@ export function ErrorDetailsDialog({ open, onClose }: { open: boolean; onClose: 
       aria-label="问题反馈"
       style={overlay}
       onClick={onClose}
+      onKeyDown={onKeyDown}
     >
-      <div className="error-report-dialog" style={dialog} onClick={(e) => e.stopPropagation()}>
+      <div ref={dialogRef} className="error-report-dialog" style={dialog} onClick={(e) => e.stopPropagation()}>
         <header style={head}>
           <h2 style={{ margin: 0, fontSize: 16 }}>问题反馈</h2>
-          <button className="error-report-close" onClick={onClose} aria-label="关闭" style={iconBtn}>
+          <button ref={closeBtnRef} className="error-report-close" onClick={onClose} aria-label="关闭" style={iconBtn}>
             ×
           </button>
         </header>

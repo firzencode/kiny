@@ -23,8 +23,7 @@ export function SidebarResizer({
         if (disabled) return
         const startY = e.clientY
         const startTop = e.currentTarget.getBoundingClientRect().top
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const el = e.currentTarget as any
+        const el: HTMLElement = e.currentTarget
         el.setPointerCapture(e.pointerId)
         el.classList.add('dragging')
         const move = (ev: PointerEvent) => {

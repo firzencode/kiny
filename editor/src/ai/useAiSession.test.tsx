@@ -42,6 +42,25 @@ describe('useAiSession', () => {
     expect(say && 'text' in say && say.text).toContain('写故事')
   })
 
+  it('stop() 返回的 Promise 等 AI 真正停下才 resolve（先停后离的时序基石）', async () => {
+    // 受控 chat：一直挂起，直到 signal 触发 abort 才 reject——模拟「in-flight 请求响应 abort 后才退出」。
+    const provider: Provider = {
+      chat: vi.fn().mockImplementation((_req: unknown, signal?: AbortSignal) =>
+        new Promise((_res, rej) => {
+          signal?.addEventListener('abort', () => rej(new DOMException('aborted', 'AbortError')))
+        })),
+    }
+    const { result } = renderHook(() => useAiSession(makeDeps(provider)))
+    act(() => result.current.send('跑一个长任务'))
+    await waitFor(() => expect(result.current.running).toBe(true))
+
+    let stopResolved = false
+    // await stop 期间 AI 才真正停下（run 链 finally 清 running）；await act 包住这批状态更新。
+    await act(async () => { await result.current.stop(); stopResolved = true })
+    expect(stopResolved).toBe(true)
+    expect(result.current.running).toBe(false) // resolve 时 AI 确已停下
+  })
+
   it('思考型模型：reasoning 作 think 片段先于回复呈现', async () => {
     const provider: Provider = {
       chat: vi.fn().mockResolvedValue({
@@ -284,5 +303,25 @@ describe('cleanupExpiredChats', () => {
     const gw = createMemoryGateway({ files: {}, chatStores: { k: toChatStore('/a', [stale]) } })
     await cleanupExpiredChats(gw, null, now)
     expect((await gw.readChatStore('k'))!.conversations).toHaveLength(1)
+  })
+})
+
+describe('useAiSession flush（a6：退出前显式落盘）', () => {
+  it('flush 立即把当前对话写回磁盘，跳过防抖（防 destroy() 丢最后一轮）', async () => {
+    const gw = createMemoryGateway({ files: {} })
+    const dir = '/proj'
+    // 防抖设极大：无 flush 时这段时间内绝不会自动写。
+    const { result } = renderHook(() =>
+      useAiSession({ ...persistDeps(gw, dir, okProvider('答完了')), persistDebounceMs: 1_000_000 }),
+    )
+    await act(async () => {}) // 载入 effect 落定
+    act(() => result.current.send('问一句'))
+    await waitFor(() => expect(result.current.running).toBe(false))
+    // 防抖极大 → 此刻磁盘还没写（无 flush 就会丢这轮）。
+    expect(await gw.readChatStore(projectKey(dir))).toBeFalsy()
+    await act(async () => { await result.current.flush() })
+    const store = await gw.readChatStore(projectKey(dir))
+    expect(store?.conversations).toHaveLength(1)
+    expect(store?.conversations[0]!.turns).toHaveLength(1)
   })
 })

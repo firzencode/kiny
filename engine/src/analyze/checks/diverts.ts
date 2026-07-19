@@ -1,5 +1,7 @@
 import type { ProjectFile, ContentBlock, Knot, Divert } from '../../parser/ast'
 import type { Diagnostic, SymbolTable } from '../types'
+import { openingKnotName } from '../opening'
+import { visitBlockTree } from '../../parser/visit'
 
 /** 跳转目标存在性 + 带参实参个数 + 非法进入带参节点子节点。 */
 export function checkDiverts(files: ProjectFile[], table: SymbolTable): Diagnostic[] {
@@ -21,6 +23,10 @@ export function checkDiverts(files: ProjectFile[], table: SymbolTable): Diagnost
       if (knot.params.length > 0 && parent !== host.name) {
         out.push({ severity: 'error', code: 'param-knot-stitch-entry', message: `不能从外部跳进带参节点「${parent}」的子节点（参数无从绑定）`, file, line: d.line })
       }
+      // 子节点（stitch）不接受实参——只有 knot 有 params。实参被运行期静默吞掉、连副作用都不求值（A10）。
+      if (d.args.length > 0) {
+        out.push({ severity: 'error', code: 'stitch-no-args', message: `子节点「${t}」不接受实参（只有节点可带参数）`, file, line: d.line })
+      }
       return
     }
 
@@ -36,27 +42,29 @@ export function checkDiverts(files: ProjectFile[], table: SymbolTable): Diagnost
     out.push({ severity: 'error', code: 'unknown-divert-target', message: `跳转目标不存在：「${t}」`, file, line: d.line })
   }
 
-  const walk = (block: ContentBlock, host: Knot, file: string) => {
-    for (const el of block) {
-      switch (el.kind) {
-        case 'divert':
-          checkOne(el, host, file)
-          break
-        case 'choiceGroup':
-          for (const c of el.choices) {
-            if (c.resultDivert !== null) checkOne(c.resultDivert, host, file)
-            walk(c.body, host, file)
-          }
-          break
-        case 'conditional':
-          for (const b of el.branches) walk(b.body, host, file)
-          break
-      }
-    }
-  }
+  // host / file 在一棵 knot 树内恒定，闭包捕获即可，无需线程化语境。
+  const walk = (block: ContentBlock, host: Knot, file: string) =>
+    visitBlockTree<void>(block, undefined, {
+      element: (el) => {
+        if (el.kind === 'divert') checkOne(el, host, file)
+      },
+      choice: (c) => {
+        if (c.resultDivert !== null) checkOne(c.resultDivert, host, file)
+      },
+    })
 
-  // preamble 不含跳转（跳转只在节点体内），故只走 knots。
+  // 走每个文件的显式 knots + preamble（顶层开场）——parser 对 preamble 一视同仁产出
+  // divert/choiceGroup，顶层开场里的坏跳转目标须一并静态诊断（A5）。preamble 的 host 用自建的
+  // 开场 knot（不依赖 addOpeningKnots 先跑）：无参、无子节点，故 host.name 不撞任何作者 knot、
+  // 同级子节点判定恒空——preamble 的裸跳转只能命中全局 knot，与运行期一致。
   for (const file of files) {
+    if (file.preamble.length > 0) {
+      const openingHost: Knot = {
+        kind: 'knot', name: openingKnotName(file.path), params: [],
+        body: file.preamble, stitches: [], line: file.preamble[0]!.line, scope: 'global',
+      }
+      walk(file.preamble, openingHost, file.path)
+    }
     for (const knot of file.knots) {
       walk(knot.body, knot, file.path)
       for (const st of knot.stitches) walk(st.body, knot, file.path)

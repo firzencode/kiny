@@ -33,6 +33,13 @@ export function checkVariables(table: SymbolTable): Diagnostic[] {
         out.push({ severity: 'error', code: 'undeclared-var', message: `引用未声明的变量：「${ref}」`, file: frag.file, line: frag.line })
       }
     }
+    // 给内置函数赋值（`~ random = 5` / `random++`）→ error：B 是实例级共享层，一次手滑
+    // 赋值会永久破坏该 Story 的内置函数，运行期在远处炸「random is not a function」（A7）。
+    for (const name of frag.assigns) {
+      if (BUILTINS.has(name)) {
+        out.push({ severity: 'error', code: 'assign-builtin', message: `不能给内置函数赋值：「${name}」`, file: frag.file, line: frag.line })
+      }
+    }
   }
   return out
 }

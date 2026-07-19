@@ -1,15 +1,30 @@
 import { useEffect, useState } from 'react'
-import type { Story } from '@kiny/engine'
-import { type ResolveAsset } from '@kiny/player'
+import { createStory, type Story, type ValidatedProgram } from '@kiny/engine'
+import { replayToStory, type PlayState, type InteractionStep, type ResolveAsset } from '@kiny/player'
 import { loadStory, type LoadedStory } from './load/loadStory'
+import { randomSeed } from './load/buildStory'
+import { progressKey, loadProgress, saveProgress, clearProgress } from './load/progress'
 import { StartGate } from './components/StartGate'
 import { PlayingView } from './components/PlayingView'
+
+interface PlayingPhase {
+  kind: 'playing'
+  story: Story
+  resolveAsset: ResolveAsset
+  program: ValidatedProgram
+  start: string
+  progKey: string
+  seed: number
+  initialState?: PlayState
+  initialSeq: InteractionStep[]
+  notice: string | null
+}
 
 type Phase =
   | { kind: 'loading' }
   | { kind: 'error'; message: string }
   | { kind: 'ready'; loaded: LoadedStory }
-  | { kind: 'playing'; story: Story; resolveAsset: ResolveAsset }
+  | PlayingPhase
 
 export function App() {
   const [phase, setPhase] = useState<Phase>({ kind: 'loading' })
@@ -33,12 +48,58 @@ export function App() {
   if (phase.kind === 'error') return <div className="app-status app-error">{phase.message}</div>
 
   if (phase.kind === 'ready') {
-    const { story, assetBase, title } = phase.loaded
+    const { story, assetBase, title, version, program, start, seed } = phase.loaded
     const resolveAsset: ResolveAsset = (name) => assetBase + name
-    // 点击进入播放；首帧推进 + 逐行揭示由 usePlayback 持有（StrictMode 双调用其内部守卫处理）
-    const onStart = () => setPhase({ kind: 'playing', story, resolveAsset })
+    const progKey = progressKey(title, version)
+
+    // 从头开始一局（新 seed，存空序列）：首次进入 / 「重新开始」/ 存档分歧回退共用。
+    const fresh = (notice: string | null): PlayingPhase => {
+      const s = randomSeed()
+      const freshStory = createStory(program, { start, seed: s })
+      saveProgress(progKey, s, [])
+      return { kind: 'playing', story: freshStory, resolveAsset, program, start, progKey, seed: s, initialSeq: [], notice }
+    }
+
+    // 点击进入播放：有存档则保位重放恢复到上次暂停点；重放分歧（appliedCount < seq）则丢存档从头 + 提示。
+    const onStart = () => {
+      const saved = loadProgress(progKey)
+      if (saved === null) {
+        saveProgress(progKey, seed, []) // 首次：沿用 loaded 的 story + seed
+        setPhase({ kind: 'playing', story, resolveAsset, program, start, progKey, seed, initialSeq: [], notice: null })
+        return
+      }
+      const r = replayToStory(program, start, saved.seed, saved.seq, resolveAsset)
+      if (r.appliedCount < saved.seq.length) {
+        clearProgress(progKey)
+        setPhase(fresh('存档与当前故事不一致，已从头开始。'))
+        return
+      }
+      setPhase({
+        kind: 'playing', story: r.story, resolveAsset, program, start, progKey,
+        seed: saved.seed, initialState: r.state, initialSeq: saved.seq, notice: null,
+      })
+    }
     return <StartGate title={title} onStart={onStart} />
   }
 
-  return <PlayingView story={phase.story} resolveAsset={phase.resolveAsset} />
+  // playing —「重新开始」：清旧进度、以新 seed 从头开一局（复用当前 program/start）。
+  const onRestart = () => setPhase(freshFrom(phase))
+  return (
+    <>
+      {phase.notice && <div className="app-notice" role="status">{phase.notice}</div>}
+      <PlayingView
+        story={phase.story} resolveAsset={phase.resolveAsset}
+        initialState={phase.initialState} initialSeq={phase.initialSeq}
+        progressKey={phase.progKey} seed={phase.seed} onRestart={onRestart}
+      />
+    </>
+  )
+
+  // 「重新开始」：清存档、以新 seed 从头开一局（复用当前 program/start）。
+  function freshFrom(p: PlayingPhase): PlayingPhase {
+    const s = randomSeed()
+    const story = createStory(p.program, { start: p.start, seed: s })
+    saveProgress(p.progKey, s, [])
+    return { kind: 'playing', story, resolveAsset: p.resolveAsset, program: p.program, start: p.start, progKey: p.progKey, seed: s, initialSeq: [], notice: null }
+  }
 }

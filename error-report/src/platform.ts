@@ -28,14 +28,27 @@ export async function openLogDir(): Promise<void> {
 }
 
 /**
+ * 取文本末尾约 maxBytes 字节（按 UTF-8 计，而非 UTF-16 字符数），并对齐到行边界——
+ * 丢弃开头可能被截碎的不完整一行（含跨字节切断产生的替换字符）。纯函数。
+ */
+export function tailByBytes(text: string, maxBytes: number): string {
+  const bytes = new TextEncoder().encode(text)
+  if (bytes.length <= maxBytes) return text
+  const tail = new TextDecoder().decode(bytes.slice(bytes.length - maxBytes))
+  const nl = tail.indexOf('\n')
+  return nl >= 0 ? tail.slice(nl + 1) : tail
+}
+
+/**
  * 读应用日志文件的近期尾部（默认末 16KB），供「非崩溃问题」的反馈也带上上下文。
+ * 按 UTF-8 **字节**截断（旧实现按 UTF-16 字符数，中日文日志实际截得比 maxBytes 大得多）并对齐行边界。
  * 读不到（无文件 / 无权限 / 非 Tauri）返回 null，不抛。
  */
 export async function readRecentLog(maxBytes = 16384): Promise<string | null> {
   try {
     const path = await join(await appLogDir(), LOG_FILE)
     const text = await readTextFile(path)
-    return text.length > maxBytes ? text.slice(text.length - maxBytes) : text
+    return tailByBytes(text, maxBytes)
   } catch {
     return null
   }

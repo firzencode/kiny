@@ -12,4 +12,4 @@ export { InputBox } from './components/InputBox'
 export type { RevealBinding } from './components/StoryLog'
 // playback
 export { usePlayback } from './playback/usePlayback'
-export type { Playback, RevealState } from './playback/usePlayback'
+export type { Playback } from './playback/usePlayback'

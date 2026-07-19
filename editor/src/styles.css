@@ -36,6 +36,9 @@
   --accent-soft: color-mix(in srgb, var(--accent) 16%, transparent);
   --accent-line: color-mix(in srgb, var(--accent) 42%, transparent);
   --accent-fg: #1a1407;
+  /* 代码区选中背景：中性不透明 slate（非 accent 着色），与金/蓝/绿/粉/紫/橙各色系
+     token 都拉开对比，选中态文字清晰可读（T041） */
+  --sel-bg: #2f3648;
   /* 注释比 --text-faint 略亮一档：Windows 上中文注释（去斜体后）不再发暗看不清 */
   --s-comment: #7a8497;
   --s-node: #d2a24c;
@@ -67,6 +70,8 @@
   --accent-soft: color-mix(in srgb, var(--accent) 16%, transparent);
   --accent-line: color-mix(in srgb, var(--accent) 50%, transparent);
   --accent-fg: #fbf6ea;
+  /* 亮主题选中背景：中性浅 slate（非 accent 着色），见 dark 说明（T041） */
+  --sel-bg: #d0d6e4;
   --s-comment: #847d6a;
   --s-node: #97651e;
   --s-command: #2f6e8e;
@@ -845,6 +850,8 @@ button {
 .sidebar .outline { flex: 1; }
 .editor-col { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
 .editor-empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--text-faint); font-size: 13px; }
+/* AI 运行期编辑区只读提示条：明示暂时不可编辑，避免用户「敲了没反应」的困惑。 */
+.editor-readonly-banner { padding: 4px 12px; font-size: 12px; color: var(--s-string, #b58900); background: color-mix(in srgb, var(--s-string, #b58900) 12%, transparent); border-bottom: 1px solid color-mix(in srgb, var(--s-string, #b58900) 30%, transparent); }
 
 /* 编辑窗从 ?project 载入项目期间的过渡占位（模型 A：编辑窗永不停在无项目态）。 */
 .editor-booting { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--text-faint); font-size: 13px; }

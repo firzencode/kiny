@@ -1,4 +1,7 @@
 // 资源导入的纯逻辑（无 React / gateway 依赖，便于单测）。
+import { basename } from '../util/paths'
+// basename 收敛到 util/paths；此处 re-export 保持既有 `import { basename } from './importAssets'` 调用点不变。
+export { basename }
 
 /** 图片扩展名（小写，不含点）。 */
 export const IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg', 'bmp']
@@ -12,12 +15,6 @@ export function resolveImportDir(kind: 'file' | 'dir' | 'root', path: string): s
   if (kind === 'dir') return path
   if (kind === 'file') return path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : ''
   return '' // root
-}
-
-/** 取路径末段文件名（兼容 Windows 反斜杠绝对路径）。 */
-export function basename(p: string): string {
-  const norm = p.replace(/\\/g, '/').replace(/\/+$/, '')
-  return norm.slice(norm.lastIndexOf('/') + 1)
 }
 
 /** 目标相对路径 = 目录拼文件名（根目录则无前缀）。 */

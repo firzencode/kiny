@@ -233,6 +233,14 @@ describe('assertSafeRelPath 守卫', () => {
     const gw = createMemoryGateway({ files: { '/p/kiny.json': JSON.stringify({ name: 'P', version: '1', engine: '0.1.0', entry: 'main.kin' }), '/p/main.kin': '', '/danger/x.txt': 'X' } })
     await expect(gw.deletePath('/p', '../danger')).rejects.toThrow('非法路径')
   })
+  it('writeFile 拒绝 .. 穿越（AI 驱动的写不得逃出项目根）', async () => {
+    const gw = createMemoryGateway({ files: { '/p/kiny.json': JSON.stringify({ name: 'P', version: '1', engine: '0.1.0', entry: 'main.kin' }), '/p/main.kin': '' } })
+    await expect(gw.writeFile('/p', '../../evil.txt', 'pwned')).rejects.toThrow('非法路径')
+  })
+  it('writeManifest 拒绝 .. 穿越的 manifestFile', async () => {
+    const gw = createMemoryGateway({ files: { '/p/kiny.json': JSON.stringify({ name: 'P', version: '1', engine: '0.1.0', entry: 'main.kin' }), '/p/main.kin': '' } })
+    await expect(gw.writeManifest('/p', { name: 'P', version: '1', engine: '0.1.0', entry: 'main.kin' }, '../evil.kiw')).rejects.toThrow('非法路径')
+  })
 })
 
 describe('memoryGateway 导出相关', () => {

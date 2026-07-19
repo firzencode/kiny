@@ -137,6 +137,29 @@ describe('SettingsDialog', () => {
     await userEvent.click(screen.getByRole('tab', { name: 'AI' }))
     expect(screen.getByText(/运行中 · 端口 4321/)).toBeInTheDocument()
   })
+
+  it('AI tab：明文存储风险提示可见；「清除」清空 key 且保存回传空 key（T051）', async () => {
+    const onSave = vi.fn()
+    const aiConfig = { ...DEFAULT_AI_CONFIG, endpoint: 'https://api.x/v1', model: 'm', apiKey: 'sk-secret' }
+    render(<SettingsDialog {...base} aiConfig={aiConfig} onSave={onSave} />)
+    await userEvent.click(screen.getByRole('tab', { name: 'AI' }))
+    // 明文存储风险提示（区别于「不中转」隐私说明）
+    expect(screen.getByText('明文')).toBeInTheDocument()
+    const keyInput = screen.getByLabelText('API Key') as HTMLInputElement
+    expect(keyInput.value).toBe('sk-secret')
+    // 一键清除 → 字段清空
+    await userEvent.click(screen.getByRole('button', { name: '清除 API Key' }))
+    expect(keyInput.value).toBe('')
+    // 保存生效 → 回传空 key
+    await userEvent.click(screen.getByRole('button', { name: '保存' }))
+    expect(onSave).toHaveBeenCalledWith(DEFAULT_SETTINGS, 'dark', { ...aiConfig, apiKey: '' })
+  })
+
+  it('key 为空时「清除」按钮禁用', async () => {
+    render(<SettingsDialog {...base} />)
+    await userEvent.click(screen.getByRole('tab', { name: 'AI' }))
+    expect(screen.getByRole('button', { name: '清除 API Key' })).toBeDisabled()
+  })
 })
 
 describe('SettingsDialog · 多 tab（T030）', () => {

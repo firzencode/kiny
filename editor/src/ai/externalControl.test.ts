@@ -4,7 +4,7 @@ import { editorReducer, initialEditorState, type EditorState, type EditorAction 
 import { createMemoryGateway } from '../files/memoryGateway'
 import { createIncrementalValidator } from '../validate/validate'
 import type { ActionContext, PreviewPort, PreviewSnapshot } from './actions'
-import { handleExternalRequest, useExternalControl, type ExternalRequest } from './externalControl'
+import { handleExternalRequest, useExternalControl, withProjectGuard, type ExternalRequest } from './externalControl'
 
 // mock Tauri 运行时：useExternalControl 桥接测试用（handleExternalRequest 本身不依赖 Tauri）。
 type EventHandler = (e: { payload: ExternalRequest }) => void
@@ -36,6 +36,32 @@ async function makeCtx() {
   dispatch({ type: 'project_loaded', project: proj })
   return { ctx, getState: () => state }
 }
+
+describe('withProjectGuard（项目一致性兜底）', () => {
+  function guardHarness(initialDir: string | null) {
+    let projectDir = initialDir
+    const dispatched: EditorAction[] = []
+    const ctx = {
+      getState: () => ({ projectDir } as EditorState),
+      dispatch: (a: EditorAction) => { dispatched.push(a) },
+    } as unknown as ActionContext
+    return { guarded: withProjectGuard(ctx), setDir: (d: string | null) => { projectDir = d }, dispatched }
+  }
+
+  it('项目未变 → dispatch 照常落地', () => {
+    const h = guardHarness('/a')
+    h.guarded.dispatch({ type: 'set_active', path: 'x' })
+    expect(h.dispatched).toHaveLength(1)
+  })
+
+  it('处理期间项目已切换 → 丢弃该 dispatch，不落地（防跨项目写）', () => {
+    const h = guardHarness('/a') // 捕获 startDir='/a'
+    h.guarded.dispatch({ type: 'set_active', path: 'x' }) // 同项目 → 落
+    h.setDir('/b') // 模拟并发切到新项目
+    h.guarded.dispatch({ type: 'set_active', path: 'y' }) // 跨项目 → 丢
+    expect(h.dispatched.map((a) => (a as { path?: string }).path)).toEqual(['x'])
+  })
+})
 
 describe('handleExternalRequest', () => {
   it('GET /health 回项目摘要', async () => {

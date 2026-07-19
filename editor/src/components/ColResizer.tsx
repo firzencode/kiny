@@ -29,8 +29,7 @@ export function ColResizer({
       aria-orientation="vertical"
       aria-label={ariaLabel}
       onPointerDown={(e) => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const el = e.currentTarget as any
+        const el: HTMLElement = e.currentTarget
         el.setPointerCapture(e.pointerId)
         el.classList.add('dragging')
         onStart?.(e.clientX)

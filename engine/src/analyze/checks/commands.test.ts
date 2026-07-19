@@ -76,5 +76,12 @@ describe('checkCommands', () => {
       const src = ['~ let x = ""', '=== A ===', '@input(x)', '-> END'].join('\n')
       expect(diags(src).some((d) => d.code === 'unknown-command')).toBe(false)
     })
+    // A7：@input 目标为内置函数名会破坏该 Story 的内置函数。
+    it('@input 目标为内置函数名报 input-target-builtin', () => {
+      expect(run('=== A ===\n@input(random)\n-> END').map((d) => d.code)).toContain('input-target-builtin')
+    })
+    it('@input 目标为普通变量名不报 input-target-builtin', () => {
+      expect(run('=== A ===\n@input(name)\n-> END').map((d) => d.code)).not.toContain('input-target-builtin')
+    })
   })
 })

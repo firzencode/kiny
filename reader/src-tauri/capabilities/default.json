@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "reader 默认权限：读库目录、读用户选中的 .kip 字节（任意位置，等价旧 Rust 导入）、文件对话框",
+  "description": "reader 默认权限：读库目录、文件对话框、打开日志目录。.kip 导入由 Rust 侧 File::open 流式读，webview 不持有全盘文件读权限",
   "windows": ["main"],
   "permissions": [
     "core:default",
@@ -9,8 +9,7 @@
     "log:default",
     "opener:default",
     "clipboard-manager:allow-write-text",
-    { "identifier": "opener:allow-open-path", "allow": [{ "path": "$HOME/**" }] },
-    { "identifier": "fs:allow-read-file", "allow": [{ "path": "**" }] },
+    { "identifier": "opener:allow-open-path", "allow": [{ "path": "$APPLOG" }, { "path": "$APPLOG/**" }] },
     { "identifier": "fs:allow-read-text-file", "allow": [{ "path": "$APPDATA/**" }, { "path": "$APPLOG/**" }] },
     { "identifier": "fs:allow-read-dir", "allow": [{ "path": "$APPDATA/**" }] },
     { "identifier": "fs:allow-exists", "allow": [{ "path": "$APPDATA/**" }] }

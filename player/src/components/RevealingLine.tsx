@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback, type CSSProperties } from 'react'
 import type { RichSpan } from '@kiny/engine'
 import { RichText } from './RichText'
+import { spanStyle } from './spanStyle'
 
 /**
  * 打字机逐字揭示 + 每字淡入的一行正文。仅用于 StoryLog 的**最新一行**——已定型行走静态 RichText。
@@ -138,24 +139,10 @@ function toCells(spans: RichSpan[]): Cell[] {
       cells.push({ br: true }) // { kind: 'break' }
       continue
     }
-    const style = styleOf(s)
+    const style = spanStyle(s)
     for (const ch of Array.from(s.text)) cells.push({ ch, style })
   }
   return cells
-}
-
-/** RichSpan 富文本样式 → 内联 CSS（与 RichText 的标签渲染视觉等价）。 */
-function styleOf(s: Extract<RichSpan, { text: string }>): CSSProperties {
-  const style: CSSProperties = {}
-  if (s.bold) style.fontWeight = 700
-  if (s.italic) style.fontStyle = 'italic'
-  const deco: string[] = []
-  if (s.underline) deco.push('underline')
-  if (s.strike) deco.push('line-through')
-  if (deco.length) style.textDecoration = deco.join(' ')
-  if (s.color) style.color = s.color
-  if (s.size) style.fontSize = `${s.size}em`
-  return style
 }
 
 /** 系统「减弱动态效果」偏好（无障碍底线）。jsdom 无 matchMedia → 返回 false。 */

@@ -2,6 +2,8 @@ import type { ProjectFile, Knot, Stitch, ContentBlock } from '../parser/ast'
 import type { SymbolTable, DeclSite, LabelSite, ParamSite, FragmentInfo } from './types'
 import { collectFragments } from './fragments'
 import { analyzeJs } from './js-scope'
+import { sortByPath } from '../order'
+import { visitBlockTree } from '../parser/visit'
 
 /** 纯建表：填 Map、收集出现记录、跑唯一一遍 acorn，派生查询集。不产诊断。 */
 export function buildSymbolTable(files: ProjectFile[]): SymbolTable {
@@ -13,7 +15,7 @@ export function buildSymbolTable(files: ProjectFile[]): SymbolTable {
   const fragments: FragmentInfo[] = []
 
   // 文件名字典序，保证合并确定性（§7.6）。
-  const sorted = [...files].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+  const sorted = sortByPath(files)
 
   // 1) 节点 / 子节点 / 参数 / 标签 出现记录
   for (const file of sorted) {
@@ -34,10 +36,10 @@ export function buildSymbolTable(files: ProjectFile[]): SymbolTable {
     for (const frag of collectFragments(file)) {
       const r = analyzeJs(frag.code, frag.mode)
       if ('error' in r) {
-        fragments.push({ file: frag.file, line: frag.line, scope: frag.scope, references: [], syntaxError: r.error })
+        fragments.push({ file: frag.file, line: frag.line, scope: frag.scope, references: [], assigns: [], syntaxError: r.error })
         continue
       }
-      fragments.push({ file: frag.file, line: frag.line, scope: frag.scope, references: r.references, syntaxError: null })
+      fragments.push({ file: frag.file, line: frag.line, scope: frag.scope, references: r.references, assigns: r.assigns, syntaxError: null })
       for (const name of r.declares) declarations.push({ name, file: frag.file, line: frag.line, scope: frag.scope })
     }
   }
@@ -64,14 +66,9 @@ export function buildSymbolTable(files: ProjectFile[]): SymbolTable {
 }
 
 function collectLabels(block: ContentBlock, file: string, out: LabelSite[]): void {
-  for (const el of block) {
-    if (el.kind === 'choiceGroup') {
-      for (const c of el.choices) {
-        if (c.label !== null) out.push({ name: c.label, file, line: c.line })
-        collectLabels(c.body, file, out)
-      }
-    } else if (el.kind === 'conditional') {
-      for (const b of el.branches) collectLabels(b.body, file, out)
-    }
-  }
+  visitBlockTree<void>(block, undefined, {
+    choice: (c) => {
+      if (c.label !== null) out.push({ name: c.label, file, line: c.line })
+    },
+  })
 }

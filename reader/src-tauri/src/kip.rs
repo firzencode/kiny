@@ -102,29 +102,61 @@ pub(crate) fn locate_manifest(dir: &Path) -> Result<String, String> {
     Err("不是 Kiny 项目（缺少 .kiw）".to_string())
 }
 
+/// manifest 校验产物：四必需字段 + 三可选展示字段（去空白后非空才计入可选字段）。
+pub(crate) struct ManifestMeta {
+    pub name: String,
+    pub entry: String,
+    pub author: Option<String>,
+    pub cover: Option<String>,
+    pub description: Option<String>,
+}
+
+/// 取 manifest 字段的「去空白后非空字符串」值，否则 None（空串 / 非字符串 / 缺失都视作无）。
+fn manifest_str(v: &serde_json::Value, k: &str) -> Option<String> {
+    v.get(k).and_then(|x| x.as_str()).map(|s| s.to_string()).filter(|s| !s.trim().is_empty())
+}
+
+/// 校验 manifest 四必需字段非空（复刻 engine `validateManifest` 的结构校验，防两端规则漂移；
+/// 跨语言 fixture `engine/src/project/manifest-fixtures.json` 守此等价性）。
+/// 注：engine 版一次收齐全部缺失字段，本版报**首个**缺失即返回——两端「是否合法」判定须一致，
+/// 错误**消息**不要求逐字相同（fixture 只断言 ok/name 同判，错误只断言两端都 reject）。
+pub(crate) fn validate_manifest(v: &serde_json::Value, manifest_name: &str) -> Result<ManifestMeta, String> {
+    if !v.is_object() {
+        return Err(format!("{manifest_name} 不是 JSON 对象"));
+    }
+    let need = |k: &str| manifest_str(v, k).ok_or_else(|| format!("{manifest_name} 缺少或非法字段: {k}"));
+    // 按 name→version→engine→entry 顺序校验（首个缺失即返回）；version/engine 展示态用不到值，仅校验非空。
+    let name = need("name")?;
+    let _ = need("version")?;
+    let _ = need("engine")?;
+    let entry = need("entry")?;
+    Ok(ManifestMeta {
+        name,
+        entry,
+        author: manifest_str(v, "author"),
+        cover: manifest_str(v, "cover"),
+        description: manifest_str(v, "description"),
+    })
+}
+
 /// 定位 dir 根的 manifest（`<名>.kiw` 或旧 kiny.json）读之，校验四个必需字段非空 + entry 文件存在；返回展示元数据。
 /// 与 engine validateManifest 等价的结构校验（engine 的权威 analyze 留到打开时在前端跑）。
 pub(crate) fn read_meta(dir: &Path) -> Result<StoryEntry, String> {
     let manifest_name = locate_manifest(dir)?;
     let text = fs::read_to_string(dir.join(&manifest_name)).map_err(|_| format!("缺少 {manifest_name}"))?;
     let v: serde_json::Value = serde_json::from_str(&text).map_err(|_| format!("{manifest_name} 不是合法 JSON"))?;
-    let get = |k: &str| v.get(k).and_then(|x| x.as_str()).map(|x| x.to_string()).filter(|x| !x.trim().is_empty());
-    let need = |k: &str| get(k).filter(|x| !x.trim().is_empty()).ok_or_else(|| format!("kiny.json 缺少或非法字段: {k}"));
-    let name = need("name")?;
-    let _ = need("version")?;
-    let _ = need("engine")?;
-    let entry = need("entry")?;
-    if !dir.join(&entry).is_file() {
-        return Err(format!("入口文件不存在: {entry}"));
+    let meta = validate_manifest(&v, &manifest_name)?;
+    if !dir.join(&meta.entry).is_file() {
+        return Err(format!("入口文件不存在: {}", meta.entry));
     }
     let id = dir.file_name().and_then(|x| x.to_str()).unwrap_or("").to_string();
     Ok(StoryEntry {
         id,
         dir: dir.to_string_lossy().into_owned(),
-        name,
-        author: get("author"),
-        cover: get("cover"),
-        description: get("description"),
+        name: meta.name,
+        author: meta.author,
+        cover: meta.cover,
+        description: meta.description,
     })
 }
 
@@ -134,6 +166,25 @@ fn library_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let lib = base.join("library");
     fs::create_dir_all(&lib).map_err(|e| e.to_string())?;
     Ok(lib)
+}
+
+/// 清扫库目录里遗留的 `.tmp-*` 临时导入目录（启动期调）。正常导入成功会 rename 转正、
+/// 失败会 remove，故还残留的 `.tmp-*` 必是导入中途进程被 OS 杀死（Android LMK）留下的
+/// 半成品——磁盘垃圾且 list_library 因 `.` 前缀隐藏规则永远跳过它，只能在此清扫。
+pub(crate) fn clean_stale_tmp_dirs(lib: &Path) {
+    let Ok(rd) = fs::read_dir(lib) else { return };
+    for ent in rd {
+        let Ok(ent) = ent else { continue };
+        let p = ent.path();
+        let is_tmp = p
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(|n| n.starts_with(".tmp-"))
+            .unwrap_or(false);
+        if is_tmp && p.is_dir() {
+            let _ = fs::remove_dir_all(&p);
+        }
+    }
 }
 
 /// 导入核心（不依赖 AppHandle，可单测）：把 reader 里的 .kip 字节解压进 lib 下临时目录、
@@ -162,56 +213,29 @@ pub(crate) fn import_from_reader<R: std::io::Read + std::io::Seek>(lib: &Path, r
     }
 }
 
-/// 解码 encodeURIComponent 编码的 ASCII 串（%XX → 字节，再按 UTF-8 还原）。
-/// 仅用于把前端经 header 传来的原文件名解回，供诊断日志可读。
-fn percent_decode(s: &str) -> String {
-    let b = s.as_bytes();
-    let hex = |c: u8| match c {
-        b'0'..=b'9' => Some(c - b'0'),
-        b'a'..=b'f' => Some(c - b'a' + 10),
-        b'A'..=b'F' => Some(c - b'A' + 10),
-        _ => None,
-    };
-    let mut out = Vec::with_capacity(b.len());
-    let mut i = 0;
-    while i < b.len() {
-        if b[i] == b'%' && i + 2 < b.len() {
-            if let (Some(h), Some(l)) = (hex(b[i + 1]), hex(b[i + 2])) {
-                out.push(h * 16 + l);
-                i += 3;
-                continue;
-            }
-        }
-        out.push(b[i]);
-        i += 1;
-    }
-    String::from_utf8_lossy(&out).into_owned()
+/// 从磁盘路径流式导入 .kip（不依赖 AppHandle，可单测）：Rust 侧 `File::open` 直接读，
+/// 经 `BufReader` 喂 zip 解包——字节从磁盘流式进来，不在 JS 堆/IPC 上驻留整包（消大包内存峰值）。
+/// 桌面 picker/拖入拿到的是真实文件系统路径，故不再需要 webview 持有 `fs:allow-read-file` 权限。
+pub(crate) fn import_from_path(lib: &Path, path: &Path) -> Result<StoryEntry, String> {
+    let file = fs::File::open(path).map_err(|e| e.to_string())?;
+    import_from_reader(lib, std::io::BufReader::new(file))
 }
 
-/// 导入 .kip（跨平台统一字节入口）：原始字节经 request body 传入（桌面 picker/拖入读到的
-/// 文件字节、Android content:// URI 读到的字节都走这里），原文件名经 `x-kip-filename`
-/// header（encodeURIComponent 编码）传入仅作诊断。解压/校验/落盘逻辑与路径版等价。
+/// 导入 .kip（桌面文件系统路径入口）：前端把 picker/拖入拿到的路径传进来，Rust 侧流式读、
+/// 解压/校验/落盘逻辑与 Android URI 版共用 import_from_reader。Android content:// 走 import_kip_uri。
 #[tauri::command]
-pub fn import_kip_bytes(app: tauri::AppHandle, request: tauri::ipc::Request) -> Result<StoryEntry, String> {
-    let bytes = match request.body() {
-        tauri::ipc::InvokeBody::Raw(b) => b.as_slice(),
-        _ => return Err("import_kip_bytes 需要原始字节请求体".to_string()),
-    };
-    let filename = request
-        .headers()
-        .get("x-kip-filename")
-        .and_then(|v| v.to_str().ok())
-        .map(percent_decode)
-        .unwrap_or_default();
-    log::info!("import_kip_bytes · {filename} · {} bytes", bytes.len());
+pub fn import_kip_path(app: tauri::AppHandle, path: String) -> Result<StoryEntry, String> {
+    let p = Path::new(&path);
+    let name = p.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+    log::info!("import_kip_path · {name}");
     let lib = library_dir(&app)?;
-    import_from_reader(&lib, std::io::Cursor::new(bytes))
+    import_from_path(&lib, p)
 }
 
 /// 导入 .kip（Android `content://` 入口）：plugin-fs 的 readFile 在 Android 读不了 content://
 /// （Tauri #9083），故 picker 选中 / 分享·打开意图给的 content:// URI 走这里——经
 /// tauri-plugin-android-fs 用 ContentResolver 在原生侧读字节，再复用同一 import_from_reader。
-/// 桌面文件系统路径仍走 `import_kip_bytes`（前端 readFile 读字节），不经此入口。
+/// 桌面文件系统路径走 `import_kip_path`（前端只传路径、Rust 流式读），不经此入口。
 #[tauri::command]
 pub fn import_kip_uri(app: tauri::AppHandle, uri: String) -> Result<StoryEntry, String> {
     #[cfg(target_os = "android")]
@@ -348,6 +372,22 @@ pub(crate) fn read_save_in(dir: &Path, save_id: &str) -> Result<Option<serde_jso
     serde_json::from_str(&text).map(Some).map_err(|e| e.to_string())
 }
 
+/// 扫 saves 根，返回「含 auto 续读存档（auto.json）」的合法 storyId 集合。
+/// 供书架一次性探测哪些书可「继续」，替代前端逐本 read_save 的 N+1 IPC。
+pub(crate) fn stories_with_auto_save_in(root: &Path) -> Vec<String> {
+    let mut out = Vec::new();
+    let Ok(rd) = fs::read_dir(root) else { return out };
+    for ent in rd {
+        let Ok(ent) = ent else { continue };
+        let p = ent.path();
+        let Some(id) = p.file_name().and_then(|n| n.to_str()) else { continue };
+        if p.is_dir() && is_valid_story_id(id) && p.join("auto.json").is_file() {
+            out.push(id.to_string());
+        }
+    }
+    out
+}
+
 /// 删 dir/<saveId>.json（不存在视作成功）。
 pub(crate) fn delete_save_in(dir: &Path, save_id: &str) -> Result<(), String> {
     if !is_valid_save_id(save_id) {
@@ -373,6 +413,11 @@ pub fn write_save(app: tauri::AppHandle, story_id: String, save: serde_json::Val
 #[tauri::command]
 pub fn read_save(app: tauri::AppHandle, story_id: String, save_id: String) -> Result<Option<serde_json::Value>, String> {
     read_save_in(&saves_dir(&app, &story_id)?, &save_id)
+}
+
+#[tauri::command]
+pub fn stories_with_auto_save(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    Ok(stories_with_auto_save_in(&app_saves_root(&app)?))
 }
 
 #[tauri::command]
@@ -463,6 +508,16 @@ mod tests {
     }
 
     #[test]
+    fn bad_field_error_names_actual_manifest() {
+        // 字段错误文案须用真实 manifest 文件名（`<名>.kiw`），非硬编码「kiny.json」。
+        let dest = tmp().join("out");
+        extract_kip(&[("雾港之夜.kiw", r#"{"name":"","version":"1","engine":"0.1.0","entry":"main.kin"}"#), ("main.kin", "x")], &dest).unwrap();
+        let err = read_meta(&dest).unwrap_err();
+        assert!(err.contains("雾港之夜.kiw"), "错误文案应含真实 manifest 名，实际：{err}");
+        assert!(!err.contains("kiny.json"), "不应硬编码 kiny.json，实际：{err}");
+    }
+
+    #[test]
     fn missing_entry_field_rejected() {
         let dest = tmp().join("out");
         // kiny.json 无 entry 字段
@@ -522,13 +577,38 @@ mod tests {
     }
 
     #[test]
-    fn percent_decode_roundtrips_utf8() {
-        // encodeURIComponent("雾港之夜.kip") 的等价编码 → 解回原文。
-        assert_eq!(super::percent_decode("%E9%9B%BE%E6%B8%AF.kip"), "雾港.kip");
-        // 无编码原样返回；ASCII 文件名不变。
-        assert_eq!(super::percent_decode("story.kip"), "story.kip");
-        // 残缺的 % 序列不致 panic，原样保留。
-        assert_eq!(super::percent_decode("a%2"), "a%2");
+    fn import_from_path_streams_file_and_persists() {
+        // 桌面路径入口：把 .kip 字节先写进磁盘文件，再经 import_from_path 流式读入、解压落盘。
+        let lib = tmp();
+        let bytes = make_kip_bytes(&[("kiny.json", GOOD_MANIFEST), ("main.kin", "=== 开场\n你好")]);
+        let kip_path = tmp().join("雾港.kip");
+        fs::write(&kip_path, &bytes).unwrap();
+        let entry = super::import_from_path(&lib, &kip_path).unwrap();
+        assert_eq!(entry.name, "雾港之夜");
+        let dest = lib.join(&entry.id);
+        assert!(dest.join("kiny.json").is_file());
+        assert!(dest.join("main.kin").is_file());
+    }
+
+    #[test]
+    fn import_from_path_missing_file_errors_without_leftover() {
+        let lib = tmp();
+        let err = super::import_from_path(&lib, &lib.join("不存在.kip")).unwrap_err();
+        assert!(!err.is_empty());
+        // 文件打不开：连临时目录都没建，lib 保持空。
+        assert_eq!(fs::read_dir(&lib).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn clean_stale_tmp_dirs_removes_leftovers_keeps_stories() {
+        let lib = tmp();
+        // 残留的半成品临时目录 + 一个正常 story 目录。
+        fs::create_dir_all(lib.join(".tmp-deadbeef/sub")).unwrap();
+        fs::write(lib.join(".tmp-deadbeef/x.kin"), "x").unwrap();
+        fs::create_dir_all(lib.join("0a1b2c3d")).unwrap();
+        super::clean_stale_tmp_dirs(&lib);
+        assert!(!lib.join(".tmp-deadbeef").exists(), "应清掉遗留 .tmp-* 目录");
+        assert!(lib.join("0a1b2c3d").is_dir(), "正常 story 目录不受影响");
     }
 
     #[test]
@@ -634,5 +714,69 @@ mod tests {
             &dest, &limits,
         ).unwrap();
         assert!(dest.join("main.kin").is_file());
+    }
+
+    #[test]
+    fn stories_with_auto_save_scans_root() {
+        // Q3：书架批量探测——只返回「含 auto.json」的合法 storyId，忽略仅手动存档 / 空目录 / 非法名。
+        let root = tmp();
+        let sid_a = "0a1b2c3d4e5f60718293a4b5c6d7e8f9"; // 有 auto
+        let sid_b = "1111222233334444555566667777888"; // 仅手动
+        let sid_c = "aaaabbbbccccddddeeeeffff00001111"; // 空目录
+        fs::create_dir_all(root.join(sid_a)).unwrap();
+        fs::write(root.join(sid_a).join("auto.json"), "{}").unwrap();
+        fs::write(root.join(sid_a).join("deadbeef.json"), "{}").unwrap(); // 混一条手动，仍算有 auto
+        fs::create_dir_all(root.join(sid_b)).unwrap();
+        fs::write(root.join(sid_b).join("cafef00d.json"), "{}").unwrap();
+        fs::create_dir_all(root.join(sid_c)).unwrap();
+        fs::create_dir_all(root.join(".tmp-junk")).unwrap(); // 非法名目录（. 前缀）
+        fs::write(root.join("loose.txt"), "x").unwrap(); // 根下散文件
+        let mut got = super::stories_with_auto_save_in(&root);
+        got.sort();
+        assert_eq!(got, vec![sid_a.to_string()], "只应返回含 auto.json 的合法 story");
+    }
+
+    #[test]
+    fn stories_with_auto_save_missing_root_empty() {
+        // saves 根不存在 → 空集（不 panic）。
+        let root = tmp().join("nope");
+        assert!(super::stories_with_auto_save_in(&root).is_empty());
+    }
+
+    #[test]
+    fn manifest_cross_lang_fixture() {
+        use serde_json::Value;
+        // 与 engine（engine/src/project/manifest-fixtures.test.ts）读**同一份** fixture，两端对同批样本断言同判——
+        // 防 Rust locate_manifest/validate_manifest 与 engine findManifest/validateManifest 规则漂移。
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../engine/src/project/manifest-fixtures.json");
+        let text = fs::read_to_string(path).unwrap_or_else(|e| panic!("读 fixture 失败 {path}: {e}"));
+        let fx: Value = serde_json::from_str(&text).unwrap();
+
+        // locate 用例：建临时目录、touch 每个文件名、跑 locate_manifest 判定同 findManifest。
+        for c in fx["locate"].as_array().unwrap() {
+            let desc = c["desc"].as_str().unwrap();
+            let dir = tmp().join("loc");
+            fs::create_dir_all(&dir).unwrap();
+            for n in c["names"].as_array().unwrap() {
+                fs::write(dir.join(n.as_str().unwrap()), b"").unwrap();
+            }
+            let r = super::locate_manifest(&dir);
+            let want_ok = c["ok"].as_bool().unwrap();
+            assert_eq!(r.is_ok(), want_ok, "locate 同判失配：{desc} → {r:?}");
+            if want_ok {
+                assert_eq!(r.unwrap(), c["name"].as_str().unwrap(), "locate name 失配：{desc}");
+            }
+        }
+
+        // validate 用例：直接跑 validate_manifest（纯字段校验，不涉 entry 文件存在）判定同 validateManifest。
+        for c in fx["validate"].as_array().unwrap() {
+            let desc = c["desc"].as_str().unwrap();
+            let r = super::validate_manifest(&c["raw"], "kiny.json");
+            let want_ok = c["ok"].as_bool().unwrap();
+            assert_eq!(r.is_ok(), want_ok, "validate 同判失配：{desc}（ok 期望 {want_ok}）");
+            if want_ok {
+                assert_eq!(r.unwrap().name, c["name"].as_str().unwrap(), "validate name 失配：{desc}");
+            }
+        }
     }
 }

@@ -43,6 +43,8 @@ export interface FragmentInfo {
   line: number
   scope: Scope
   references: string[]
+  /** 自由标识符的赋值目标（`random = 5`）——供检测给内置函数赋值。 */
+  assigns: string[]
   syntaxError: string | null
 }
 

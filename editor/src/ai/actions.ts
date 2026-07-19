@@ -6,6 +6,7 @@ import type { ValidateResult } from '../validate/validate'
 import { parseNodes, type NodeInfo } from '../syntax/kin'
 import { tableOfContents, getSection, type SpecSection } from './kinSpec'
 import { SPEC_SECTIONS } from './kinSpecData'
+import { underPath, entryAfterRename } from '../util/paths'
 
 /**
  * 动作层（action layer · substrate，spec 2026-06-24-editor-ai-integration §2）。
@@ -133,11 +134,6 @@ function projectDir(ctx: ActionContext): string {
   return dir
 }
 
-/** 某路径是否即入口文件或其下后代（删除/改名时同步 manifest 入口用）。 */
-function underPath(p: string, base: string): boolean {
-  return p === base || p.startsWith(`${base}/`)
-}
-
 /**
  * 单一 dispatch 入口：执行一个动作层命令，返回该命令的类型化结果。
  * 非法参数（缺文件 / 越界 / 未打开项目等）抛 Error；调用方（如 agent 循环）按需包成 tool-result。
@@ -182,9 +178,11 @@ export async function runCommand<C extends ActionCommand>(
       await ctx.gateway.renamePath(dir, cmd.from, cmd.to)
       ctx.dispatch({ type: 'path_renamed', from: cmd.from, to: cmd.to })
       // 入口文件被改名/移动 → 同步 manifest 的 entry
-      if (before.manifest && before.manifestFile && before.entry && underPath(before.entry, cmd.from)) {
-        const newEntry = before.entry === cmd.from ? cmd.to : cmd.to + before.entry.slice(cmd.from.length)
-        await ctx.gateway.writeManifest(dir, { ...before.manifest, entry: newEntry }, before.manifestFile)
+      if (before.manifest && before.manifestFile && before.entry) {
+        const newEntry = entryAfterRename(before.entry, cmd.from, cmd.to)
+        if (newEntry !== null) {
+          await ctx.gateway.writeManifest(dir, { ...before.manifest, entry: newEntry }, before.manifestFile)
+        }
       }
       return { from: cmd.from, to: cmd.to } as ResultFor<C['name']>
     }

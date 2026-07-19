@@ -1,0 +1,19 @@
+{
+  "_doc": "跨语言 manifest 契约 fixture：engine（findManifest/validateManifest）与 reader Rust（locate_manifest/validate_manifest）两端测试读同一批样本、断言同判，防两端校验规则漂移。locate/ok 断言 name 一致；validate/ok 断言 name 一致；错误用例只断言两端都 reject（Rust 报首个缺失字段、engine 一次报全，错误消息不可逐字比）。改动任一端规则时先在此加/改样本。",
+  "locate": [
+    { "desc": "恰一个 .kiw → 选它", "names": ["雾港之夜.kiw", "main.kin"], "ok": true, "name": "雾港之夜.kiw" },
+    { "desc": "零 .kiw 有 kiny.json → 兼容 fallback", "names": ["kiny.json", "main.kin"], "ok": true, "name": "kiny.json" },
+    { "desc": ".kiw 优先于并存的 kiny.json", "names": ["雾港之夜.kiw", "kiny.json", "main.kin"], "ok": true, "name": "雾港之夜.kiw" },
+    { "desc": "多个 .kiw → 拒", "names": ["a.kiw", "b.kiw", "main.kin"], "ok": false },
+    { "desc": "无 manifest（无 .kiw 无 kiny.json）→ 拒", "names": ["main.kin", "notes.txt"], "ok": false }
+  ],
+  "validate": [
+    { "desc": "四必需字段齐全 + 可选字段 → 合法", "raw": { "name": "雾港之夜", "version": "1.0.0", "engine": "0.1.0", "entry": "main.kin", "author": "佚名" }, "ok": true, "name": "雾港之夜" },
+    { "desc": "缺 name → 拒", "raw": { "version": "1", "engine": "0.1.0", "entry": "main.kin" }, "ok": false },
+    { "desc": "version 全空白 → 拒", "raw": { "name": "x", "version": "   ", "engine": "0.1.0", "entry": "main.kin" }, "ok": false },
+    { "desc": "缺 entry → 拒", "raw": { "name": "x", "version": "1", "engine": "0.1.0" }, "ok": false },
+    { "desc": "多字段缺失 → 拒", "raw": { "name": "x" }, "ok": false },
+    { "desc": "非对象（数组）→ 拒", "raw": ["nope"], "ok": false },
+    { "desc": "name 非字符串 → 拒", "raw": { "name": 123, "version": "1", "engine": "0.1.0", "entry": "main.kin" }, "ok": false }
+  ]
+}

@@ -2,7 +2,7 @@ import { findManifest } from '@kiny/engine'
 import type { ResolveAsset } from '@kiny/player'
 import {
   type FileGateway, type LoadedProject, type Manifest, type ProjectFileEntry, type WindowMode,
-  STARTER_MAIN_KIN, STARTER_NEW_FILE, normalizeKinName, starterManifest, projectFileName, projectFolderName, assertSafeRelPath,
+  STARTER_MAIN_KIN, STARTER_NEW_FILE, normalizeKinName, starterManifest, projectFileName, projectFolderName, assertSafeRelPath, assertRenameSafe,
 } from './gateway'
 import { type DraftStore, emptyDraftStore } from '../state/drafts'
 import type { ChatStore } from '../state/chatStore'
@@ -121,7 +121,7 @@ export function createMemoryGateway(init: MemoryGatewayInit): FileGateway {
       files.set(abs, STARTER_NEW_FILE)
       return { path: rel, isKin: true, source: STARTER_NEW_FILE }
     },
-    writeFile: async (dir, rel, text) => { files.set(`${dir}/${rel}`, text) },
+    writeFile: async (dir, rel, text) => { assertSafeRelPath(rel); files.set(`${dir}/${rel}`, text) },
     pickImportFiles: async () => init.importPicks ?? null,
     importAsset: async (dir, destRel, sourceAbsPath) => {
       assertSafeRelPath(destRel)
@@ -135,10 +135,8 @@ export function createMemoryGateway(init: MemoryGatewayInit): FileGateway {
       if (!list.includes(relDir)) emptyDirs.set(dir, [...list, relDir])
     },
     renamePath: async (dir, from, to) => {
-      assertSafeRelPath(from)
-      assertSafeRelPath(to)
+      assertRenameSafe(from, to)
       const absFrom = `${dir}/${from}`, absTo = `${dir}/${to}`
-      if (absTo === absFrom || absTo.startsWith(`${absFrom}/`)) throw new Error(`不能移入自身: ${to}`)
       if (files.has(absTo) || [...files.keys()].some((k) => k.startsWith(`${absTo}/`))) throw new Error(`目标已存在: ${to}`)
       if (files.has(absFrom)) { files.set(absTo, files.get(absFrom)!); files.delete(absFrom); return }
       // 目录：前缀迁移文件 + emptyDirs
@@ -158,7 +156,7 @@ export function createMemoryGateway(init: MemoryGatewayInit): FileGateway {
       const list = emptyDirs.get(dir) ?? []
       emptyDirs.set(dir, list.filter((d) => d !== relPath && !d.startsWith(`${relPath}/`)))
     },
-    writeManifest: async (dir, manifest, manifestFile) => { files.set(`${dir}/${manifestFile}`, JSON.stringify(manifest, null, 2)) },
+    writeManifest: async (dir, manifest, manifestFile) => { assertSafeRelPath(manifestFile); files.set(`${dir}/${manifestFile}`, JSON.stringify(manifest, null, 2)) },
     pickSaveKipPath: async () => init.saveKipPath ?? null,
     exportKip: async (dir, dest) => {
       if (!findManifest(rootNames(dir)).ok) throw new Error(`缺少 manifest: ${dir}`)

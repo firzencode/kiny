@@ -41,6 +41,23 @@ describe('snapshot 指纹', () => {
   })
 })
 
+describe('snapshot 索引按 program 缓存（C1）', () => {
+  it('同一 program 重复调 → 返回同一引用（命中缓存，不重建）', () => {
+    const program = prog(['=== A ===', '* x -> B', '* y -> B', '=== B ===', '-> END'].join('\n'))
+    // 引用相等即证明第二次直接返回了缓存对象、未重新构建。
+    expect(buildBlockPaths(program)).toBe(buildBlockPaths(program))
+    expect(enumerateChoices(program)).toBe(enumerateChoices(program))
+  })
+
+  it('不同 program 各自独立缓存（不串味）', () => {
+    const p1 = prog(['=== A ===', '* x -> END'].join('\n'))
+    const p2 = prog(['=== A ===', '* x -> END', '* y -> END'].join('\n'))
+    expect(buildBlockPaths(p1)).not.toBe(buildBlockPaths(p2))
+    expect(enumerateChoices(p1).list.length).toBe(1)
+    expect(enumerateChoices(p2).list.length).toBe(2)
+  })
+})
+
 describe('snapshot 栈帧 block 路径', () => {
   it('根帧 block（knot.body）路径 steps 为空，往返取回同一引用', () => {
     const program = prog(['=== A ===', '文本', '-> END'].join('\n'))

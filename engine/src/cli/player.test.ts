@@ -53,4 +53,17 @@ describe('cli play 循环', () => {
     const r = await play(storyFromEntry(CHOICE_SRC), term)
     expect(r).toBe('quit')
   })
+  it('@input：读一行文本回写变量后继续揭示（不再静默截断为 ended）', async () => {
+    const term = fakeTerm(['勇者'])
+    const r = await play(storyFromEntry('~ let name = "旅人"\n@input(name, "你的名字")\n你好，{name}。\n-> END'), term)
+    expect(r).toBe('ended')
+    expect(term.out).toContain('你好，勇者。')
+    expect(term.out).toContain('—— 故事结束 ——')
+  })
+  it('@input 空提交：保留变量声明的默认值', async () => {
+    const term = fakeTerm([''])
+    const r = await play(storyFromEntry('~ let name = "旅人"\n@input(name)\n你好，{name}。\n-> END'), term)
+    expect(r).toBe('ended')
+    expect(term.out).toContain('你好，旅人。')
+  })
 })

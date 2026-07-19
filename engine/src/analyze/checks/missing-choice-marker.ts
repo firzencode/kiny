@@ -1,5 +1,6 @@
-import type { ProjectFile, ContentBlock, ContentElement, TextLine } from '../../parser/ast'
+import type { ProjectFile, ContentBlock, TextLine } from '../../parser/ast'
 import type { Diagnostic } from '../types'
+import { visitBlockTree } from '../../parser/visit'
 
 /** 整行就是一个方括号片段，如「[向右走]」。 */
 const BRACKET_LINE = /^\[[^\]]*\]$/
@@ -22,7 +23,8 @@ function plainOf(line: TextLine): string | null {
 export function checkMissingChoiceMarker(files: ProjectFile[]): Diagnostic[] {
   const out: Diagnostic[] = []
 
-  const scan = (block: ContentBlock, file: string): void => {
+  // 单块内扫相邻「方括号正文行 + 无条件 divert」对；嵌套正文（选项体 / @if 分支体）的下钻由 visitBlockTree 负责。
+  const scanBlock = (block: ContentBlock, file: string): void => {
     for (let i = 0; i < block.length - 1; i++) {
       const el = block[i]!
       const next = block[i + 1]!
@@ -40,17 +42,10 @@ export function checkMissingChoiceMarker(files: ProjectFile[]): Diagnostic[] {
         }
       }
     }
-    for (const el of block) recurse(el, file)
   }
 
-  // 递归进嵌套正文（选项体 / @if 分支体），漏标记可能藏在任意层。
-  const recurse = (el: ContentElement, file: string): void => {
-    if (el.kind === 'choiceGroup') {
-      for (const c of el.choices) scan(c.body, file)
-    } else if (el.kind === 'conditional') {
-      for (const b of el.branches) scan(b.body, file)
-    }
-  }
+  const scan = (block: ContentBlock, file: string): void =>
+    visitBlockTree<string>(block, file, { block: (b, f) => scanBlock(b, f) })
 
   for (const file of files) {
     scan(file.preamble, file.path)

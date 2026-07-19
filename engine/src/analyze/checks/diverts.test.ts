@@ -49,4 +49,27 @@ describe('checkDiverts', () => {
     const ds = run(src)
     expect(ds.map((d) => d.code)).not.toContain('param-knot-stitch-entry')
   })
+
+  // A5：顶层开场（首个 === 前的 preamble）里的坏跳转旧实现完全跳过、零诊断。
+  it('A5：开场（preamble）里的坏跳转目标报 unknown-divert-target', () => {
+    const ds = run('开场白\n-> 不存在的节点\n=== A ===\n-> END')
+    expect(ds.map((d) => d.code)).toContain('unknown-divert-target')
+  })
+  it('A5：开场里选项结果跳转的坏目标也报', () => {
+    const ds = run('开场白\n* [选] -> 没有这个\n=== A ===\n-> END')
+    expect(ds.map((d) => d.code)).toContain('unknown-divert-target')
+  })
+  it('A5：开场里跳到存在的节点不报', () => {
+    expect(run('开场白\n-> A\n=== A ===\n-> END')).toEqual([])
+  })
+
+  // A10：子节点（stitch）不接受实参——实参被运行期静默吞掉、连副作用都不求值。
+  it('A10：跳子节点带实参报 stitch-no-args', () => {
+    const src = ['=== A ===', '-> B.s(1, 2)', '=== B ===', '= s', '-> END'].join('\n')
+    expect(run(src).map((d) => d.code)).toContain('stitch-no-args')
+  })
+  it('A10：跳子节点无实参不报', () => {
+    const src = ['=== A ===', '-> B.s', '=== B ===', '= s', '-> END'].join('\n')
+    expect(run(src)).toEqual([])
+  })
 })

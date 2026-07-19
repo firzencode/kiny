@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Story, ValidatedProgram } from '@kiny/engine'
 import { Player, usePlayback, initialState, type PlayState, type ResolveAsset } from '@kiny/player'
-import { listSaves, writeSave, deleteSave, genSaveId } from '../saves/store'
+import { listSaves, writeSaveSerial, deleteSave, genSaveId } from '../saves/store'
 import { captureSave, restoreSave } from '../saves/snapshot'
 import { AUTO_SAVE_ID, type SaveRecord } from '../saves/types'
 
@@ -52,15 +52,24 @@ export function ReadingView({
     listSaves(storyId).then(setSaves).catch(() => {})
   }, [storyId])
 
-  // 写一条存档（捕获当前 story + play）。serialize 仅在稳定边界可用，非边界抛错 → 吞掉，下个稳定点再存。
+  // 写一条存档（捕获当前 story + play），返回是否成功——供 onSaveManual 据实反馈（B5：不再无条件
+  // 谎报「已存档」）。serialize 仅在稳定边界可用，非边界抛错 / writeSave IPC 失败均返回 false。
+  // 写走 per-story 串行队列（B8：防快速连点时并发写乱序）。
   const putSave = useCallback(
-    (st: PlayState, kind: SaveRecord['kind'], id: string) => {
-      if (!storyId || st.error) return
+    async (st: PlayState, kind: SaveRecord['kind'], id: string): Promise<boolean> => {
+      if (!storyId || st.error) return false
+      let save: SaveRecord
       try {
-        const save = captureSave(driven.story, st, kind, id, Date.now())
-        void writeSave(storyId, save).then(refreshSaves).catch(() => {})
+        save = captureSave(driven.story, st, kind, id, Date.now())
       } catch {
-        /* 非稳定边界等：忽略 */
+        return false // 非稳定边界：serialize 抛错
+      }
+      try {
+        await writeSaveSerial(storyId, save)
+        refreshSaves()
+        return true
+      } catch {
+        return false // IPC 写盘失败
       }
     },
     [storyId, refreshSaves, driven.story],
@@ -73,7 +82,7 @@ export function ReadingView({
     const atPause = state.choices.length > 0 || state.input !== null || state.ended
     if (atPause && pendingAuto.current) {
       pendingAuto.current = false
-      putSave(state, 'auto', AUTO_SAVE_ID)
+      void putSave(state, 'auto', AUTO_SAVE_ID) // auto 静默写（失败无需打扰读者，串行队列保序）
     }
   }, [state, putSave])
 
@@ -90,10 +99,10 @@ export function ReadingView({
     pb.onSubmitInput(text)
   }
 
-  const onSaveManual = () => {
+  const onSaveManual = async () => {
     if (!storyId || state.error) return
-    putSave(state, 'manual', genSaveId())
-    showToast('已存档')
+    const ok = await putSave(state, 'manual', genSaveId())
+    showToast(ok ? '已存档' : '存档失败，请稍后重试') // B5：据实反馈，写失败不谎报成功
   }
 
   const onLoad = (save: SaveRecord) => {

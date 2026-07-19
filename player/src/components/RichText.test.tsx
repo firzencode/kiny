@@ -3,21 +3,18 @@ import { render } from '@testing-library/react'
 import { RichText } from './RichText'
 
 describe('RichText', () => {
-  it('bold/italic/underline/strike 渲染为 strong/em/u/s', () => {
-    const { container } = render(
-      <RichText
-        spans={[
-          { text: '粗', bold: true },
-          { text: '斜', italic: true },
-          { text: '下', underline: true },
-          { text: '删', strike: true },
-        ]}
-      />,
-    )
-    expect(container.querySelector('strong')?.textContent).toBe('粗')
-    expect(container.querySelector('em')?.textContent).toBe('斜')
-    expect(container.querySelector('u')?.textContent).toBe('下')
-    expect(container.querySelector('s')?.textContent).toBe('删')
+  it('bold/italic/underline/strike 落内联样式 span（与打字中 RevealingLine 同源，Q2）', () => {
+    const bold = render(<RichText spans={[{ text: '粗', bold: true }]} />).container.querySelector('span')!
+    expect(bold.style.fontWeight).toBe('700')
+    const italic = render(<RichText spans={[{ text: '斜', italic: true }]} />).container.querySelector('span')!
+    expect(italic.style.fontStyle).toBe('italic')
+    const under = render(<RichText spans={[{ text: '下', underline: true }]} />).container.querySelector('span')!
+    expect(under.style.textDecoration).toContain('underline')
+    const strike = render(<RichText spans={[{ text: '删', strike: true }]} />).container.querySelector('span')!
+    expect(strike.style.textDecoration).toContain('line-through')
+    // 不再有语义标签（宿主对 strong/em 的定制不会在「打字→定格」瞬间闪变）。
+    expect(bold.tagName).toBe('SPAN')
+    expect(render(<RichText spans={[{ text: '粗', bold: true }]} />).container.querySelector('strong')).toBeNull()
   })
 
   it('color 落 style.color，size 落 fontSize 的 em', () => {

@@ -4,12 +4,6 @@ import { initialState, step, chooseStep, submitInputStep, type PlayState } from 
 import type { ResolveAsset } from '../host/commands'
 import type { RevealBinding } from '../components/StoryLog'
 
-/** 最新一行的揭示态（供调试 / 测试）。 */
-export interface RevealState {
-  /** 最新一行是否正在打字（未揭示完）。 */
-  revealing: boolean
-}
-
 export interface Playback {
   state: PlayState
   /** 本次推进新触发的一次性音效（瞬时）。 */
@@ -95,9 +89,15 @@ export function usePlayback(story: Story, resolve: ResolveAsset, initial: PlaySt
   const onChoose = useCallback(
     (pos: number) => {
       const cur = stateRef.current
-      const idx = cur.choices[pos]?.index
-      if (idx == null) return
-      const r = chooseStep(storyRef.current, cur, idx, resolve)
+      const view = cur.choices[pos]
+      if (view == null) return
+      // Q7 看门狗：ChoiceView.index 恒等于其在 choices 里的位置（engine 的 currentChoices 不过滤/重排）。
+      // onChoose、Player 选项渲染、reader/web-reader 的位置回传三处都隐式假定 pos===index；若将来
+      // engine 引入条件过滤使二者背离，这里立刻炸响，而非静默把「点第 pos 个」错映到别的分支。
+      if (view.index !== pos) {
+        throw new Error(`ChoiceView.index(${view.index}) 与显示位置(${pos})不一致：播放层多处假定二者相等`)
+      }
+      const r = chooseStep(storyRef.current, cur, view.index, resolve)
       commit(r.state, r.sfx)
     },
     [resolve, commit],

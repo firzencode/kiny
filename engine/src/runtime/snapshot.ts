@@ -1,6 +1,8 @@
 import type { Choice, ContentBlock, Knot } from '../parser/ast'
 import type { ValidatedProgram } from '../analyze/types'
 import { openingKnotName } from '../analyze'
+import { sortByPath } from '../order'
+import { visitBlockTree, type BlockVisitor } from '../parser/visit'
 import type { Frame } from './frames'
 
 /**
@@ -9,7 +11,7 @@ import type { Frame } from './frames'
  * 指纹都须经此辅助一并覆盖——否则顶层开场（首个 `===` 前）的选项点 serialize 会「栈帧 block 无路径」。
  */
 function orderedKnots(program: ValidatedProgram): Knot[] {
-  const files = [...program.files].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+  const files = sortByPath(program.files)
   const out: Knot[] = []
   for (const f of files) {
     const opening = program.knots.get(openingKnotName(f.path))
@@ -56,27 +58,30 @@ export type BlockPath = {
   steps: { via: number; pick: { choice: number } | { branch: number } }[]
 }
 
-/** 给 program 里每个 block（knot/stitch/choice/branch 的 body）建立 引用 → 路径 映射。 */
+// program 是 analyze 产出的不可变结构，故 buildBlockPaths / enumerateChoices / fingerprint 的结果
+// 只随 program 身份变化。按 program 引用 WeakMap 缓存（program 释放即随之 GC，无泄漏），把 reader
+// 每回合自动存档的 O(全书) 重建降为 O(1) 摊销（C1）。返回值按**只读**契约使用（现有调用方仅做查表 /
+// 比较，不改动返回的 Map/数组）——如需修改务必先拷贝，否则会污染缓存。
+const blockPathsCache = new WeakMap<ValidatedProgram, Map<ContentBlock, BlockPath>>()
+const choicesCache = new WeakMap<ValidatedProgram, { list: Choice[]; index: Map<Choice, number> }>()
+const fingerprintCache = new WeakMap<ValidatedProgram, string>()
+
+/** 给 program 里每个 block（knot/stitch/choice/branch 的 body）建立 引用 → 路径 映射（按 program 缓存）。 */
 export function buildBlockPaths(program: ValidatedProgram): Map<ContentBlock, BlockPath> {
+  const cached = blockPathsCache.get(program)
+  if (cached) return cached
   const map = new Map<ContentBlock, BlockPath>()
-  const visit = (block: ContentBlock, path: BlockPath): void => {
-    map.set(block, path)
-    block.forEach((el, via) => {
-      if (el.kind === 'choiceGroup') {
-        el.choices.forEach((c, choice) => {
-          visit(c.body, { root: path.root, steps: [...path.steps, { via, pick: { choice } }] })
-        })
-      } else if (el.kind === 'conditional') {
-        el.branches.forEach((b, branch) => {
-          visit(b.body, { root: path.root, steps: [...path.steps, { via, pick: { branch } }] })
-        })
-      }
-    })
+  // 语境 = 到当前 block 的路径；下钻 choice/branch 时在 steps 尾追一步（via = 所在元素下标）。
+  const pather: BlockVisitor<BlockPath> = {
+    block: (block, path) => map.set(block, path),
+    choice: (_c, via, index, path) => ({ root: path.root, steps: [...path.steps, { via, pick: { choice: index } }] }),
+    branch: (_b, via, index, path) => ({ root: path.root, steps: [...path.steps, { via, pick: { branch: index } }] }),
   }
   for (const k of orderedKnots(program)) {
-    visit(k.body, { root: { knot: k.name }, steps: [] })
-    for (const s of k.stitches) visit(s.body, { root: { knot: k.name, stitch: s.name }, steps: [] })
+    visitBlockTree(k.body, { root: { knot: k.name }, steps: [] }, pather)
+    for (const s of k.stitches) visitBlockTree(s.body, { root: { knot: k.name, stitch: s.name }, steps: [] }, pather)
   }
+  blockPathsCache.set(program, map)
   return map
 }
 
@@ -119,26 +124,20 @@ export function enumerateChoices(program: ValidatedProgram): {
   list: Choice[]
   index: Map<Choice, number>
 } {
+  const cached = choicesCache.get(program)
+  if (cached) return cached
   const list: Choice[] = []
-  const walk = (block: ContentBlock): void => {
-    for (const el of block) {
-      if (el.kind === 'choiceGroup') {
-        for (const c of el.choices) {
-          list.push(c)
-          walk(c.body)
-        }
-      } else if (el.kind === 'conditional') {
-        for (const b of el.branches) walk(b.body)
-      }
-    }
-  }
+  // choice 钩子的触发顺序即枚举序：每个 choice 先入表、再下钻其 body（深度优先），与旧手写递归逐字一致。
+  const collector: BlockVisitor<null> = { choice: (c) => (list.push(c), null) }
   for (const k of orderedKnots(program)) {
-    walk(k.body)
-    for (const s of k.stitches) walk(s.body)
+    visitBlockTree(k.body, null, collector)
+    for (const s of k.stitches) visitBlockTree(s.body, null, collector)
   }
   const index = new Map<Choice, number>()
   list.forEach((c, i) => index.set(c, i))
-  return { list, index }
+  const result = { list, index }
+  choicesCache.set(program, result)
+  return result
 }
 
 /** djb2 字符串 hash，输出十六进制（无符号 32 位）。 */
@@ -153,8 +152,10 @@ function djb2(s: string): string {
  * 同一 program → 同一指纹；增删 choice / 改结构 → 指纹变化。
  */
 export function fingerprint(program: ValidatedProgram): string {
+  const cached = fingerprintCache.get(program)
+  if (cached !== undefined) return cached
   const parts: string[] = []
-  const files = [...program.files].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+  const files = sortByPath(program.files)
   for (const f of files) {
     parts.push(`F:${f.path}`)
     for (const k of f.knots) {
@@ -165,5 +166,7 @@ export function fingerprint(program: ValidatedProgram): string {
   for (const c of enumerateChoices(program).list) {
     parts.push(`C:${c.line}:${c.sticky ? 1 : 0}${c.fallback ? 1 : 0}:${c.label ?? ''}`)
   }
-  return djb2(parts.join(''))
+  const fp = djb2(parts.join('\u0001'))
+  fingerprintCache.set(program, fp)
+  return fp
 }

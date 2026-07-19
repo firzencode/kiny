@@ -41,23 +41,32 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         // Android content:// 字节读取（桌面为 no-op，命令在非 android 返回 NOT_ANDROID）。
         .plugin(tauri_plugin_android_fs::init())
-        .setup(|_app| {
+        .setup(|app| {
+            use tauri::Manager;
             // 启动行：定位版本 / 平台；Rust 端 panic 也经 log 插件落同一文件。
             log::info!(
                 "app started · Kiny 阅读器 v{} · {}",
                 env!("CARGO_PKG_VERSION"),
                 std::env::consts::OS
             );
+            // 清扫上次导入被 OS 杀死（Android LMK）残留的 .tmp-* 半成品目录。
+            if let Ok(base) = app.path().app_data_dir() {
+                let lib = base.join("library");
+                if lib.is_dir() {
+                    kip::clean_stale_tmp_dirs(&lib);
+                }
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            kip::import_kip_bytes,
+            kip::import_kip_path,
             kip::import_kip_uri,
             kip::list_library,
             kip::delete_story,
             kip::list_saves,
             kip::write_save,
             kip::read_save,
+            kip::stories_with_auto_save,
             kip::delete_save,
             opened_urls
         ])

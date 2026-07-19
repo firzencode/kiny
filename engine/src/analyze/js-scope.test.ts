@@ -83,3 +83,40 @@ describe('analyzeJs —— 语法错误', () => {
     expect('error' in r).toBe(true)
   })
 })
+
+describe('analyzeJs —— B1 作用域修复', () => {
+  it('参数默认值可引用前序参数（不误判自由引用）', () => {
+    const r = ok(analyzeJs('let f = (a, b = a) => b', 'stmt'))
+    expect(r.references).not.toContain('a')
+    expect(r.declares).toContain('f')
+  })
+  it('参数默认值引用后序参数仍算自由（TDZ，正确报出）', () => {
+    const r = ok(analyzeJs('let f = (a = b, b) => a', 'stmt'))
+    expect(r.references).toContain('b')
+  })
+  it('var 提升到函数作用域：块内声明、块外可见', () => {
+    const r = ok(analyzeJs('function g(){ if(1){ var x = 1 } return x }', 'stmt'))
+    expect(r.references).not.toContain('x')
+    expect(r.declares).toContain('g')
+  })
+  it('顶层 var 进 declares、嵌套 var 不进（导出语义与 topDeclares 一致）', () => {
+    const r = ok(analyzeJs('var y = 1; if(1){ var z = 2 }', 'stmt'))
+    expect(r.declares).toContain('y')
+    expect(r.declares).not.toContain('z')
+  })
+})
+
+describe('analyzeJs —— A7 赋值目标', () => {
+  it('自由标识符赋值目标进 assigns', () => {
+    expect(ok(analyzeJs('random = 5', 'stmt')).assigns).toContain('random')
+  })
+  it('自增/自减也算赋值', () => {
+    expect(ok(analyzeJs('random++', 'stmt')).assigns).toContain('random')
+  })
+  it('局部变量赋值不进 assigns', () => {
+    expect(ok(analyzeJs('let x = 1; x = 2', 'stmt')).assigns).not.toContain('x')
+  })
+  it('成员赋值不算裸标识符赋值', () => {
+    expect(ok(analyzeJs('obj.random = 5', 'stmt')).assigns).not.toContain('random')
+  })
+})

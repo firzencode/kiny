@@ -258,8 +258,12 @@ export function SettingsDialog({ open, settings, theme, aiConfig, controlInfo, o
                     <input className="settings-input" aria-label="API Key" type={showKey ? 'text' : 'password'}
                       value={draftAi.apiKey} onChange={(e) => setDraftAi({ ...draftAi, apiKey: e.target.value })} />
                     <button className="key-toggle" type="button" onClick={() => setShowKey((v) => !v)}>{showKey ? '隐藏' : '显示'}</button>
+                    <button className="key-toggle" type="button" aria-label="清除 API Key"
+                      disabled={draftAi.apiKey === ''}
+                      onClick={() => setDraftAi({ ...draftAi, apiKey: '' })}>清除</button>
                   </div>
                 </div>
+                <div className="settings-help">⚠ API key 以<b>明文</b>存于本机浏览器存储（localStorage），并未加密。共享 / 公用设备上用完请点「清除」（清空后保存生效）；敏感环境建议改用你信任的私人设备。</div>
                 <div className="settings-trust">
                   <span className="lock">🔒</span>
                   <div>API key 与每一次请求都只在本机，<b>直连你配置的 endpoint</b>，不经 Kiny 任何服务器中转或托管。你用的是自己的 key、自己的额度。</div>

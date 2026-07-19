@@ -1,4 +1,5 @@
 import type { InlineStyle } from '../parser/ast'
+import { sameStyle } from '../parser/style'
 
 /**
  * 一条呈现用的富文本片段：要么是带样式的文本，要么是显式换行。
@@ -32,18 +33,6 @@ export function makeTextSpan(text: string, style?: InlineStyle): RichSpan {
 
 function isBreak(s: RichSpan): s is { kind: 'break' } {
   return 'kind' in s && s.kind === 'break'
-}
-
-/** 两个文本 span 样式是否一致（可合并）。 */
-function sameStyle(a: Extract<RichSpan, { text: string }>, b: Extract<RichSpan, { text: string }>): boolean {
-  return (
-    !!a.bold === !!b.bold &&
-    !!a.italic === !!b.italic &&
-    !!a.underline === !!b.underline &&
-    !!a.strike === !!b.strike &&
-    a.color === b.color &&
-    a.size === b.size
-  )
 }
 
 /** 合并相邻、同样式的文本 span（break 是边界）；保持纯文本恒为单 span，确保向后兼容。 */

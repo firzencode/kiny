@@ -38,4 +38,16 @@ describe('checkVariables', () => {
     const ds = run('~ let gold = 1\n=== A ===\n~ let gold = 0\n-> END')
     expect(ds.map((d) => d.code)).not.toContain('duplicate-global')
   })
+
+  // A7：给内置函数赋值破坏该 Story 的内置函数（B 是实例级共享层）。
+  it('给内置函数赋值报 assign-builtin', () => {
+    expect(run('~ random = 5\n=== A ===\n-> END').map((d) => d.code)).toContain('assign-builtin')
+  })
+  it('自增内置函数也报 assign-builtin', () => {
+    expect(run('~ random++\n=== A ===\n-> END').map((d) => d.code)).toContain('assign-builtin')
+  })
+  it('给普通变量赋值不报 assign-builtin', () => {
+    const ds = run('~ let g = 0\n=== A ===\n~ g = 5\n-> END')
+    expect(ds.map((d) => d.code)).not.toContain('assign-builtin')
+  })
 })

@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
+import { errMsg } from '../util/errMsg'
 import { runCommand, type ActionCommand, type ActionContext } from './actions'
 import { ACTION_MANIFEST, validateCommandArgs } from './actionManifest'
 
@@ -24,6 +25,25 @@ interface HandleDeps { ctx: ActionContext }
 
 function json(id: string, status: number, payload: unknown): ExternalResponse {
   return { id, status, body: JSON.stringify(payload) }
+}
+
+/**
+ * 项目一致性兜底（防御层）：外部通道不经「离开项目」守卫，随时可能在项目切换中途 dispatch。
+ * 处理某请求前捕获当前 projectDir，其命令的 dispatch 校验「仍是同一项目」，不符则丢弃——绝不把
+ * 基于旧项目算出的内容写进新项目。正常路径二者恒一致、无副作用。
+ */
+export function withProjectGuard(ctx: ActionContext): ActionContext {
+  const startDir = ctx.getState().projectDir
+  return {
+    ...ctx,
+    dispatch: (a) => {
+      if (ctx.getState().projectDir !== startDir) {
+        if (import.meta.env.DEV) console.warn('[external] 丢弃跨项目 dispatch：请求处理期间项目已切换')
+        return
+      }
+      ctx.dispatch(a)
+    },
+  }
 }
 
 /**
@@ -53,10 +73,10 @@ export async function handleExternalRequest(deps: HandleDeps, req: ExternalReque
       return json(req.id, 400, { ok: false, error: `参数校验失败：${invalid}` })
     }
     try {
-      const result = await runCommand(ctx, cmd)
+      const result = await runCommand(withProjectGuard(ctx), cmd)
       return json(req.id, 200, { ok: true, result: result ?? null })
     } catch (e) {
-      return json(req.id, 200, { ok: false, error: e instanceof Error ? e.message : String(e) })
+      return json(req.id, 200, { ok: false, error: errMsg(e) })
     }
   }
   return json(req.id, 404, { ok: false, error: `未知路由: ${req.method} ${req.path}` })

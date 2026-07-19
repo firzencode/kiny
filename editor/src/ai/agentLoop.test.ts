@@ -164,6 +164,25 @@ describe('runAgentLoop · 一轮 prompt→toolcall→执行→回喂→完成', 
     const toolMsgs = res.messages.filter((m) => m.role === 'tool')
     expect(toolMsgs).toHaveLength(2)
   })
+
+  it('a5：触顶 maxRounds 返回 truncated:true（回复可能说到一半）', async () => {
+    const h = makeCtx()
+    await loadProject(h)
+    // provider 每轮都返回 tool call → 永不自然结束 → 触顶 maxRounds。
+    const { provider } = scriptedProvider([
+      asst('继续……', [{ id: 'c1', name: 'createFile', arguments: { path: 'x.kin' } }]),
+    ])
+    const res = await runAgentLoop('无限工具', { provider, ctx: h.ctx, model: 'm', maxRounds: 2 })
+    expect(res.truncated).toBe(true)
+    expect(res.rounds).toBe(2)
+  })
+
+  it('a5：正常结束不带 truncated', async () => {
+    const h = makeCtx()
+    const { provider } = scriptedProvider([asst('完成。')])
+    const res = await runAgentLoop('你好', { provider, ctx: h.ctx, model: 'm' })
+    expect(res.truncated).toBeFalsy()
+  })
 })
 
 describe('runAgentLoop · 可停止', () => {

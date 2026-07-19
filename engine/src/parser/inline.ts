@@ -1,5 +1,6 @@
 import type { InlineSegment, InlineStyle, RichTextIssue } from './ast'
 import { findInterpEnd } from './interp'
+import { sameStyle } from './style'
 import { ParseError } from './errors'
 
 export interface ScanResult {
@@ -38,20 +39,6 @@ function validColor(v: string): boolean {
 function parseSize(v: string): number | null {
   const n = Number(v)
   return Number.isFinite(n) && n > 0 ? n : null
-}
-
-/** 两个内联样式是否等价（用于归并标签边界处产生的相邻同样式 literal 段）。 */
-function sameInlineStyle(a: InlineStyle | undefined, b: InlineStyle | undefined): boolean {
-  if (!a && !b) return true
-  if (!a || !b) return false
-  return (
-    !!a.bold === !!b.bold &&
-    !!a.italic === !!b.italic &&
-    !!a.underline === !!b.underline &&
-    !!a.strike === !!b.strike &&
-    a.color === b.color &&
-    a.size === b.size
-  )
 }
 
 /** 由当前标签栈算出活动样式快照；无任何样式时返回 undefined（段不带 style 字段）。 */
@@ -124,7 +111,7 @@ export function scanInline(text: string, startId: number, line: number, path: st
     const style = activeStyle(stack)
     // 标签边界处样式未变时（错配 / 非法值忽略），与前一同样式 literal 归并，保持纯文本恒为单段。
     const prev = segments[segments.length - 1]
-    if (prev && prev.kind === 'literal' && sameInlineStyle(prev.style, style)) {
+    if (prev && prev.kind === 'literal' && sameStyle(prev.style, style)) {
       prev.value += literal
     } else {
       segments.push(style ? { kind: 'literal', value: literal, style } : { kind: 'literal', value: literal })

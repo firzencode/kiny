@@ -148,9 +148,14 @@ export const openAiCompatibleAdapter: ProviderAdapter = {
     if (wire.reasoning_content) message.reasoning = wire.reasoning_content
     if (wire.tool_calls && wire.tool_calls.length > 0) {
       message.toolCalls = wire.tool_calls.map((tc) => {
+        // 畸形 tool_call：缺 function 字段（某些兼容供应商偶发）→ 给可读报错，而非在 tc.function.name
+        // 处抛裸 TypeError（`Cannot read properties of undefined`），便于用户/日志定位。
+        if (!tc.function) {
+          throw new Error(`tool call 缺少 function 字段（id=${tc.id ?? '?'}）`)
+        }
         // OpenAI 规范里 arguments 恒为 JSON 字符串；但 glm/deepseek 等兼容供应商偶有偏离
         // （返回已解析对象 / null / 缺失）——归一处理，不抛裸 TypeError。
-        const raw: unknown = tc.function?.arguments
+        const raw: unknown = tc.function.arguments
         let args: Record<string, unknown>
         if (raw === null || raw === undefined || raw === '') {
           args = {}

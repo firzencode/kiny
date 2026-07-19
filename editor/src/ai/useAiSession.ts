@@ -7,6 +7,7 @@
  * conversations 是单一真相，turns 从当前会话派生；每轮结束防抖写回当前项目文件。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { errMsg } from '../util/errMsg'
 import { runAgentLoop, type Provider, type ToolRunRecord, type AgentEvent } from './agentLoop'
 import type { ActionContext, PreviewPort } from './actions'
 import type { Message } from './provider'
@@ -53,7 +54,9 @@ export interface AiSession {
   turns: AiTurn[]
   running: boolean
   send: (prompt: string) => void
-  stop: () => void
+  /** 中止在跑的 AI 并**等它真正停下**（当前批 in-flight 工具执行完 + finally 清 mirror/running 后 resolve）。
+   *  「离开项目」守卫据此先停后离，保证 AI 的全部 dispatch 都落在旧项目、随即被整体丢弃，绝不跨项目写。 */
+  stop: () => Promise<void>
   newConversation: () => void
   /** 该项目的会话列表（按 lastActivityAt 倒序，供历史面板呈现）。 */
   conversations: ConversationSummary[]
@@ -61,6 +64,9 @@ export interface AiSession {
   currentId: string | null
   selectConversation: (id: string) => void
   deleteConversation: (id: string) => void
+  /** 立即把当前对话写回磁盘（跳过 1s 防抖）。退出 / 关项目用 destroy() 硬关窗口、不给防抖 flush
+   *  机会，须在关窗口前显式调用，否则刚答完 1s 内退出会丢最后一轮对话。 */
+  flush: () => Promise<void>
 }
 
 /** 跨会话唯一 id：优先 crypto.randomUUID，回退时间戳+随机（仅本地存储用，无需强唯一）。 */
@@ -81,6 +87,8 @@ export function useAiSession(deps: UseAiSessionDeps): AiSession {
 
   const mirrorRef = useRef<EditorState | null>(null)   // 运行中的活态镜像；null = 读已提交
   const abortRef = useRef<AbortController | null>(null)
+  const runPromiseRef = useRef<Promise<void> | null>(null)   // 当前轮 runAgentLoop 链（stop 等其真正停下）
+  const runProjectDirRef = useRef<string | null>(null)       // 本轮发起时的 projectDir（dispatch 一致性兜底基准）
   const idRef = useRef(0)
   const runningRef = useRef(false)             // 同步守卫：避免 running state 的 stale closure
   const conversationsRef = useRef(conversations); conversationsRef.current = conversations
@@ -101,6 +109,14 @@ export function useAiSession(deps: UseAiSessionDeps): AiSession {
   const ctx: ActionContext = useMemo(() => ({
     getState: () => mirrorRef.current ?? committedStateRef.current,
     dispatch: (a: EditorAction) => {
+      // 项目一致性兜底（防御层）：若已切到别的项目（当前 projectDir ≠ 本轮发起时的），丢弃该 in-flight
+      // dispatch，绝不把基于旧项目算出的内容写进新项目缓冲。正常路径二者恒一致、校验恒通过、无副作用。
+      if (committedStateRef.current.projectDir !== runProjectDirRef.current) {
+        if (import.meta.env.DEV) {
+          console.warn('[ai] 丢弃跨项目 dispatch：发起时项目已切换')
+        }
+        return
+      }
       const base = mirrorRef.current ?? committedStateRef.current
       mirrorRef.current = editorReducer(base, a)
       dispatch(a)
@@ -182,6 +198,7 @@ export function useAiSession(deps: UseAiSessionDeps): AiSession {
     const ac = new AbortController()
     abortRef.current = ac
     mirrorRef.current = committedStateRef.current   // seed 镜像
+    runProjectDirRef.current = committedStateRef.current.projectDir   // 本轮基准项目（dispatch 一致性兜底）
 
     const provider = (deps.makeProvider ?? createTauriProvider)(config)
     // 进度回调：每段思考 / 叙述 / 工具执行完即按序追加进当前这轮，UI 边跑边显。
@@ -194,16 +211,18 @@ export function useAiSession(deps: UseAiSessionDeps): AiSession {
         ...c, turns: c.turns.map((t) => (t.id === turnId ? { ...t, segments: [...t.segments, seg] } : t)),
       } : c)))
     }
-    runAgentLoop(prompt, { provider, ctx, model: config.model, signal: ac.signal, onEvent }, seedHistory)
+    runPromiseRef.current = runAgentLoop(prompt, { provider, ctx, model: config.model, signal: ac.signal, onEvent }, seedHistory)
       .then((res) => {
         const hist = res.messages.filter((m) => m.role !== 'system')
         setConversations((prev) => prev.map((c) => (c.id === cid ? {
           ...c, history: hist, lastActivityAt: Date.now(),
           turns: c.turns.map((t) => (t.id === turnId ? { ...t, running: false } : t)),
         } : c)))
+        // 触顶工具调用轮数上限：回复可能「说到一半」，提示用户（否则呈现得像正常结束）。
+        if (res.truncated) setNotice('已达工具调用轮数上限，AI 回复可能不完整——可继续追问让它接着做。', 'error')
       })
       .catch((e: unknown) => {
-        const msg = e instanceof Error ? e.message : String(e)
+        const msg = errMsg(e)
         setNotice(msg, 'error')
         setConversations((prev) => prev.map((c) => (c.id === cid ? {
           ...c, turns: c.turns.map((t) => (t.id === turnId ? { ...t, error: msg, running: false } : t)),
@@ -217,7 +236,21 @@ export function useAiSession(deps: UseAiSessionDeps): AiSession {
       })
   }, [ctx, config, committedStateRef, setNotice, deps.makeProvider])
 
-  const stop = useCallback(() => { abortRef.current?.abort() }, [])
+  // 中止并等其真正停下：abort() 后 await 本轮 run 链——当前批 in-flight 工具执行完 + finally
+  // 清 mirror/running 后才 resolve。返回时 AI 已完全停止、全部 dispatch 已落在旧项目。
+  const stop = useCallback(async () => {
+    abortRef.current?.abort()
+    await (runPromiseRef.current ?? Promise.resolve())
+  }, [])
+
+  // 立即落盘当前对话（跳过防抖）：退出 / 关项目前显式调用，弥补 destroy() 硬关窗口丢的那次防抖写。
+  const flush = useCallback(async () => {
+    if (!projectDir || loadedDirRef.current !== projectDir) return
+    const key = projectKey(projectDir)
+    const convs = conversationsRef.current
+    if (convs.length === 0) await gatewayRef.current.deleteChatStore(key)
+    else await gatewayRef.current.writeChatStore(key, toChatStore(projectDir, convs))
+  }, [projectDir])
 
   const newConversation = useCallback(() => {
     if (runningRef.current) return
@@ -249,7 +282,7 @@ export function useAiSession(deps: UseAiSessionDeps): AiSession {
     [conversations],
   )
 
-  return { turns, running, send, stop, newConversation, conversations: summaries, currentId, selectConversation, deleteConversation }
+  return { turns, running, send, stop, newConversation, conversations: summaries, currentId, selectConversation, deleteConversation, flush }
 }
 
 /**

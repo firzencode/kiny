@@ -8,6 +8,10 @@ import { AudioController } from './AudioController'
 import { AudioToggle } from './AudioToggle'
 import { SfxController } from './SfxController'
 
+// 模块级稳定空数组：不传 sfx 时的默认值。用 `sfx = []` 默认参会每次渲染新建数组，
+// 令下游 SfxController 的「引用变化即播」误判为有新音效（Q3）。
+const NO_SFX: string[] = []
+
 /**
  * 受控播放视口：只收 state + onChoose(pos)，自身不驱动 Story。
  * 驱动逻辑（advance/choose/replay/usePlayback）由消费者持有（web-reader/reader 用 usePlayback，editor 用保位重算）。
@@ -16,7 +20,7 @@ import { SfxController } from './SfxController'
  * reveal / onContentClick（可选）：接 usePlayback 时启用打字机逐字揭示 + 点击推进 / 跳过；不传则最新行静态呈现。
  */
 export function Player({
-  state, onChoose, sfx = [], reveal, onContentClick, onSubmitInput,
+  state, onChoose, sfx = NO_SFX, reveal, onContentClick, onSubmitInput,
 }: {
   state: PlayState
   onChoose: (pos: number) => void

@@ -19,15 +19,18 @@ export async function loadDemo(base = 'demo/', seed = randomSeed()): Promise<Loa
   }
   let manifestText: string
   let manifestName: string
-  let index: string[]
   const files = new Map<string, string>()
   try {
-    index = JSON.parse(await text('files.json')) as string[]
+    const index = JSON.parse(await text('files.json')) as string[]
     const found = findManifest(index)
     if (!found.ok) return { ok: false, message: found.message }
     manifestName = found.name
-    manifestText = await text(manifestName)
-    for (const p of index) if (p !== manifestName) files.set(p, await text(p))
+    const entryPaths = index.filter((p) => p !== manifestName)
+    // 并行 fetch manifest + 全部 .kin（此前 manifest 后逐个 await 串行，N 个文件 N 趟往返）；
+    // 结果按 entryPaths（即 files.json 顺序）插入 files，保持文件表插入序不变（Q5）。
+    const [mText, ...entryTexts] = await Promise.all([text(manifestName), ...entryPaths.map((p) => text(p))])
+    manifestText = mText
+    entryPaths.forEach((p, i) => files.set(p, entryTexts[i]!))
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : '加载失败' }
   }

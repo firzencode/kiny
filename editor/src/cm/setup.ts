@@ -38,6 +38,14 @@ export const highlightCompartment = new Compartment()
 /** editor 域快捷键的 compartment（快捷键设置页改绑定时热更）。 */
 export const shortcutsCompartment = new Compartment()
 
+/** 只读态 compartment（AI 运行期把编辑区置只读，热切换）。 */
+export const readonlyCompartment = new Compartment()
+
+/** 只读 = 禁止编辑输入（内容不可改），但选中 / 滚动 / 复制不受限。 */
+export function readonlyExtensionFor(on: boolean): Extension {
+  return on ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : []
+}
+
 /** CM 命令注册表：editor 域命令 id → CM Command（部分——只有可绑的 editor 命令有实现）。 */
 const EDITOR_COMMANDS: Partial<Record<CommandId, KeyBinding['run']>> = { toggleComment }
 
@@ -73,8 +81,9 @@ function gotoAt(view: EditorView, pos: number, cb: KinEditorCallbacks): boolean 
   return true
 }
 
-export function kinSetup(cb: KinEditorCallbacks, highlightOn: boolean, shortcuts: Overrides = {}): Extension[] {
+export function kinSetup(cb: KinEditorCallbacks, highlightOn: boolean, shortcuts: Overrides = {}, readOnly = false): Extension[] {
   return [
+    readonlyCompartment.of(readonlyExtensionFor(readOnly)),
     lineNumbers(),
     highlightActiveLineGutter(),
     highlightActiveLine(),
