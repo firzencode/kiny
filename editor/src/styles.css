@@ -83,6 +83,38 @@
   --s-tag: #2f7d72;
   --s-text: #3a362e;
 }
+/* 素雪白（plain, T074）：纯白 #ffffff 文档区 + 中性灰阶 chrome，去暖；黄铜 accent 同源。 */
+[data-theme='plain'] {
+  color-scheme: light;
+  --backdrop: #d5d5d8;
+  --bg-0: #ffffff;
+  --bg-1: #f7f7f8;
+  --bg-2: #eeeef1;
+  --bg-3: #e4e4e8;
+  --border: #e7e7ea;
+  --border-2: #d5d5da;
+  --text: #1f2023;
+  --text-dim: #64656c;
+  --text-faint: #9a9ba3;
+  --ok: #3c8570;
+  --warn: #8a6d12;
+  --err: #bb4a3f;
+  --accent: #9a6e2c;
+  --accent-soft: color-mix(in srgb, var(--accent) 16%, transparent);
+  --accent-line: color-mix(in srgb, var(--accent) 50%, transparent);
+  --accent-fg: #fbf6ea;
+  --sel-bg: #dbe1ef;
+  --s-comment: #8a8a92;
+  --s-node: #8f611c;
+  --s-command: #2f6a8c;
+  --s-logic: #4a7a3c;
+  --s-divert: #9a4a82;
+  --s-interp: #845f1c;
+  --s-string: #a6542f;
+  --s-keyword: #7548ac;
+  --s-tag: #2c7b70;
+  --s-text: #26272b;
+}
 * {
   box-sizing: border-box;
 }
@@ -347,6 +379,54 @@ button {
   color: var(--text-faint);
 }
 
+/* ---------- 待办面板（T075）---------- */
+/* 让位式（flex:0 1 auto）：窗口变矮时优先让位、列表内部滚动，守节点栏恒可见的布局不变量。 */
+.todo {
+  display: flex;
+  flex-direction: column;
+  flex: 0 1 auto;
+  max-height: 38%;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg-1);
+  border-top: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+}
+.todo.collapsed { flex: 0 0 auto; }
+.todo.collapsed .todo-list,
+.todo.collapsed .outline-empty { display: none; }
+.todo-list { flex: 1; min-height: 0; overflow: auto; }
+.todo-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 5px 14px 3px;
+  color: var(--text-dim);
+  font-size: 11px;
+  text-align: left;
+}
+.todo-group-head:hover { color: var(--text); }
+.todo-group-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, monospace; }
+.todo-group-count { font-size: 10px; color: var(--text-faint); font-family: ui-monospace, monospace; }
+.todo-items { padding-left: 4px; }
+.todo-item { gap: 7px; }
+.todo-badge {
+  flex: 0 0 auto;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+.todo-badge.todo { color: var(--accent); background: var(--accent-soft); }
+.todo-badge.fixme { color: var(--err); background: color-mix(in srgb, var(--err) 15%, transparent); }
+.todo-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.todo-line { flex: 0 0 auto; font-size: 10px; font-family: ui-monospace, monospace; color: var(--text-faint); }
+
 /* ---------- 编辑区（CodeMirror 6 host） ---------- */
 /* .editor-pane 只是 CM 的挂载容器；行号 / 滚动 / 光标 / 选区 / 高亮全由 CM6 接管。
    语义着色经 cm/highlight.ts 的 HighlightStyle 映射到下方 .t-* 类（色值仍走 --s-* 变量，
@@ -541,7 +621,8 @@ button {
   font-size: 11.5px;
   color: var(--text-faint);
 }
-.preview-restart {
+.preview-restart,
+.preview-back {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -554,10 +635,13 @@ button {
   cursor: pointer;
   font-size: 12px;
 }
-.preview-restart:hover {
+.preview-back { margin-right: 6px; }
+.preview-restart:hover,
+.preview-back:hover:not(:disabled) {
   background: var(--bg-2);
   color: var(--text);
 }
+.preview-back:disabled { opacity: 0.4; cursor: default; }
 .preview-empty {
   flex: 1;
   display: flex;
@@ -1180,6 +1264,37 @@ button {
 .settings-seg { display: inline-flex; background: var(--bg-1); border: 1px solid var(--border-2); border-radius: 8px; padding: 3px; gap: 3px; }
 .settings-seg-btn { padding: 6px 13px; border: none; background: transparent; color: var(--text-dim); border-radius: 6px; font-size: 12.5px; cursor: pointer; }
 .settings-seg-btn.on { background: var(--accent-soft); color: var(--text); }
+
+/* 外观页：主题列表 + 取色面板（T042 自定义主题）。 */
+.theme-list { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.theme-item { display: flex; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: 9px; padding: 4px 6px 4px 4px; background: var(--bg-1); }
+.theme-item.on { border-color: var(--accent); background: var(--accent-soft); }
+.theme-pick { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; border: none; background: transparent; color: var(--text); cursor: pointer; padding: 5px 6px; border-radius: 6px; text-align: left; }
+.theme-name { font-size: 13px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.theme-badge { font-size: 10px; letter-spacing: .1em; color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); border-radius: 999px; padding: 1px 7px; }
+.theme-badge.muted { color: var(--text-faint); border-color: var(--border-2); }
+.theme-swatch { display: inline-flex; width: 52px; height: 20px; border-radius: 5px; overflow: hidden; border: 1px solid var(--border-2); flex: 0 0 auto; }
+.theme-swatch > span { flex: 1; }
+.theme-rename { flex: 1; font-size: 13px; padding: 6px 8px; border: 1px solid var(--accent); border-radius: 6px; background: var(--bg-0); color: var(--text); }
+.theme-actions { display: flex; gap: 2px; flex: 0 0 auto; }
+.theme-act { width: 26px; height: 26px; border: none; background: transparent; border-radius: 6px; cursor: pointer; font-size: 13px; color: var(--text-dim); }
+.theme-act:hover { background: var(--bg-2); color: var(--text); }
+.theme-act.danger:hover { background: color-mix(in srgb, var(--err) 18%, transparent); color: var(--err); }
+.theme-toolbar { display: flex; gap: 8px; margin-top: 10px; }
+.theme-import-ok { color: var(--ok); }
+.theme-import-err { color: var(--err); }
+.theme-editor { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 6px; }
+.theme-group { margin-top: 8px; }
+.theme-group-label { font-size: 11px; color: var(--text-faint); letter-spacing: .12em; text-transform: uppercase; margin-bottom: 4px; }
+.theme-var-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+.theme-var-row input[type='color'] { width: 30px; height: 26px; padding: 0; border: 1px solid var(--border-2); border-radius: 6px; background: none; cursor: pointer; }
+.theme-var-hex { width: 92px; font-family: ui-monospace, monospace; font-size: 12px; padding: 5px 7px; border: 1px solid var(--border-2); border-radius: 6px; background: var(--bg-0); color: var(--text); }
+.theme-var-name { flex: 1; font-size: 11.5px; color: var(--text-faint); font-family: ui-monospace, monospace; }
+.theme-var-reset { width: 24px; height: 24px; border: none; background: transparent; border-radius: 5px; cursor: pointer; color: var(--text-dim); }
+.theme-var-reset:hover { background: var(--bg-2); color: var(--text); }
+.theme-contrast-warn { margin-top: 12px; font-size: 12px; color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); border: 1px solid color-mix(in srgb, var(--warn) 32%, transparent); border-radius: 8px; padding: 8px 11px; }
+.theme-contrast-warn ul { margin: 4px 0 0; padding-left: 18px; }
+
 /* 开关（设置项布尔，如自动恢复草稿）：滑块 = 圆角轨 + 移位旋钮。 */
 .settings-toggle { position: relative; width: 40px; height: 22px; border-radius: 999px; border: 1px solid var(--border-2); background: var(--bg-1); cursor: pointer; padding: 0; transition: background .15s ease; }
 .settings-toggle.on { background: var(--accent); border-color: var(--accent); }

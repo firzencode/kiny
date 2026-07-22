@@ -15,7 +15,7 @@ export function stageSample(srcDir, destDir, opts = {}) {
   cpSync(srcDir, destDir, { recursive: true })
   if (opts.filesJson) {
     // 浏览器无法枚举目录，故 files.json 显式列出根部需 fetch 的文件：manifest（`<名>.kiw` 或旧
-    // kiny.json）+ 顶层 .kin（样例约定 .kin 平铺在根，assets 等子目录不含源文件）。web-reader
+    // kiny.json）+ 顶层 .kin（样例约定 .kin 平铺在根，assets 等子目录不含源文件）。viewer
     // loadDemo 用 findManifest 从这份索引挑 manifest、其余作故事文件。
     const roots = readdirSync(destDir)
     const kins = roots.filter((f) => f.endsWith('.kin')).sort()

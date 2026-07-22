@@ -1,4 +1,8 @@
 import { useEffect, useState } from 'react'
+import {
+  type CustomTheme, type PresetId, applyTheme, effectiveBase,
+  loadCustomThemes, saveCustomThemes, loadActiveThemeId, saveActiveThemeId,
+} from '../state/themes'
 
 export type Theme = 'dark' | 'light'
 
@@ -7,6 +11,7 @@ export interface ViewPrefs {
   /** 三个面板各自的折叠态（头部 ▾ 控制）。 */
   explorerCollapsed: boolean
   outlineCollapsed: boolean
+  todoCollapsed: boolean
   diagnosticsCollapsed: boolean
   /** Explorer 面板像素高度（拖拽分隔条设定）；0 表示用 CSS 默认 52%。 */
   explorerHeight: number
@@ -22,15 +27,12 @@ export interface ViewPrefs {
 
 export const DEFAULT_VIEW: ViewPrefs = {
   sidebar: true, preview: true, highlight: true, ai: false,
-  explorerCollapsed: false, outlineCollapsed: false, diagnosticsCollapsed: false,
+  explorerCollapsed: false, outlineCollapsed: false, todoCollapsed: true, diagnosticsCollapsed: false,
   explorerHeight: 0,
   sidebarWidth: 232, aiWidth: 360, editorRatio: 0.5,
   rightTab: 'preview',
 }
 
-function loadTheme(): Theme {
-  try { return localStorage.getItem('kiny-editor-theme') === 'light' ? 'light' : 'dark' } catch { return 'dark' }
-}
 function loadView(): ViewPrefs {
   try { return { ...DEFAULT_VIEW, ...JSON.parse(localStorage.getItem('kiny-editor-view') || '{}') } } catch { return { ...DEFAULT_VIEW } }
 }
@@ -43,8 +45,16 @@ function loadSavedView(): ViewPrefs | null {
 }
 
 export interface ViewPrefsApi {
+  /** 有效基底（dark/light）：MenuBar / LaunchScreen / 预览 swatch 的 data-theme 用。 */
   theme: Theme
-  setTheme: React.Dispatch<React.SetStateAction<Theme>>
+  /** 快切预设主题（MenuBar 主题菜单用；预设含素雪白 plain）。 */
+  setPresetTheme: (t: PresetId) => void
+  /** 活动主题标识：预设 id（'dark'/'light'）或某自定义主题 id。 */
+  activeThemeId: string
+  setActiveThemeId: (id: string) => void
+  /** 用户自定义主题列表（应用级）。 */
+  customThemes: CustomTheme[]
+  setCustomThemes: (next: CustomTheme[]) => void
   view: ViewPrefs
   setView: React.Dispatch<React.SetStateAction<ViewPrefs>>
   hasSavedLayout: boolean
@@ -65,16 +75,21 @@ export interface ViewPrefsApi {
  * @param notifySaved 保存布局成功后的提示回调（App 接成 setNotice('已保存当前布局','success')）。
  */
 export function useViewPrefs(notifySaved: () => void): ViewPrefsApi {
-  const [theme, setTheme] = useState<Theme>(loadTheme)
+  const [activeThemeId, setActiveThemeId] = useState<string>(loadActiveThemeId)
+  const [customThemes, setCustomThemes] = useState<CustomTheme[]>(loadCustomThemes)
   const [view, setView] = useState<ViewPrefs>(loadView)
   const [savedView, setSavedView] = useState<ViewPrefs | null>(loadSavedView)
   const hasSavedLayout = savedView !== null
 
-  // 主题 / 视图持久化
+  const theme = effectiveBase(activeThemeId, customThemes)
+  const setPresetTheme = (t: PresetId) => setActiveThemeId(t)
+
+  // 主题应用 + 持久化：activeThemeId / customThemes 一变即 applyTheme（设 data-theme + inline 覆盖）并存。
   useEffect(() => {
-    document.documentElement.dataset.theme = theme
-    try { localStorage.setItem('kiny-editor-theme', theme) } catch { /* ignore */ }
-  }, [theme])
+    applyTheme(activeThemeId, customThemes)
+    saveActiveThemeId(activeThemeId)
+  }, [activeThemeId, customThemes])
+  useEffect(() => { saveCustomThemes(customThemes) }, [customThemes])
   useEffect(() => {
     try { localStorage.setItem('kiny-editor-view', JSON.stringify(view)) } catch { /* ignore */ }
   }, [view])
@@ -132,7 +147,8 @@ export function useViewPrefs(notifySaved: () => void): ViewPrefsApi {
     : undefined
 
   return {
-    theme, setTheme, view, setView, hasSavedLayout,
+    theme, setPresetTheme, activeThemeId, setActiveThemeId, customThemes, setCustomThemes,
+    view, setView, hasSavedLayout,
     onSaveLayout, onRestoreMyLayout, onRestoreDefaultLayout,
     cols, explorerStyle, onResizeSidebar, onResizeAi, onResizeEditorPreview, onResizeExplorer,
   }

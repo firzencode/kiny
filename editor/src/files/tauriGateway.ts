@@ -217,6 +217,13 @@ export const tauriFileGateway: FileGateway = {
   async exportWebpage(projectDir, parentDir, folderName, projectData) {
     return invoke<string>('export_webpage', { projectDir, parentDir, folderName, projectData })
   },
+  async exportThemeFile(defaultName, contents) {
+    const picked = await save({ defaultPath: defaultName, filters: [{ name: 'Kiny 主题', extensions: ['json'] }] })
+    if (typeof picked !== 'string') return false
+    await grantProjectScope(await dirname(picked)) // 动态放行目标目录，任意盘符位置也可写（同项目目录放行套路）
+    await writeTextFile(picked, contents)
+    return true
+  },
   async confirm(message) {
     return ask(message, { title: 'Kiny Editor', kind: 'warning' })
   },

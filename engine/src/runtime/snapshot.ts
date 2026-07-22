@@ -4,6 +4,7 @@ import { openingKnotName } from '../analyze'
 import { sortByPath } from '../order'
 import { visitBlockTree, type BlockVisitor } from '../parser/visit'
 import type { Frame } from './frames'
+import type { RichSpan } from './spans'
 
 /**
  * program 的全部 knot（**含合成开场 knot**），确定性顺序：文件按 path 字典序，每文件先开场 knot
@@ -21,10 +22,19 @@ function orderedKnots(program: ValidatedProgram): Knot[] {
   return out
 }
 
+/**
+ * park 态的**已求值结果**（落盘形态，choice 存 enumerateChoices 序号）：restore 直接重建 park 态，
+ * 不重跑 enterChoiceGroup / evalArg——彻底消除 A2「restore 重放选项/输入求值副作用」。ended 时缺省。
+ */
+export type ParkSnapshot =
+  | { kind: 'choices'; choices: { spans: RichSpan[]; choice: number }[] }
+  | { kind: 'input'; varName: string; placeholder: string | null }
+
 /** 运行时状态快照：纯 JSON-able 数据，可落盘往返。 */
 export interface StorySnapshot {
-  version: 1
+  version: 3
   fingerprint: string
+  entry: string // 原始入口起点 knot 名（= 建 Story 时的 start）：restore 据此复刻正常播放的 buildGlobals 顺序
   turns: number
   ended: boolean
   rng: number
@@ -33,11 +43,18 @@ export interface StorySnapshot {
   globals: Record<string, unknown>
   current: { knot: string; stitch?: string; localIsGlobal: boolean; locals?: Record<string, unknown> }
   taken: number[]
-  stack: { path: BlockPath; index: number }[]
+  stack: { path: BlockPath; index: number }[] // index 存真实游标值（park 于选项时亦不回退）
+  park?: ParkSnapshot // 新增；ended 时缺省
 }
+
+/** park 态解码结果（choice 序号已解回 AST 引用），交 Story 直接重建 pendingChoices / pendingInput。 */
+export type ParkData =
+  | { kind: 'choices'; choices: { spans: RichSpan[]; choice: Choice }[] }
+  | { kind: 'input'; varName: string; placeholder: string | null }
 
 /** restoreStory 解码快照后交给 Story 构造的内部数据（含解析回的 AST 引用）。 */
 export interface RestoreData {
+  entry: string // 原始入口起点 knot 名：restore 复刻正常播放的 buildGlobals 顺序（见 story.ts buildGlobals）
   turns: number
   ended: boolean
   globals: Record<string, unknown>
@@ -50,6 +67,7 @@ export interface RestoreData {
   localIsGlobal: boolean
   locals?: Record<string, unknown>
   frames: Frame[]
+  park?: ParkData // park 态已求值结果；ended 时缺省
 }
 
 /** 一个栈帧 block 的定位：根（knot.body 或 stitch.body）+ 逐层下钻步骤。 */
@@ -163,9 +181,13 @@ export function fingerprint(program: ValidatedProgram): string {
       for (const s of k.stitches) parts.push(`S:${s.name}`)
     }
   }
-  for (const c of enumerateChoices(program).list) {
-    parts.push(`C:${c.line}:${c.sticky ? 1 : 0}${c.fallback ? 1 : 0}:${c.label ?? ''}`)
-  }
+  // choice 用**结构序号**（enumerateChoices 的确定性枚举位序，即 parts 里的出现顺序）+ 结构特征，
+  // 不编入源码行号 c.line（T069 决策 A11）：在 choice 前插 / 删一行（哪怕注释）不再令全部旧存档失效；
+  // 增删 / 重排 choice 仍改变序列 → 指纹变。指纹是启发式兼容护栏、非正确性保证（改逻辑不改指纹属固有，
+  // 由 restore 正确性另行保障）。
+  enumerateChoices(program).list.forEach((c, i) => {
+    parts.push(`C:${i}:${c.sticky ? 1 : 0}${c.fallback ? 1 : 0}:${c.label ?? ''}`)
+  })
   const fp = djb2(parts.join('\u0001'))
   fingerprintCache.set(program, fp)
   return fp

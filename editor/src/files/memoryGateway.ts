@@ -14,6 +14,10 @@ export interface MemoryGatewayInit {
   confirmResult?: boolean
   saveKipPath?: string | null
   exportSink?: { dest: string; files: string[] }[]
+  /** exportThemeFile 调用记录（供断言）。 */
+  themeExportSink?: { defaultName: string; contents: string }[]
+  /** exportThemeFile 是否模拟用户选了落点（true=写入并返 true；false=取消返 false）。缺省 true。 */
+  themeSaveConfirmed?: boolean
   webpageDir?: string | null
   webpageSink?: { dest: string; projectData: string; files: string[] }[]
   draftStore?: DraftStore
@@ -168,6 +172,11 @@ export function createMemoryGateway(init: MemoryGatewayInit): FileGateway {
       const dest = `${parentDir}/${folderName}`
       init.webpageSink?.push({ dest, projectData, files: listAll(projectDir) })
       return dest
+    },
+    exportThemeFile: async (defaultName, contents) => {
+      if (init.themeSaveConfirmed === false) return false
+      init.themeExportSink?.push({ defaultName, contents })
+      return true
     },
     confirm: async () => init.confirmResult ?? true,
     closeWindow: async () => { init.windowSink?.push('close') },

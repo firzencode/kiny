@@ -7,6 +7,7 @@ import type {
   ContentElement,
   InlineSegment,
   Knot,
+  ProjectFile,
   Stitch,
 } from '../parser/ast'
 import { FrameStack, type Frame } from './frames'
@@ -21,7 +22,8 @@ import type { ChoiceView, OutputEvent, StoryOptions } from './types'
 import type { RichSpan } from './spans'
 import { makeTextSpan, mergeSpans } from './spans'
 import { buildBlockPaths, enumerateChoices, fingerprint } from './snapshot'
-import type { StorySnapshot, RestoreData } from './snapshot'
+import type { StorySnapshot, RestoreData, ParkSnapshot } from './snapshot'
+import { encodeGlobals, decodeGlobals } from './scope-codec'
 import { sortByPath } from '../order'
 
 // 无玩家交互的累计自动推进步数上限（仅 choose() 清零）。取值是「尽早报错」与
@@ -34,6 +36,7 @@ export class Story {
   private readonly stack = new FrameStack()
   private buffer: RichSpan[] | null = null
   private bufferGlued = false // buffer 末尾来自 glue 文本，待与后续内容粘连，不可 flush
+  private canContinueCache: boolean | null = null // canContinue 幂等缓存（B2）；推进后失效，null=未算
   private ended = false
   private currentKnot!: Knot
   private currentStitch: string | null = null // 当前所在 stitch 名（栈根定位用，knot 顶层为 null）
@@ -61,7 +64,10 @@ export class Story {
   ) {
     const knot = this.program.knots.get(options.start)
     if (!knot) throw new RuntimeError(`入口节点不存在：「${options.start}」`)
-    this.start = options.start
+    // restore 时 options.start 传的是快照**当前**所在 knot（仅供上面的存在性校验），真正的入口起点是
+    // 原始 entry——须记为 this.start，否则 restored 故事再存档时 serialize 会把 entry 写成当前 knot，
+    // 下次读档便丢失「入口开场文件 preamble 最后跑」的顺序，跨文件读依赖会误抛（见 buildGlobals）。
+    this.start = restore ? restore.entry : options.start
     for (const f of this.program.files) {
       for (const k of f.knots) this.knotFile.set(k.name, f.path)
     }
@@ -76,35 +82,50 @@ export class Story {
       turns_since: (name: string) =>
         this.visitedAt.has(name) ? this.turns - this.visitedAt.get(name)! : -1,
     })
-    if (restore) {
-      this.restoreFrom(restore)
-      return
-    }
-    this.buildGlobals()
+    // buildGlobals + 标签初始化在两条路径都跑（this.start 此时已是真正的入口起点，两路一致）。正常启动
+    // 跳过入口开场 knot 所属文件（其 preamble 留待进入开场 knot 时按序执行、即最后跑）。restore 无
+    // enterKnot 兜底，须自行补跑该文件的 preamble 以重建其函数（A4），且 deferSkipped=true 让它**最后**
+    // 跑——复刻正常播放的建全局顺序，避免入口文件 preamble 读取的跨文件全局在 restore 早跑时尚未就绪而误抛。
+    this.buildGlobals(this.start, restore !== undefined)
     // 标签计数初始化为 0
     for (const label of this.program.labels) {
       ;(this.G as Record<string, unknown>)[label] = 0
     }
+    if (restore) {
+      this.restoreFrom(restore)
+      return
+    }
     this.enterKnot(knot)
   }
 
-  /** 从快照数据装配运行时状态（不跑 preamble / 不进 knot，直接覆盖各字段）。 */
+  /**
+   * 从快照数据装配运行时状态：buildGlobals 已重建 preamble 声明的函数并跑出初值，本函数用快照
+   * 覆盖可序列化状态（globals / rng / 计数器等），并直接重建 park 态——不重跑 advanceToEvent，
+   * 故选项/输入的求值副作用（变体推进、rng 消耗、条件里改全局）不会被重放（A2）。
+   */
   private restoreFrom(r: RestoreData): void {
     this.turns = r.turns
     this.ended = r.ended
-    Object.assign(this.G, r.globals)
-    this.rng.setState(r.rng)
-    this.variants.importCounters(r.variantCounters)
+    Object.assign(this.G, decodeGlobals(r.globals)) // 覆盖可序列化全局数据（先 decode 还原 Map/Set/Date）；函数已由 buildGlobals 重建、不在 r.globals 里
+    this.rng.setState(r.rng) // 覆盖 buildGlobals 重跑 preamble 消耗掉的 rng 状态
+    this.variants.importCounters(r.variantCounters) // 同理覆盖变体计数
     for (const [k, v] of Object.entries(r.visitedAt)) this.visitedAt.set(k, v)
     for (const c of r.taken) this.taken.add(c)
     this.currentKnot = r.currentKnot
     this.currentFile = this.knotFile.get(r.currentKnot.name)
     this.currentStitch = r.currentStitch
-    this.L = r.localIsGlobal ? this.G : Object.assign(makeScope(), r.locals)
+    this.L = r.localIsGlobal ? this.G : Object.assign(makeScope(), decodeGlobals(r.locals ?? {}))
     if (!r.ended) {
       this.stack.restoreFrames(r.frames)
-      // 栈顶 index 已回退指向触发选项的 choiceGroup；重跑一次推进以重建 pendingChoices。
-      this.advanceToEvent()
+      // 直接重建 park 态（park 快照存的是已求值结果），不调 advanceToEvent——A2 的修复核心。
+      if (r.park?.kind === 'choices') {
+        this.pendingChoices = r.park.choices.map((c, i) => ({
+          view: { spans: c.spans, index: i },
+          choice: c.choice, // 已由 restoreStory 解码回 AST 引用
+        }))
+      } else if (r.park?.kind === 'input') {
+        this.pendingInput = { varName: r.park.varName, placeholder: r.park.placeholder }
+      }
     }
   }
 
@@ -120,16 +141,14 @@ export class Story {
     const { index: choiceIndex } = enumerateChoices(this.program)
 
     const frames = this.stack.snapshotFrames()
-    const waitingChoice = !this.ended && this.pendingChoices.length > 0
+    // 栈帧 index 存真实游标值（停在选项时栈顶已越过 choiceGroup 一格，不回退）——
+    // restore 直接从 park 快照重建 pendingChoices，不再重跑 advanceToEvent。
     const stack = this.ended
       ? []
-      : frames.map((f, i) => {
+      : frames.map((f) => {
           const path = blockPaths.get(f.block)
           if (!path) throw new RuntimeError('serialize: 栈帧 block 无路径')
-          // 停在选项时栈顶帧 index 已越过 choiceGroup 一格，回退指回它，
-          // restore 后重跑 advanceToEvent 会重新 park 出同样的 pendingChoices。
-          const index = waitingChoice && i === frames.length - 1 ? f.index - 1 : f.index
-          return { path, index }
+          return { path, index: f.index }
         })
 
     const taken: number[] = []
@@ -139,35 +158,72 @@ export class Story {
     })
     taken.sort((a, b) => a - b)
 
+    // park 态导出已求值结果（选项富文本 + 序号 / 输入 placeholder），不存重跑所需的游标位。
+    let park: ParkSnapshot | undefined
+    if (!this.ended) {
+      if (this.pendingChoices.length > 0) {
+        park = {
+          kind: 'choices',
+          choices: this.pendingChoices.map((p) => {
+            const n = choiceIndex.get(p.choice)
+            if (n === undefined) throw new RuntimeError('serialize: pendingChoice 无序号')
+            return { spans: p.view.spans, choice: n }
+          }),
+        }
+      } else if (this.pendingInput !== null) {
+        park = { kind: 'input', varName: this.pendingInput.varName, placeholder: this.pendingInput.placeholder }
+      }
+    }
+
     return {
-      version: 1,
+      version: 3,
       fingerprint: fingerprint(this.program),
+      entry: this.start,
       turns: this.turns,
       ended: this.ended,
       rng: this.rng.state(),
       variantCounters: this.variants.exportCounters(),
       visitedAt: Object.fromEntries(this.visitedAt),
-      globals: { ...this.G },
+      globals: encodeGlobals(this.G), // 白名单容器编码：Map/Set/Date 保真；函数丢弃、由 buildGlobals 重建
       current: {
         knot: this.currentKnot.name,
         ...(this.currentStitch !== null ? { stitch: this.currentStitch } : {}),
         localIsGlobal: this.L === this.G,
-        ...(this.L === this.G ? {} : { locals: { ...this.L } }),
+        ...(this.L === this.G ? {} : { locals: encodeGlobals(this.L!) }), // 局部作用域同样编码
       },
       taken,
       stack,
+      ...(park ? { park } : {}),
     }
   }
 
-  /** 启动时按文件名字典序执行各文件 preamble 的 ~ / ~~~ 建全局；跳过「起点正是其开场 knot」的文件（其 preamble 在进入开场 knot 时按序执行）。 */
-  private buildGlobals(): void {
+  /**
+   * 按文件名字典序执行各文件 preamble 的 ~ / ~~~ 建全局（含声明其函数）。
+   * `skipOpeningOf` 给定时跳过「其开场 knot 名 === skipOpeningOf」的文件（入口开场 knot 所属文件）。
+   * - 正常启动（`deferSkipped=false`）：被跳过的文件不在此跑，其 preamble 留待 enterKnot 进入开场 knot
+   *   时按序执行（即最后跑），避免二次执行。
+   * - restore（`deferSkipped=true`）：无 enterKnot 兜底，被跳过的文件改为**最后**补跑（restoreFrom 不调
+   *   enterKnot，故不会二次执行），既重建其函数（A4），又与正常播放同序——入口文件 preamble 读取的
+   *   跨文件全局在其他文件之后才求值，不会因 restore 早跑（字典序靠前）而未就绪误抛。
+   */
+  private buildGlobals(skipOpeningOf?: string, deferSkipped = false): void {
     const files = sortByPath(this.program.files)
+    const deferred: ProjectFile[] = []
     for (const f of files) {
-      if (openingKnotName(f.path) === this.start) continue // 入口开场 knot 的 preamble 留待进入时按序执行
-      for (const el of f.preamble) {
-        if (el.kind === 'logicLine' || el.kind === 'logicBlock') {
-          this.runLogic(el.code, true, f.path, el.line)
-        }
+      if (skipOpeningOf !== undefined && openingKnotName(f.path) === skipOpeningOf) {
+        if (deferSkipped) deferred.push(f) // restore：最后补跑；正常启动：交给 enterKnot
+        continue
+      }
+      this.runFilePreamble(f)
+    }
+    for (const f of deferred) this.runFilePreamble(f)
+  }
+
+  /** 执行单个文件 preamble 里的逻辑元素（~ / ~~~）建全局；文本 / 跳转元素照常跳过。 */
+  private runFilePreamble(f: ProjectFile): void {
+    for (const el of f.preamble) {
+      if (el.kind === 'logicLine' || el.kind === 'logicBlock') {
+        this.runLogic(el.code, true, f.path, el.line)
       }
     }
   }
@@ -195,7 +251,23 @@ export class Story {
     return this.pendingInput
   }
 
+  /**
+   * 是否可继续推进（宿主 `while (story.canContinue)` 轮询）。**幂等只读缓存**（T069 决策 B2，修 A3）：
+   * 同一位置重复读只算一次——首读 computeCanContinue（可能推进到下个事件、求值作者 JS），结果缓存；
+   * 之后重复读返回缓存值、不再执行作者 JS / 不推进 / 不抛。真正的推进副作用只留在 `continue()` / `choose()`
+   * / `submitInput()`——它们改变状态后 `invalidateCanContinue()` 失效缓存，下次读重新计算。
+   */
   get canContinue(): boolean {
+    if (this.canContinueCache === null) this.canContinueCache = this.computeCanContinue()
+    return this.canContinueCache
+  }
+
+  /** 清缓存：状态推进（continue/choose/submitInput）后调，使下次读 canContinue 重新计算。 */
+  private invalidateCanContinue(): void {
+    this.canContinueCache = null
+  }
+
+  private computeCanContinue(): boolean {
     // 已有完整成行的待 flush 文本（点击正文 / 非 glue 行 / END 前定型的末段）。
     // 注意：此判断须先于 ended 短路——到达 END 时末段缓冲已定型成行（bufferGlued 清零），
     // 仍要报告可继续以便 flush 出最后一行。
@@ -235,6 +307,7 @@ export class Story {
 
   continue(): OutputEvent {
     if (!this.canContinue) throw new RuntimeError('continue() 在 !canContinue 时被调用')
+    this.invalidateCanContinue() // 本次将推进/产出状态，缓存作废（须在上面读过 canContinue 之后）
     // 文本统一经缓冲产出：canContinue 为真且 buffer 成行时，优先 flush 文本。
     if (this.buffer !== null) {
       const t = this.buffer
@@ -263,6 +336,7 @@ export class Story {
     if (this.pendingInput === null) {
       throw new RuntimeError('当前无待填输入框')
     }
+    this.invalidateCanContinue() // 提交输入 = 推进状态，canContinue 缓存作废
     const { varName } = this.pendingInput
     const v = text.trim()
     if (v !== '') {
@@ -284,6 +358,7 @@ export class Story {
     if (index < 0 || index >= this.pendingChoices.length) {
       throw new RuntimeError(`choose 越界：${index}`)
     }
+    this.invalidateCanContinue() // 选择 = 推进状态，canContinue 缓存作废
     const entry = this.pendingChoices[index]!
     this.pendingChoices = []
     this.turns++
@@ -371,7 +446,11 @@ export class Story {
       const el = frame.block[frame.index]!
       if (el.kind === 'text') {
         // 文本就地累积进 buffer；glue 则继续合并，否则成行（下一轮顶部 flush）。
-        this.appendSpans(this.renderSpans(el.segments, el.line), el.glue)
+        const spans = this.renderSpans(el.segments, el.line)
+        // 空即无行（T069 决策 A8）：求值为空**且非 glue** 的独立行不成行（不产 text 事件、不建 buffer），
+        // 免得 `{""}` / `{cond?"文字":""}` 假分支 / once 用尽等周期性产空白段。glue 守卫关键：glue 链中间
+        // 的空插值（与前后文本拼一行）仍须 append 以维持 glue 开口、不误丢。
+        if (spans.length > 0 || el.glue) this.appendSpans(spans, el.glue)
         frame.index++
         continue
       }

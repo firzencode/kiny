@@ -22,7 +22,8 @@ The goal is a whole ecosystem: an **engine** (reads `.kin`, runs the story), a *
 
 ### Readers
 
-- **web-reader (browser)** — loads a self-contained exported web page; double-click to open over `file://` and run offline; choice clicks, background and BGM effects.
+- **viewer (browser)** — loads a self-contained exported web page; double-click to open over `file://` and run offline; choice clicks, background and BGM effects.
+- **shelf (browser library)** — import an author's exported `.kip` into a persistent, manageable bookshelf right in the browser; open to read, with auto-continue plus multiple manual save slots (load / delete / label); deployable to any static host.
 - **reader (desktop, Tauri 2)** — drag in or import a `.kip` (a zip package of a kin project) → a persistent, manageable bookshelf → the reading screen reuses the controlled `<Player>`; auto-continue plus multiple manual save slots (load / delete / label).
 
 ### Editor (desktop, Tauri 2)
@@ -40,7 +41,7 @@ The goal is a whole ecosystem: an **engine** (reads `.kin`, runs the story), a *
 - **The Rust toolchain** ([rustup](https://rustup.rs/)) — needed for the editor / reader desktop apps.
 - Building a Windows installer also needs **Visual Studio Build Tools** (with "Desktop development with C++") + the **WebView2 runtime** (already bundled on most Win10/11).
 
-The repository is a multi-subproject layout with the dependency chain `engine ← player ← { web-reader, editor, reader }`; the editor / reader also depend on `error-report`. The root `package.json` provides **sequential orchestration scripts** across subprojects (calling each subdirectory in dependency order; it does not use npm workspaces), so the common workflows run with a single command from the repo root.
+The repository is a multi-subproject layout with the dependency chain `engine ← player ← { viewer, shelf, editor, reader }`; the editor / reader also depend on `error-report`. The root `package.json` provides **sequential orchestration scripts** across subprojects (calling each subdirectory in dependency order; it does not use npm workspaces), so the common workflows run with a single command from the repo root.
 
 ```bash
 # 1. Install all subproject dependencies
@@ -50,7 +51,8 @@ npm run install:all
 npm run build:core
 
 # 3. Build an app (downstream builds auto-run build:core first)
-npm run build:web-reader        # the browser reader's static output
+npm run build:viewer            # the browser reader's static output
+npm run build:shelf             # the web bookshelf app's static output (deployable to any static host)
 npm run tauri:build             # the editor's desktop installer
 npm run tauri:build:reader      # the reader's desktop installer
 ```
@@ -75,7 +77,8 @@ npm run play -- ../samples/雾港之夜   # path is relative to engine/ (the roo
 **Read / develop in the browser:**
 
 ```bash
-npm run dev:web-reader   # auto-runs build:core first, then starts the dev server (open the local URL printed in the terminal)
+npm run dev:viewer       # auto-runs build:core first, then starts the dev server (open the local URL printed in the terminal)
+npm run dev:shelf        # dev server for the web bookshelf app (import .kip into a persistent library, multi-slot saves)
 ```
 
 **Write a story in the editor:**
@@ -102,14 +105,15 @@ kiny/
 ├── engine/        # TypeScript engine: parser + analyze + runtime + cli (@kiny/engine)
 ├── player/        # platform-agnostic React player layer (@kiny/player, reuses engine)
 ├── error-report/  # runtime error-collection library shared by editor / reader (@kiny/error-report)
-├── web-reader/    # Vite + React browser reader (@kiny/web-reader, reuses engine + player)
+├── viewer/        # Vite + React browser reader (@kiny/viewer, reuses engine + player)
+├── shelf/         # Vite + React web bookshelf reader (@kiny/shelf, browser .kip import + persistent library)
 ├── editor/        # Tauri 2 desktop editor (@kiny/editor, reuses engine + player + error-report)
 ├── reader/        # Tauri 2 desktop universal reader (@kiny/reader, reuses engine + player + error-report)
 ├── samples/       # real .kin story samples that also stress-test the engine
 └── docs/reference/ # the language spec (the single long-term source of truth)
 ```
 
-Dependencies: `engine ← player ← { web-reader, editor, reader }`; the editor / reader also depend on `error-report`. `engine/src/` is a "compiler front end + interpreter" pipeline: `parser/` (text → AST) → `analyze/` (cross-file semantic checks) → `runtime/` (stateful execution) → `project/` + `cli/` (load a project, play in the terminal). `player/` wraps a platform-agnostic driver / host and the controlled `<Player>` component on top of the engine; web-reader / editor / reader each add only their shell.
+Dependencies: `engine ← player ← { viewer, shelf, editor, reader }`; the editor / reader also depend on `error-report`. `engine/src/` is a "compiler front end + interpreter" pipeline: `parser/` (text → AST) → `analyze/` (cross-file semantic checks) → `runtime/` (stateful execution) → `project/` + `cli/` (load a project, play in the terminal). `player/` wraps a platform-agnostic driver / host and the controlled `<Player>` component on top of the engine; viewer / editor / reader each add only their shell.
 
 ## Documentation
 

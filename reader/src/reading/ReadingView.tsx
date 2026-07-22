@@ -109,7 +109,13 @@ export function ReadingView({
     if (!program) return
     const res = restoreSave(program, save)
     if (!res.ok) {
-      setNotice(res.reason === 'fingerprint-mismatch' ? '该存档对应的故事已更新，无法读取此存档。' : '存档已损坏，无法读取。')
+      setNotice(
+        res.reason === 'fingerprint-mismatch'
+          ? '该存档对应的故事已更新，无法读取此存档。'
+          : res.reason === 'story-error'
+            ? `故事脚本出错：${res.message}`
+            : '存档已损坏，无法读取。',
+      )
       return
     }
     pendingAuto.current = false // 读档不写 auto（auto 停在最靠前进度）

@@ -8,5 +8,5 @@ reader/dist/
 # Tauri 原生构建产物
 **/src-tauri/target/
 
-# web-reader 样例 staging 产物（由 stage-sample 在 pre* 钩子重新生成）
-web-reader/public/demo/
+# viewer 样例 staging 产物（由 stage-sample 在 pre* 钩子重新生成）
+viewer/public/demo/

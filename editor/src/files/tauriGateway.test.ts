@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 // mock 全部 Tauri 运行时模块（tauriGateway 在 import 期即引用），newProject 只用到 open/writeTextFile/join。
 const open = vi.fn()
+const save = vi.fn()
 const writeTextFile = vi.fn()
 const mkdir = vi.fn()
 const exists = vi.fn()
@@ -9,8 +10,9 @@ const readTextFile = vi.fn()
 const readDir = vi.fn()
 const remove = vi.fn()
 const invoke = vi.fn()
+const dirname = vi.fn()
 
-vi.mock('@tauri-apps/plugin-dialog', () => ({ open: (...a: unknown[]) => open(...a), ask: vi.fn(), save: vi.fn() }))
+vi.mock('@tauri-apps/plugin-dialog', () => ({ open: (...a: unknown[]) => open(...a), ask: vi.fn(), save: (...a: unknown[]) => save(...a) }))
 vi.mock('@tauri-apps/plugin-fs', () => ({
   readTextFile: (...a: unknown[]) => readTextFile(...a), writeTextFile: (...a: unknown[]) => writeTextFile(...a),
   readDir: (...a: unknown[]) => readDir(...a),
@@ -19,9 +21,34 @@ vi.mock('@tauri-apps/plugin-fs', () => ({
 }))
 vi.mock('@tauri-apps/api/core', () => ({ convertFileSrc: (s: string) => s, invoke: (...a: unknown[]) => invoke(...a) }))
 vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: vi.fn() }))
-vi.mock('@tauri-apps/api/path', () => ({ join: (...parts: string[]) => parts.join('/') }))
+vi.mock('@tauri-apps/api/path', () => ({ join: (...parts: string[]) => parts.join('/'), dirname: (...a: unknown[]) => dirname(...a) }))
 
 import { tauriFileGateway } from './tauriGateway'
+
+describe('tauriFileGateway.exportThemeFile', () => {
+  beforeEach(() => {
+    [save, writeTextFile, invoke, dirname].forEach((m) => m.mockReset())
+    writeTextFile.mockResolvedValue(undefined)
+    invoke.mockResolvedValue(undefined)
+    dirname.mockImplementation((p: string) => p.slice(0, p.lastIndexOf('/')))
+  })
+
+  it('选好落点 → 放行目标目录后写盘，返回 true', async () => {
+    save.mockResolvedValue('D:/out/林夜.kiny-theme.json')
+    const ok = await tauriFileGateway.exportThemeFile('林夜.kiny-theme.json', '{"a":1}')
+    expect(ok).toBe(true)
+    expect(save).toHaveBeenCalledWith({ defaultPath: '林夜.kiny-theme.json', filters: [{ name: 'Kiny 主题', extensions: ['json'] }] })
+    expect(invoke).toHaveBeenCalledWith('allow_project_dir', { dir: 'D:/out' }) // 任意盘符位置先放行
+    expect(writeTextFile).toHaveBeenCalledWith('D:/out/林夜.kiny-theme.json', '{"a":1}')
+  })
+
+  it('用户取消 → 返回 false，不写盘', async () => {
+    save.mockResolvedValue(null)
+    const ok = await tauriFileGateway.exportThemeFile('林夜.kiny-theme.json', '{"a":1}')
+    expect(ok).toBe(false)
+    expect(writeTextFile).not.toHaveBeenCalled()
+  })
+})
 
 describe('tauriFileGateway.newProject / pickDirectory', () => {
   beforeEach(() => {

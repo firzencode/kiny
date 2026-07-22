@@ -16,7 +16,11 @@ export type InteractionStep =
 export interface ReplayResult {
   /** 重建到最远一致点的 PlayState。 */
   state: PlayState
-  /** seq 中被成功应用的前缀长度（分歧时 < seq.length）。 */
+  /**
+   * seq 中成功应用的前缀长度 **+ 触发出错的那一步（若有）**（T069 决策 A7）。运行时出错的那一步照常计入
+   * appliedCount（其后步不计），使 `seq.slice(0, appliedCount)` **保留触发出错的交互**——重放能复现该错误、
+   * 停在出错处让作者/读者看到问题，胜过悄悄丢弃出错交互。其它分歧（越界/撞非暂停点/提前结束）不计出错步。
+   */
   appliedCount: number
   /** 最后一步（最后一次成功 choose/submitInput；seq 空则初始 advance）的瞬时 sfx。中间历史步全部丢弃，故重放不重播过往音效。 */
   sfx: string[]

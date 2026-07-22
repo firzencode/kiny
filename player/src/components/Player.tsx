@@ -14,7 +14,7 @@ const NO_SFX: string[] = []
 
 /**
  * 受控播放视口：只收 state + onChoose(pos)，自身不驱动 Story。
- * 驱动逻辑（advance/choose/replay/usePlayback）由消费者持有（web-reader/reader 用 usePlayback，editor 用保位重算）。
+ * 驱动逻辑（advance/choose/replay/usePlayback）由消费者持有（viewer/reader 用 usePlayback，editor 用保位重算）。
  * onChoose 的入参是「第几个可见选项」(0-based 位置)；因 ChoiceView.index === 位置，二者等价。
  * sfx：本次推进新触发的一次性音效队列（瞬时，引用变化即播）；与 bgm 共用 muted。
  * reveal / onContentClick（可选）：接 usePlayback 时启用打字机逐字揭示 + 点击推进 / 跳过；不传则最新行静态呈现。

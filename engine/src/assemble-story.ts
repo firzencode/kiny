@@ -36,7 +36,7 @@ export type AssembleResult =
 
 /**
  * 公共装配流水线：manifest 文本 + `.kin` 文件集 → 校验 / 合并 / 分析 / 起点解析 → Story。
- * 收敛 reader / tutorial / web-reader 三端此前各自手写、外围漂移（错误文案兜底、警告收集、返回形状）的复制。
+ * 收敛 reader / tutorial / viewer 三端此前各自手写、外围漂移（错误文案兜底、警告收集、返回形状）的复制。
  * 纯内存、无 IO——文件定位（`findManifest`）、读盘 / fetch、资源前缀（assetBase）留调用方 IO 层。
  * 错误经判别式 union 表达、不抛。
  */

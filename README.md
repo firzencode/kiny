@@ -22,7 +22,8 @@
 
 ### 阅读器
 
-- **web-reader（浏览器）**——加载自包含的导出网页，`file://` 双击即开、可脱机运行；选项点击、背景与 BGM 效果。
+- **viewer（浏览器）**——加载自包含的导出网页，`file://` 双击即开、可脱机运行；选项点击、背景与 BGM 效果。
+- **shelf（浏览器书库）**——在浏览器里导入作者导出的 `.kip` 建持久书库（可管理、可删），点开即读；多槽存档（自动续读 + 手动存读 / 删 / 加标签），可部署到任意静态站点。
 - **reader（桌面端，Tauri 2）**——拖入或导入 `.kip`（kin 项目的 zip 打包）→ 持久书架管理（可删）→ 阅读屏复用受控 `<Player>`；自动续读 + 多槽手动存档（读 / 删 / 加标签）。
 
 ### 编辑器（editor，桌面端，Tauri 2）
@@ -40,7 +41,7 @@
 - **Rust 工具链**（[rustup](https://rustup.rs/)）——editor / reader 的桌面端需要。
 - 打 Windows 安装包另需 **Visual Studio Build Tools**（勾选「使用 C++ 的桌面开发」）+ **WebView2 运行时**（Win10/11 多数已自带）。
 
-仓库是多子项目布局，依赖链 `engine ← player ← { web-reader, editor, reader }`，editor / reader 另依赖 `error-report`。根目录 `package.json` 提供跨子项目的**顺序编排脚本**（按依赖序调各子目录，不使用 npm workspaces），常用流程都从仓库根目录一条命令跑通。
+仓库是多子项目布局，依赖链 `engine ← player ← { viewer, shelf, editor, reader }`，editor / reader 另依赖 `error-report`。根目录 `package.json` 提供跨子项目的**顺序编排脚本**（按依赖序调各子目录，不使用 npm workspaces），常用流程都从仓库根目录一条命令跑通。
 
 ```bash
 # 1. 装好所有子项目依赖
@@ -50,7 +51,8 @@ npm run install:all
 npm run build:core
 
 # 3. 构建某个应用（下游构建会自动先 build:core）
-npm run build:web-reader        # 浏览器阅读器静态产物
+npm run build:viewer            # 浏览器阅读器静态产物
+npm run build:shelf             # 网页书库应用静态产物（可部署到任意静态站点）
 npm run tauri:build             # editor 的桌面端安装包
 npm run tauri:build:reader      # reader 的桌面端安装包
 ```
@@ -75,7 +77,8 @@ npm run play -- ../samples/雾港之夜   # 路径相对 engine/（根 play 把�
 **浏览器里读 / 开发**：
 
 ```bash
-npm run dev:web-reader   # 自动先 build:core，再起开发服务器（打开终端给出的本地 URL）
+npm run dev:viewer       # 自动先 build:core，再起开发服务器（打开终端给出的本地 URL）
+npm run dev:shelf        # 网页书库应用的开发服务器（导入 .kip 建持久书库、多档存读）
 ```
 
 **用编辑器写故事**：
@@ -102,14 +105,15 @@ kiny/
 ├── engine/        # TypeScript 引擎：parser + analyze + runtime + cli（@kiny/engine）
 ├── player/        # 平台无关的 React 播放层（@kiny/player，复用 engine）
 ├── error-report/  # editor / reader 共享的运行时错误收集库（@kiny/error-report）
-├── web-reader/    # Vite + React 浏览器阅读器（@kiny/web-reader，复用 engine + player）
+├── viewer/        # Vite + React 浏览器阅读器（@kiny/viewer，复用 engine + player）
+├── shelf/         # Vite + React 网页书库阅读器（@kiny/shelf，浏览器导入 .kip + 持久书库）
 ├── editor/        # Tauri 2 桌面端编辑器（@kiny/editor，复用 engine + player + error-report）
 ├── reader/        # Tauri 2 桌面端通用阅读器（@kiny/reader，复用 engine + player + error-report）
 ├── samples/       # 真实 .kin 故事样例，顺便压测引擎
 └── docs/reference/ # 语言规范（长期唯一真相源）
 ```
 
-依赖关系：`engine ← player ← { web-reader, editor, reader }`，editor / reader 另依赖 `error-report`。`engine/src/` 是一条「编译器前端 + 解释器」流水线：`parser/`（文本 → AST）→ `analyze/`（跨文件语义检查）→ `runtime/`（有状态执行）→ `project/` + `cli/`（加载项目、终端播放）。`player/` 在 engine 之上封装平台无关的 driver / host 与受控 `<Player>` 组件，web-reader / editor / reader 各自只补外壳。
+依赖关系：`engine ← player ← { viewer, shelf, editor, reader }`，editor / reader 另依赖 `error-report`。`engine/src/` 是一条「编译器前端 + 解释器」流水线：`parser/`（文本 → AST）→ `analyze/`（跨文件语义检查）→ `runtime/`（有状态执行）→ `project/` + `cli/`（加载项目、终端播放）。`player/` 在 engine 之上封装平台无关的 driver / host 与受控 `<Player>` 组件，viewer / editor / reader 各自只补外壳。
 
 ## 文档导航
 

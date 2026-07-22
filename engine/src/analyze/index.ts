@@ -10,6 +10,7 @@ import { checkVariables } from './checks/variables'
 import { checkFallthrough } from './checks/fallthrough'
 import { checkRichText } from './checks/richtext'
 import { checkMissingChoiceMarker } from './checks/missing-choice-marker'
+import { checkNonJsonGlobals } from './checks/non-json-globals'
 import { addOpeningKnots } from './opening'
 
 export type { Diagnostic, AnalyzeResult, ValidatedProgram } from './types'
@@ -30,6 +31,7 @@ export function analyze(files: ProjectFile[]): AnalyzeResult {
     ...checkFallthrough(files),
     ...checkRichText(files),
     ...checkMissingChoiceMarker(files),
+    ...checkNonJsonGlobals(files),
   ]
 
   const hasError = diagnostics.some((d) => d.severity === 'error')

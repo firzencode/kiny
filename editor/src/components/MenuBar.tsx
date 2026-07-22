@@ -3,6 +3,7 @@ import type { ShortcutOverrides } from '../state/settings'
 import { effectiveKeys } from '../shortcuts/bindings'
 import { format, isMac } from '../shortcuts/keys'
 import type { CommandId } from '../shortcuts/registry'
+import { type PresetId, PRESET_IDS, PRESET_LABEL } from '../state/themes'
 
 type EditCmd = 'cut' | 'copy' | 'paste' | 'selectAll'
 type ViewKey = 'sidebar' | 'preview' | 'highlight' | 'ai'
@@ -14,7 +15,10 @@ export interface MenuBarProps {
   warnCount: number
   hasProgram: boolean
   canSave: boolean
+  /** 有效明暗基底（用于非主题判断处，如启动页 banner）。 */
   theme: 'dark' | 'light'
+  /** 活动主题标识：用于主题菜单打勾（区分象牙稿 vs 素雪白，二者明暗性质都是 light）。 */
+  activeThemeId: string
   view: { sidebar: boolean; preview: boolean; highlight: boolean; ai: boolean }
   onNewProject: () => void
   onOpenProject: () => void
@@ -25,7 +29,7 @@ export interface MenuBarProps {
   onExportWebpage: () => void
   onExit: () => void
   onEdit: (cmd: EditCmd) => void
-  onSetTheme: (t: 'dark' | 'light') => void
+  onSetTheme: (t: PresetId) => void
   onToggleView: (key: ViewKey) => void
   onSyntaxRef: () => void
   onAbout: () => void
@@ -117,8 +121,7 @@ export function MenuBar(p: MenuBarProps) {
       items: [
         { label: '设置...', sc: scFor('openSettings'), act: p.onOpenSettings },
         { sep: true },
-        { label: '主题：石板墨', check: p.theme === 'dark', act: () => p.onSetTheme('dark') },
-        { label: '主题：象牙稿', check: p.theme === 'light', act: () => p.onSetTheme('light') },
+        ...PRESET_IDS.map((id) => ({ label: `主题：${PRESET_LABEL[id]}`, check: p.activeThemeId === id, act: () => p.onSetTheme(id) })),
         { sep: true },
         { label: '节点导航 / 资源管理器', check: p.view.sidebar, act: () => p.onToggleView('sidebar') },
         { label: '预览 / 结构图面板', check: p.view.preview, act: () => p.onToggleView('preview') },

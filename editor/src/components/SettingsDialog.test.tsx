@@ -6,9 +6,9 @@ import { DEFAULT_SETTINGS } from '../state/settings'
 import { DEFAULT_AI_CONFIG } from '../ai/aiConfig'
 
 const base = {
-  open: true, settings: DEFAULT_SETTINGS, theme: 'dark' as const,
+  open: true, settings: DEFAULT_SETTINGS, activeThemeId: 'dark', customThemes: [],
   aiConfig: DEFAULT_AI_CONFIG, controlInfo: null as { port: number } | null,
-  onSave: vi.fn(), onCancel: vi.fn(),
+  onSave: vi.fn(), onCancel: vi.fn(), onExportTheme: vi.fn(async () => true),
 }
 
 beforeEach(() => { document.documentElement.removeAttribute('style') })
@@ -49,7 +49,7 @@ describe('SettingsDialog', () => {
     render(<SettingsDialog {...base} onSave={onSave} />)
     await userEvent.click(screen.getByRole('button', { name: '增大代码字号' }))
     await userEvent.click(screen.getByRole('button', { name: '保存' }))
-    expect(onSave).toHaveBeenCalledWith({ ...DEFAULT_SETTINGS, codeSize: 14 }, 'dark', DEFAULT_AI_CONFIG)
+    expect(onSave).toHaveBeenCalledWith({ ...DEFAULT_SETTINGS, codeSize: 14 }, { activeThemeId: 'dark', customThemes: [] }, DEFAULT_AI_CONFIG)
   })
 
   it('步进器在上限夹紧（无变化、保存仍禁用）', async () => {
@@ -82,12 +82,13 @@ describe('SettingsDialog', () => {
     expect(screen.getByRole('button', { name: '保存' })).toBeEnabled()
   })
 
-  it('切主题 → 草稿主题变（保存启用）', async () => {
+  it('切主题（外观预设）→ 实时预览（写 data-theme）+ 草稿变（保存启用）', async () => {
     render(<SettingsDialog {...base} />)
     await userEvent.click(screen.getByRole('tab', { name: '外观' }))
-    await userEvent.click(screen.getByRole('button', { name: '象牙稿' }))
+    await userEvent.click(screen.getByRole('radio', { name: /象牙稿/ }))
     expect(screen.getByRole('button', { name: '保存' })).toBeEnabled()
-    expect(document.documentElement.dataset.theme).toBeUndefined()
+    // 主题编辑是实时预览：选象牙稿即写 documentElement（保存才落 localStorage）。
+    expect(document.documentElement.dataset.theme).toBe('light')
   })
 
   it('自定义字体：选「自定义...」展开输入框', async () => {
@@ -105,7 +106,7 @@ describe('SettingsDialog', () => {
     await userEvent.click(sw)
     expect(sw).not.toBeChecked()
     await userEvent.click(screen.getByRole('button', { name: '保存' }))
-    expect(onSave).toHaveBeenCalledWith({ ...DEFAULT_SETTINGS, autosaveRecovery: false }, 'dark', DEFAULT_AI_CONFIG)
+    expect(onSave).toHaveBeenCalledWith({ ...DEFAULT_SETTINGS, autosaveRecovery: false }, { activeThemeId: 'dark', customThemes: [] }, DEFAULT_AI_CONFIG)
   })
 
   it('预览随机种子开关：默认关，可切换并回传', async () => {
@@ -117,7 +118,7 @@ describe('SettingsDialog', () => {
     await userEvent.click(sw)
     expect(sw).toBeChecked()
     await userEvent.click(screen.getByRole('button', { name: '保存' }))
-    expect(onSave).toHaveBeenCalledWith({ ...DEFAULT_SETTINGS, previewRandomSeed: true }, 'dark', DEFAULT_AI_CONFIG)
+    expect(onSave).toHaveBeenCalledWith({ ...DEFAULT_SETTINGS, previewRandomSeed: true }, { activeThemeId: 'dark', customThemes: [] }, DEFAULT_AI_CONFIG)
   })
 
   it('外部控制开关：默认关，在 AI tab，可切换并回传', async () => {
@@ -129,7 +130,7 @@ describe('SettingsDialog', () => {
     await userEvent.click(sw)
     expect(sw).toBeChecked()
     await userEvent.click(screen.getByRole('button', { name: '保存' }))
-    expect(onSave).toHaveBeenCalledWith({ ...DEFAULT_SETTINGS, externalControl: true }, 'dark', DEFAULT_AI_CONFIG)
+    expect(onSave).toHaveBeenCalledWith({ ...DEFAULT_SETTINGS, externalControl: true }, { activeThemeId: 'dark', customThemes: [] }, DEFAULT_AI_CONFIG)
   })
 
   it('controlInfo 非 null 时 AI tab 显示运行中端口；null 时不显示', async () => {
@@ -152,7 +153,7 @@ describe('SettingsDialog', () => {
     expect(keyInput.value).toBe('')
     // 保存生效 → 回传空 key
     await userEvent.click(screen.getByRole('button', { name: '保存' }))
-    expect(onSave).toHaveBeenCalledWith(DEFAULT_SETTINGS, 'dark', { ...aiConfig, apiKey: '' })
+    expect(onSave).toHaveBeenCalledWith(DEFAULT_SETTINGS, { activeThemeId: 'dark', customThemes: [] }, { ...aiConfig, apiKey: '' })
   })
 
   it('key 为空时「清除」按钮禁用', async () => {
@@ -171,7 +172,7 @@ describe('SettingsDialog · 多 tab（T030）', () => {
     expect(screen.getByRole('tab', { name: '排版' })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByRole('combobox', { name: '代码字体' })).toBeInTheDocument()
     expect(screen.queryByLabelText('Base URL')).toBeNull()
-    expect(screen.queryByRole('button', { name: '象牙稿' })).toBeNull()
+    expect(screen.queryByRole('radio', { name: /象牙稿/ })).toBeNull()
   })
 
   it('点各 tab → 右栏渲染对应设置项', async () => {
@@ -180,7 +181,7 @@ describe('SettingsDialog · 多 tab（T030）', () => {
     expect(screen.getByLabelText('Base URL')).toBeInTheDocument()
     expect(screen.queryByRole('combobox', { name: '代码字体' })).toBeNull()
     await userEvent.click(screen.getByRole('tab', { name: '外观' }))
-    expect(screen.getByRole('button', { name: '象牙稿' })).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: /象牙稿/ })).toBeInTheDocument()
     await userEvent.click(screen.getByRole('tab', { name: '编辑器' }))
     expect(screen.getByRole('switch', { name: '自动恢复草稿' })).toBeInTheDocument()
   })
@@ -209,19 +210,19 @@ describe('SettingsDialog · 多 tab（T030）', () => {
     render(<SettingsDialog {...base} onSave={onSave} />)
     await userEvent.click(screen.getByRole('button', { name: '增大代码字号' })) // 排版
     await userEvent.click(screen.getByRole('tab', { name: '外观' }))
-    await userEvent.click(screen.getByRole('button', { name: '象牙稿' }))       // 外观
+    await userEvent.click(screen.getByRole('radio', { name: /象牙稿/ }))       // 外观
     expect(navDot('排版')).not.toBeNull()
     expect(navDot('外观')).not.toBeNull()
     await userEvent.click(screen.getByRole('button', { name: '保存' }))
-    expect(onSave).toHaveBeenCalledWith({ ...DEFAULT_SETTINGS, codeSize: 14 }, 'light', DEFAULT_AI_CONFIG)
+    expect(onSave).toHaveBeenCalledWith({ ...DEFAULT_SETTINGS, codeSize: 14 }, { activeThemeId: 'light', customThemes: [] }, DEFAULT_AI_CONFIG)
   })
 })
 
 describe('SettingsDialog · AI 节', () => {
   const baseProps = {
-    open: true, settings: DEFAULT_SETTINGS, theme: 'dark' as const,
+    open: true, settings: DEFAULT_SETTINGS, activeThemeId: 'dark', customThemes: [],
     aiConfig: DEFAULT_AI_CONFIG, controlInfo: null as { port: number } | null,
-    onSave: vi.fn(), onCancel: vi.fn(),
+    onSave: vi.fn(), onCancel: vi.fn(), onExportTheme: vi.fn(async () => true),
   }
 
   it('改 endpoint/model/key 后保存，回传新 aiConfig', () => {
@@ -232,7 +233,7 @@ describe('SettingsDialog · AI 节', () => {
     fireEvent.change(screen.getByLabelText('模型'), { target: { value: 'deepseek-chat' } })
     fireEvent.change(screen.getByLabelText('API Key'), { target: { value: 'sk-abc' } })
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
-    expect(onSave).toHaveBeenCalledWith(DEFAULT_SETTINGS, 'dark', expect.objectContaining({
+    expect(onSave).toHaveBeenCalledWith(DEFAULT_SETTINGS, { activeThemeId: 'dark', customThemes: [] }, expect.objectContaining({
       endpoint: 'https://api.deepseek.com/v1', model: 'deepseek-chat', apiKey: 'sk-abc',
     }))
   })

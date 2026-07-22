@@ -28,7 +28,7 @@ function atPause(s: PlayState): boolean {
  * - flow 模式：一行打完自动 step 到下一行 / 暂停点。
  * - line 模式：一行打完等读者点击再 step。
  * - 打字中点击 → 立即整行显示（跳过打字）。
- * 抵选项 / 结束即停，交由 Player 的 Choices / 结束渲染。web-reader / reader 消费。
+ * 抵选项 / 结束即停，交由 Player 的 Choices / 结束渲染。viewer / reader 消费。
  */
 export function usePlayback(story: Story, resolve: ResolveAsset, initial: PlayState = initialState): Playback {
   const [state, setState] = useState<PlayState>(initial)
@@ -92,7 +92,7 @@ export function usePlayback(story: Story, resolve: ResolveAsset, initial: PlaySt
       const view = cur.choices[pos]
       if (view == null) return
       // Q7 看门狗：ChoiceView.index 恒等于其在 choices 里的位置（engine 的 currentChoices 不过滤/重排）。
-      // onChoose、Player 选项渲染、reader/web-reader 的位置回传三处都隐式假定 pos===index；若将来
+      // onChoose、Player 选项渲染、reader/viewer 的位置回传三处都隐式假定 pos===index；若将来
       // engine 引入条件过滤使二者背离，这里立刻炸响，而非静默把「点第 pos 个」错映到别的分支。
       if (view.index !== pos) {
         throw new Error(`ChoiceView.index(${view.index}) 与显示位置(${pos})不一致：播放层多处假定二者相等`)

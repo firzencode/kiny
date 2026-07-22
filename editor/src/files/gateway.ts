@@ -78,6 +78,11 @@ export interface FileGateway {
    * index.html + 拷 assets。返回最终目标文件夹路径（用于成功提示）。
    */
   exportWebpage(projectDir: string, parentDir: string, folderName: string, projectData: string): Promise<string>
+  /**
+   * 导出自定义主题：弹原生保存对话框选落点并写入 JSON 文本（defaultName 为建议文件名）。
+   * 用户取消返 false，写入成功返 true。（不走浏览器 `<a download>`——Tauri WebView 里那是静默 no-op。）
+   */
+  exportThemeFile(defaultName: string, contents: string): Promise<boolean>
   /** 危险操作确认：真实现弹原生框，内存桩返回固定值。 */
   confirm(message: string): Promise<boolean>
   /** 强制关闭窗口（destroy，绕过 close-requested 守卫，避免自触发死循环）。 */
@@ -193,7 +198,7 @@ export function defaultWebpageDirName(storyName: string): string {
 }
 
 /**
- * 组装导出独立网页的内联数据（写入 `window.__KINY_PROJECT__`，对应 web-reader 的 InlineProject）：
+ * 组装导出独立网页的内联数据（写入 `window.__KINY_PROJECT__`，对应 viewer 的 InlineProject）：
  * manifest 文本 + 各 .kin 路径→源码。资源走 `assets/` 相对引用（资源名自带 assets/ 前缀），故 assetBase 空。
  *
  * 数据被原样拼进导出 index.html 的内联 `<script>`，故须转义 `< > &`——否则 .kin 文本里的

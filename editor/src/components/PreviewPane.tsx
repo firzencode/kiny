@@ -16,6 +16,8 @@ export function PreviewPane({
   onChoose,
   onSubmitInput,
   onRestart,
+  onBack,
+  canGoBack,
   reveal,
   onContentClick,
   style,
@@ -27,6 +29,9 @@ export function PreviewPane({
   onChoose: (pos: number) => void
   onSubmitInput: (text: string) => void
   onRestart: () => void
+  /** 返回上一步（撤销上一次 choice/@input，回到上一决定点重放）；canGoBack 为假时按钮禁用。作者调试工具。 */
+  onBack: () => void
+  canGoBack: boolean
   /** 打字机揭示绑定；只有人工点选项/重开预览时有值(usePreviewPlayback)，编辑重算/AI 校验时为 undefined。 */
   reveal?: RevealBinding
   onContentClick?: () => void
@@ -48,6 +53,9 @@ export function PreviewPane({
         {stale && <span className="preview-stale">基于上一个有效版本</span>}
         <span className="preview-spacer" />
         <span className="preview-seed">种子 #{seed.toString(16)}</span>
+        <button className="preview-back" onClick={onBack} disabled={!canGoBack} title="撤销上一次选择 / 输入，回到上一步">
+          ← 上一步
+        </button>
         <button className="preview-restart" onClick={onRestart}>
           ↺ 重开预览
         </button>

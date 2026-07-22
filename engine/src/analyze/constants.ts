@@ -15,9 +15,14 @@ export const COMMAND_NAMES = new Set([
   'input', // 唯一的交互命令：暂停请求读者文本，写回变量（engine 内部处理，不透传），见 checks/commands.ts 特判
 ])
 
-/** §6 JS 内建全局白名单（保守，按需扩充）。 */
+/**
+ * §6 JS 内建全局白名单（保守，按需扩充）。
+ * 容器类：`Map`/`Set`/`Date` 经快照白名单编解码存读档保真（T076）；`WeakMap`/`WeakSet` 可用但
+ * 内容不可枚举、存档会丢，由 analyze `non-json-global` warning 提示（见 checks/non-json-globals.ts）。
+ */
 export const JS_GLOBALS = new Set([
   'Math', 'JSON', 'Object', 'Array', 'String', 'Number', 'Boolean', 'Date',
+  'Map', 'Set', 'WeakMap', 'WeakSet',
   'parseInt', 'parseFloat', 'isNaN', 'isFinite',
   'undefined', 'NaN', 'Infinity',
 ])

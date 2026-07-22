@@ -271,6 +271,24 @@ describe('App 多文件集成', () => {
     expect(within(preview).queryByText('你往左走。')).toBeNull()
   })
 
+  it('预览「← 上一步」→ 撤销上一次选择、回上一决定点；起点处按钮禁用（T044）', async () => {
+    render(<App gateway={gw()} />)
+    await fileMenu('打开项目...')
+    const preview = screen.getByTestId('preview')
+    // 预览起点：seq 空 → 上一步禁用
+    expect(await screen.findByRole('button', { name: '向左' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /上一步/ })).toBeDisabled()
+    // 前进一步 → 上一步启用
+    await userEvent.click(screen.getByRole('button', { name: '向左' }))
+    expect(await within(preview).findByText('你往左走。')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /上一步/ })).toBeEnabled()
+    // 上一步 → 回到开场（选项重现、上一步叙事消失），回到起点按钮再度禁用
+    await userEvent.click(screen.getByRole('button', { name: /上一步/ }))
+    expect(await screen.findByRole('button', { name: '向左' })).toBeInTheDocument()
+    expect(within(preview).queryByText('你往左走。')).toBeNull()
+    expect(screen.getByRole('button', { name: /上一步/ })).toBeDisabled()
+  })
+
   it('打开 IO 失败 → role=alert 通知、项目名不载入', async () => {
     const gateway = gw()
     vi.spyOn(gateway, 'readProject').mockRejectedValue(new Error('读盘炸了'))

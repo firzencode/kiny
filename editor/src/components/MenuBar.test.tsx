@@ -13,6 +13,7 @@ function setup(over: Partial<ComponentProps<typeof MenuBar>> = {}) {
     hasProgram: true,
     canSave: true,
     theme: 'dark' as const,
+    activeThemeId: 'dark',
     view: { sidebar: true, preview: true, highlight: true, ai: false },
     onNewProject: vi.fn(),
     onOpenProject: vi.fn(),
@@ -85,11 +86,14 @@ describe('MenuBar', () => {
     expect(p.onSave).not.toHaveBeenCalled()
   })
 
-  it('视图菜单：切主题、切开关', async () => {
+  it('视图菜单：切主题（含素雪白）、切开关', async () => {
     const p = setup()
     await openMenu('视图')
     await userEvent.click(await screen.findByRole('menuitem', { name: '主题：象牙稿' }))
     expect(p.onSetTheme).toHaveBeenCalledWith('light')
+    await openMenu('视图')
+    await userEvent.click(await screen.findByRole('menuitem', { name: '主题：素雪白' })) // T074 第三预设
+    expect(p.onSetTheme).toHaveBeenCalledWith('plain')
     await openMenu('视图')
     await userEvent.click(await screen.findByRole('menuitem', { name: '节点导航 / 资源管理器' }))
     expect(p.onToggleView).toHaveBeenCalledWith('sidebar')

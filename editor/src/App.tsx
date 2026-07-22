@@ -14,6 +14,8 @@ import { MenuBar } from './components/MenuBar'
 import { Explorer } from './components/Explorer'
 import { TabBar } from './components/TabBar'
 import { Outline } from './components/Outline'
+import { TodoPanel } from './components/TodoPanel'
+import { scanTodos } from './todo/scanTodos'
 import { EditorPane, type EditorHandle } from './components/EditorPane'
 import { StoryGraph } from './components/StoryGraph'
 import { normalize as normalizeKey } from './shortcuts/keys'
@@ -29,7 +31,8 @@ import { ImportConflictDialog, type ConflictChoice } from './components/ImportCo
 import { basename, destPath, uniqueName } from './files/importAssets'
 import { underPath, entryAfterRename } from './util/paths'
 import { errMsg } from './util/errMsg'
-import { useViewPrefs, type Theme } from './hooks/useViewPrefs'
+import { useViewPrefs } from './hooks/useViewPrefs'
+import type { ThemeState } from './components/SettingsDialog'
 import { useWindowLifecycle } from './hooks/useWindowLifecycle'
 import { RecoveryDialog } from './components/RecoveryDialog'
 import { SettingsDialog } from './components/SettingsDialog'
@@ -75,7 +78,8 @@ export function App({ gateway }: { gateway: FileGateway }) {
     setNoticeRaw(msg == null ? null : { text: msg, tone })
   }
   const {
-    theme, setTheme, view, setView, hasSavedLayout,
+    theme, setPresetTheme, activeThemeId, setActiveThemeId, customThemes, setCustomThemes,
+    view, setView, hasSavedLayout,
     onSaveLayout, onRestoreMyLayout, onRestoreDefaultLayout,
     cols, explorerStyle, onResizeSidebar, onResizeAi, onResizeEditorPreview, onResizeExplorer,
   } = useViewPrefs(() => setNotice('已保存当前布局', 'success'))
@@ -214,6 +218,9 @@ export function App({ gateway }: { gateway: FileGateway }) {
 
   // 自动保存恢复草稿：脏缓冲后台写独立草稿（落 app-data，不碰真文件）。
   const draftBuffers = useMemo(() => Object.values(state.files), [state.files])
+  // 待办面板数据（T075）：扫全项目 .kin 的 TODO/FIXME。draftBuffers 已含当前编辑文件的最新 buffer，
+  // 故未保存的 // TODO 也即时出现；正则扫描成本极低，随 buffer 变化 useMemo 重算无压力。
+  const todos = useMemo(() => scanTodos(draftBuffers.map((f) => ({ path: f.path, text: f.source }))), [draftBuffers])
   const draftSignature = useMemo(
     () => JSON.stringify(draftBuffers.filter((f) => f.dirty).map((f) => [f.path, f.source])),
     [draftBuffers],
@@ -594,9 +601,10 @@ export function App({ gateway }: { gateway: FileGateway }) {
   const onSyntaxRef = () => setHelp('syntax')
   const onReportIssue = () => setShowErrorDetails(true)
   const onOpenSettings = () => setSettingsOpen(true)
-  const onSaveSettings = (next: Settings, nextTheme: Theme, nextAi: AiConfig) => {
+  const onSaveSettings = (next: Settings, nextTheme: ThemeState, nextAi: AiConfig) => {
     setSettings(clampSettings(next))
-    setTheme(nextTheme)
+    setActiveThemeId(nextTheme.activeThemeId)
+    setCustomThemes(nextTheme.customThemes)
     setAiConfig(nextAi)
     setSettingsOpen(false)
   }
@@ -713,6 +721,15 @@ export function App({ gateway }: { gateway: FileGateway }) {
     preview.restart(prog, start, nextSeed, resolveRef.current)
   }
 
+  // 返回上一步（作者调试工具）：丢弃 seq 末元素、经既有保位重算落回上一决定点（无动画，直接定格）。
+  // seq 空则 no-op。不改 seed（同一预览会话内后退确定性重建）；打断在飞的打字动画。
+  const onBack = () => {
+    const seq = interactionSeqRef.current
+    if (seq.length === 0) return
+    preview.cancel()
+    recompute(programRef.current, seq.slice(0, -1), resolveRef.current, playRef.current)
+  }
+
   const dirtyMap = useMemo(() => {
     const m: Record<string, boolean> = {}
     for (const f of Object.values(state.files)) m[f.path] = f.dirty
@@ -737,6 +754,7 @@ export function App({ gateway }: { gateway: FileGateway }) {
         hasProgram={programRef.current != null}
         canSave={active?.dirty ?? false}
         theme={theme}
+        activeThemeId={activeThemeId}
         view={view}
         onNewProject={onNewProject}
         onOpenProject={onOpenProject}
@@ -747,7 +765,7 @@ export function App({ gateway }: { gateway: FileGateway }) {
         onExportWebpage={onExportWebpage}
         onExit={requestExit}
         onEdit={(cmd) => editorRef.current?.exec(cmd)}
-        onSetTheme={setTheme}
+        onSetTheme={setPresetTheme}
         onToggleView={(key) => setView((v) => ({ ...v, [key]: !v[key] }))}
         onSyntaxRef={onSyntaxRef}
         onAbout={onAbout}
@@ -849,6 +867,12 @@ export function App({ gateway }: { gateway: FileGateway }) {
               collapsed={view.outlineCollapsed}
               onToggleCollapse={() => setView((v) => ({ ...v, outlineCollapsed: !v.outlineCollapsed }))}
             />
+            <TodoPanel
+              todos={todos}
+              onJump={onJumpDiagnostic}
+              collapsed={view.todoCollapsed}
+              onToggleCollapse={() => setView((v) => ({ ...v, todoCollapsed: !v.todoCollapsed }))}
+            />
             <ColResizer edge="right" onResize={onResizeSidebar} ariaLabel="调整资源管理器宽度" />
           </div>
         )}
@@ -927,6 +951,7 @@ export function App({ gateway }: { gateway: FileGateway }) {
                 />
               ) : (
                 <PreviewPane play={play} stale={stale} sfx={sfxQueue} seed={previewSeed} onChoose={onChoosePreview} onSubmitInput={onSubmitInputPreview} onRestart={onRestart}
+                  onBack={onBack} canGoBack={interactionSeqRef.current.length > 0}
                   reveal={preview.reveal} onContentClick={preview.onContentClick} />
               )}
             </div>
@@ -956,11 +981,13 @@ export function App({ gateway }: { gateway: FileGateway }) {
       <SettingsDialog
         open={settingsOpen}
         settings={settings}
-        theme={theme}
+        activeThemeId={activeThemeId}
+        customThemes={customThemes}
         aiConfig={aiConfig}
         controlInfo={controlInfo}
         onSave={onSaveSettings}
         onCancel={onCancelSettings}
+        onExportTheme={(defaultName, contents) => gateway.exportThemeFile(defaultName, contents)}
       />
       <ProjectSettingsDialog
         open={projectSettingsOpen}

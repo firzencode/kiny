@@ -124,6 +124,15 @@ describe('replay', () => {
     expect(r.appliedCount).toBe(1) // [继续] 这步已消费，错误发生在其后的 advance 阶段
   })
 
+  it('出错步计入 appliedCount、其后步不计（T069 A7）：slice(0,appliedCount) 保留触发出错的交互', () => {
+    const { program } = build(BOOM)
+    // 出错发生在第 1 步（choices(0)）之后的 advance；再给一个多余步 → 因 state.error 提前 break、不计入。
+    const r = replay(program, '起', 1, choices(0, 0), RESOLVE)
+    expect(r.state.error).not.toBeNull()
+    expect(r.appliedCount).toBe(1) // 触发出错的第 1 步计入、其后步不计入
+    expect(choices(0, 0).slice(0, r.appliedCount)).toEqual(choices(0)) // 持久化 seq 保留出错交互
+  })
+
   it('sfx：只回传最后一步、丢弃历史步（重放不重播过往音效）', () => {
     const SFX_TREE = `开场。
 * [A] -> a

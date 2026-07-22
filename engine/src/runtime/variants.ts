@@ -70,8 +70,10 @@ export function makeVariants(rng: Rng): Variants {
         const i = bump(String(id))
         return i < items.length ? String(items[i] ?? '') : ''
       },
-      shuffle: (id: unknown, ...items: unknown[]) => {
-        bump(String(id))
+      shuffle: (_id: unknown, ...items: unknown[]) => {
+        // shuffle 为纯随机可重复（spec §9.4，受 seed_random 控制）：输出只依赖 rng.next()。
+        // 不再 bump 计数器（T069 决策 B7：此站点计数器无消费方、是死写入；rng 状态另行序列化，
+        // determinism 不变，且该站点不再进 exportCounters）。
         return String(items[Math.floor(rng.next() * items.length)] ?? '')
       },
     },

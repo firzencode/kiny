@@ -1,5 +1,5 @@
 /** Kiny 主页（导出网页底部署名指向此处）。 */
-export const KINY_SITE_URL = 'https://firzencode.github.io/kiny-website/'
+export const KINY_SITE_URL = 'https://www.ahayoo.com/kiny/'
 
 /** 首屏门：点击「开始阅读」既进入故事、又在该用户手势内解锁音频自动播放。 */
 export function StartGate({ title, onStart }: { title: string; onStart: () => void }) {

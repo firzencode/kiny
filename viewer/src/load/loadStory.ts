@@ -36,7 +36,7 @@ function inlineProject(): InlineProbe {
 /**
  * 统一加载入口（reader-design §3）：检测到内联 `window.__KINY_PROJECT__` 走内联数据
  * （导出独立网页：file:// 下不能 fetch 本地文本），否则回退 fetch demo（线上 demo / 介绍站）。
- * 同一份 web-reader 既服务线上 demo 又服务导出网页。
+ * 同一份 viewer 既服务线上 demo 又服务导出网页。
  */
 export async function loadStory(seed = randomSeed()): Promise<LoadOutcome> {
   const probe = inlineProject()

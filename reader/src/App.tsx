@@ -132,7 +132,13 @@ export function App() {
           const res = restoreSave(out.program, save)
           if (res.ok) { enter(res.story, res.play); return } // 从续读存档态起（已在暂停点）
           // 故事更新过 / 存档损坏：优雅降级，从头开始并提示。
-          setError(res.reason === 'fingerprint-mismatch' ? '存档对应的故事已更新，已从头开始。' : '存档已损坏，已从头开始。')
+          setError(
+            res.reason === 'fingerprint-mismatch'
+              ? '存档对应的故事已更新，已从头开始。'
+              : res.reason === 'story-error'
+                ? `故事脚本出错：${res.message}`
+                : '存档已损坏，已从头开始。',
+          )
         }
       }
       // 从头开始：首帧推进 + 逐字揭示由 usePlayback 持有（StrictMode 安全）

@@ -1,0 +1,171 @@
+/* 自 reader/src/styles.css 整体移植拷贝（shelf 与 reader 同一套暗色皮肤）。
+   改 reader UI 样式时须同步本文件（见 BACKLOG 观察项）。文件末尾为 shelf 特有段。 */
+
+:root {
+  color-scheme: dark;
+  --bg0:#16181f; --bg1:#1b1e27; --bg2:#232733; --bg3:#2c3140;
+  --border:#272b36; --border2:#333949;
+  --text:#e4e7ee; --dim:#9aa1b2; --faint:#5b6273;
+  --accent:#d2a24c; --accent-soft:rgba(210,162,76,.16); --accent-line:rgba(210,162,76,.42);
+  --shadow:0 18px 50px rgba(0,0,0,.5);
+}
+* { box-sizing: border-box; }
+html, body, #root { margin:0; height:100%; }
+body { overflow:hidden; background:var(--bg1); color:var(--text);
+  font-family:'PingFang SC','Noto Sans SC','Hiragino Sans GB',system-ui,sans-serif; -webkit-font-smoothing:antialiased; }
+.app { display:flex; flex-direction:column; height:100%; }
+
+.shelfbar { display:flex; align-items:center; gap:14px; padding:16px 22px 14px; border-bottom:1px solid var(--border); }
+.shelfbar h1 { margin:0; font-size:17px; font-weight:600; }
+.shelfbar .count { color:var(--faint); font-size:12.5px; }
+.btn-import { margin-left:auto; display:inline-flex; align-items:center; gap:8px; font:inherit; font-size:13px; cursor:pointer;
+  padding:8px 16px; border-radius:9px; background:var(--accent); color:#15120a; border:1px solid var(--accent); font-weight:600; }
+.btn-import:hover { filter:brightness(1.07); }
+.btn-import:disabled { opacity:.55; cursor:default; }
+.shelf { flex:1; padding:8px 22px 24px; overflow-y:auto; }
+
+.ed-list { display:flex; flex-direction:column; }
+.ed-row { display:flex; align-items:center; gap:18px; padding:16px 6px; border-bottom:1px solid var(--border); cursor:pointer; position:relative; }
+.ed-row:hover { background:var(--bg0); }
+.ed-row:last-child { border-bottom:none; }
+.ed-cover { width:58px; height:78px; flex:none; border-radius:7px; overflow:hidden; border:1px solid var(--border2); background:var(--bg2); position:relative; }
+.ed-cover img { width:100%; height:100%; object-fit:cover; display:block; }
+.ed-cover.ph { display:grid; place-items:center; background:radial-gradient(120% 90% at 30% 18%, var(--bg3), var(--bg1)); }
+.ed-cover.ph span { font-size:30px; font-weight:700; color:var(--accent); opacity:.85; }
+.ed-cover.ph::after { content:''; position:absolute; left:9px; right:9px; bottom:9px; height:2px; background:var(--accent-line); border-radius:2px; }
+.ed-body { flex:1; min-width:0; }
+.ed-top { display:flex; align-items:baseline; gap:10px; }
+.ed-title { font-size:16px; font-weight:600; color:var(--text); }
+.ed-author { font-size:12px; color:var(--dim); }
+.ed-desc { margin:6px 0 0; font-size:13px; color:var(--dim); line-height:1.6;
+  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.ed-go { flex:none; font:inherit; font-size:13px; cursor:pointer; color:var(--accent); background:transparent;
+  border:1px solid var(--accent-line); border-radius:8px; padding:7px 14px; }
+.ed-go:hover { background:var(--accent-soft); }
+.ed-del { flex:none; width:30px; height:30px; border-radius:8px; display:grid; place-items:center; opacity:0;
+  background:transparent; border:1px solid transparent; color:var(--faint); cursor:pointer; transition:.14s; font-size:13px; }
+.ed-row:hover .ed-del { opacity:1; }
+.ed-del:hover { background:#c8443a; color:#fff; border-color:#c8443a; }
+
+.empty { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; gap:18px; padding:40px; }
+.empty .icon { width:88px; height:88px; border-radius:18px; display:grid; place-items:center; border:2px dashed var(--border2); color:var(--accent); background:var(--accent-soft); }
+.empty h2 { margin:4px 0 0; font-size:18px; font-weight:600; }
+.empty p { margin:0; color:var(--dim); font-size:13.5px; line-height:1.7; max-width:340px; }
+.empty .kip { color:var(--accent); font-family:ui-monospace,monospace; }
+
+.toast-error { position:fixed; top:14px; left:50%; transform:translateX(-50%); z-index:50; cursor:pointer;
+  background:#3a2020; color:#ffb4ac; border:1px solid #6e3b35; border-radius:9px; padding:10px 16px; font-size:13px; max-width:80vw; }
+
+/* 阅读屏返回条（叠在 player 之上）*/
+.reading { position:fixed; inset:0; overflow-y:auto; }
+.reading-bar { position:fixed; top:0; left:0; right:0; z-index:3; height:52px; display:flex; align-items:center; gap:10px; padding:0 14px;
+  background:linear-gradient(180deg, rgba(8,11,16,.72), transparent); pointer-events:none; }
+.reading-bar .back { pointer-events:auto; font:inherit; font-size:13px; cursor:pointer; color:#d8dbe2; background:rgba(8,11,16,.5);
+  border:1px solid rgba(255,255,255,.14); border-radius:9px; padding:7px 13px; }
+.reading-bar .back:hover { background:rgba(20,24,32,.8); }
+.reading-bar .title-chip { font-size:12.5px; color:#9aa1b2; letter-spacing:.06em; }
+/* margin-right 给 player 的右上角静音键（.audio-toggle: right 16px + 宽 ~42px）让位，避免两个右上控件重叠。 */
+.reading-bar .saves-btn { pointer-events:auto; margin-left:auto; margin-right:52px; font:inherit; font-size:13px; cursor:pointer; color:#d8dbe2;
+  background:rgba(8,11,16,.5); border:1px solid rgba(255,255,255,.14); border-radius:9px; padding:7px 13px; }
+.reading-bar .saves-btn:hover { background:rgba(20,24,32,.8); }
+/* 覆盖 player 静音键的纵向位置：reading-bar 内容垂直居中于 y≈26px（52px 的一半），
+   把静音键的中心也钉到 26px，使它与「书架/标题/存档读档」在同一行同心（不依赖其高度）。 */
+.audio-toggle { top:26px; transform:translateY(-50%); }
+
+/* 书架「重新开始」按钮（与「▸ 继续」并排）*/
+.ed-restart { flex:none; font:inherit; font-size:12.5px; cursor:pointer; color:var(--dim); background:transparent;
+  border:1px solid var(--border2); border-radius:8px; padding:7px 11px; }
+.ed-restart:hover { color:var(--text); background:var(--bg2); }
+
+/* 存档 / 读档面板 */
+.saves-overlay { position:fixed; inset:0; z-index:20; background:rgba(6,8,12,.55); display:grid; place-items:center; }
+.saves-panel { width:min(440px,92vw); max-height:80vh; overflow:auto; background:var(--bg1); border:1px solid var(--border2);
+  border-radius:14px; box-shadow:var(--shadow); padding:18px 20px; }
+.saves-head { display:flex; align-items:center; margin-bottom:12px; }
+.saves-head h2 { margin:0; font-size:16px; font-weight:600; }
+.saves-close { margin-left:auto; width:30px; height:30px; border-radius:8px; border:1px solid var(--border2); background:transparent;
+  color:var(--dim); font-size:18px; line-height:1; cursor:pointer; }
+.saves-close:hover { color:var(--text); background:var(--bg2); }
+.saves-new { width:100%; font:inherit; font-size:13px; cursor:pointer; color:var(--accent); background:var(--accent-soft);
+  border:1px solid var(--accent-line); border-radius:9px; padding:9px; margin-bottom:14px; }
+.saves-new:hover { background:rgba(210,162,76,.24); }
+.saves-empty { color:var(--faint); font-size:13px; text-align:center; padding:18px 0; }
+.saves-list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px; }
+.saves-row { display:flex; align-items:center; gap:10px; padding:10px 12px; background:var(--bg2); border:1px solid var(--border); border-radius:10px; }
+.saves-meta { min-width:0; flex:1; display:flex; flex-direction:column; gap:3px; }
+.saves-label { font-size:13.5px; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.saves-tag { font-size:11px; color:var(--accent); background:var(--accent-soft); border-radius:5px; padding:1px 6px; margin-right:7px; }
+.saves-time { font-size:11.5px; color:var(--faint); }
+.saves-load { flex:none; font:inherit; font-size:12.5px; cursor:pointer; color:var(--accent); background:transparent;
+  border:1px solid var(--accent-line); border-radius:8px; padding:6px 12px; }
+.saves-load:hover:not(:disabled) { background:var(--accent-soft); }
+.saves-load:disabled { opacity:.4; cursor:default; }
+.saves-del { flex:none; width:30px; height:30px; border-radius:8px; border:1px solid var(--border2); background:transparent;
+  display:grid; place-items:center; cursor:pointer; }
+.saves-del:hover { background:#c8443a; border-color:#c8443a; }
+/* 删除的行内二次确认态：危险色，点一次才真正删。 */
+.saves-del-confirm { flex:none; font:inherit; font-size:12px; cursor:pointer; color:#fff; background:#c8443a;
+  border:1px solid #c8443a; border-radius:8px; padding:7px 10px; white-space:nowrap; }
+.saves-del-confirm:hover { background:#d8554b; }
+.saves-notice { margin:12px 0 0; font-size:12.5px; color:#ffb4ac; }
+
+/* 轻量 toast：底部居中、一闪而过，不打断阅读。 */
+.reading-toast { position:fixed; left:50%; bottom:34px; transform:translateX(-50%); z-index:30;
+  background:rgba(8,11,16,.88); color:#e7eaf0; border:1px solid rgba(255,255,255,.14); border-radius:10px;
+  padding:9px 18px; font-size:13px; pointer-events:none; animation:toast-in .16s ease-out; }
+@keyframes toast-in { from { opacity:0; transform:translate(-50%,6px); } to { opacity:1; transform:translate(-50%,0); } }
+
+/* ===== 移动端适配（T100d）=====
+   仅保证手机上可用、不为手机重设计。reader 的 styles.css 在 @kiny/player/styles.css 之后引入，
+   故可覆盖 player 的 .choice/.player-content/.audio-toggle（桌面宽屏 / 细指针下面媒体查询不触发，桌面零改动）。
+   env(safe-area-inset-*) 在无安全区的设备 / 桌面上恒为 0，故基础块无条件应用亦无害。 */
+
+/* 顺滑滚动 + 安全区避让（刘海 / 圆角 / 手势条）。配合 index.html 的 viewport-fit=cover。 */
+.shelf, .reading, .saves-panel { -webkit-overflow-scrolling: touch; }
+.shelfbar { padding: calc(16px + env(safe-area-inset-top)) calc(22px + env(safe-area-inset-right)) 14px calc(22px + env(safe-area-inset-left)); }
+.shelf { padding: 8px calc(22px + env(safe-area-inset-right)) calc(24px + env(safe-area-inset-bottom)) calc(22px + env(safe-area-inset-left)); }
+.reading-bar { height: calc(52px + env(safe-area-inset-top)); padding-top: env(safe-area-inset-top);
+  padding-left: calc(14px + env(safe-area-inset-left)); padding-right: calc(14px + env(safe-area-inset-right)); }
+/* player 静音键钉在 reading-bar 垂直中心（半高 + 安全区顶），与书架/标题/存档同行同心。 */
+.audio-toggle { top: calc(26px + env(safe-area-inset-top)); }
+.toast-error { top: calc(14px + env(safe-area-inset-top)); }
+/* 阅读正文全宽单栏（player .player-content 本就 max-width:680px 居中、手机上近全宽）：补四向安全区 padding。 */
+.player-content { padding: calc(64px + env(safe-area-inset-top)) calc(24px + env(safe-area-inset-right))
+  calc(120px + env(safe-area-inset-bottom)) calc(24px + env(safe-area-inset-left)); }
+
+/* 触摸设备（细指针）：无 hover，删除键须常显；交互控件触摸命中尺寸 ≥ 44px。 */
+@media (pointer: coarse) {
+  .ed-del { opacity: 1; }
+  .btn-import, .ed-go, .ed-restart, .reading-bar .back, .reading-bar .saves-btn,
+  .saves-new, .saves-load, .saves-del-confirm, .ed-del-confirm /* shelf 特有插入 */, .choice { min-height: 44px; }
+  .ed-del, .saves-close, .saves-del { min-width: 44px; min-height: 44px; }
+}
+
+/* 窄屏（手机）：单列书架收紧间距、阅读正文缩小留白，避免横向溢出。 */
+@media (max-width: 640px) {
+  .shelfbar { padding: calc(14px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right)) 12px calc(16px + env(safe-area-inset-left)); gap: 10px; }
+  .shelfbar h1 { font-size: 16px; }
+  .shelf { padding: 6px calc(16px + env(safe-area-inset-right)) calc(20px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left)); }
+  .ed-row { gap: 12px; padding: 14px 2px; }
+  .ed-cover { width: 50px; height: 68px; }
+  .ed-title { font-size: 15px; }
+  .empty { padding: 28px; }
+  .player-content { padding: calc(52px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right))
+    calc(96px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left)); }
+}
+
+/* ===== 以下为 shelf 特有段（reader 无对应物）===== */
+
+/* 书架行删除的行内二次确认态（web 无系统对话框，用 saves-del-confirm 同款危险色）。 */
+.ed-del-confirm { flex:none; font:inherit; font-size:12px; cursor:pointer; color:#fff; background:#c8443a;
+  border:1px solid #c8443a; border-radius:8px; padding:7px 10px; white-space:nowrap; }
+.ed-del-confirm:hover { background:#d8554b; }
+
+/* 底部「Made with Kiny」署名。空书架时在 .app 列布局尾部贴底；有书时在 .shelf 滚动区末尾。 */
+.credit { flex:none; text-align:center; padding:18px 0 10px; }
+.credit a { color:var(--faint); font-size:12px; text-decoration:none; letter-spacing:.03em; }
+.credit a:hover { color:var(--accent); text-decoration:underline; }
+
+/* AppErrorBoundary 崩溃兜底页。 */
+.app-status { padding:32px; text-align:center; color:var(--dim); }
+.app-error { color:#ffb4ac; white-space:pre-wrap; }

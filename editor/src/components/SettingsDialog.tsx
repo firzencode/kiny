@@ -6,12 +6,18 @@ import {
 } from '../state/settings'
 import { type AiConfig, DEFAULT_AI_CONFIG } from '../ai/aiConfig'
 import { ShortcutsSettings } from './ShortcutsSettings'
+import { AppearanceSettings } from './AppearanceSettings'
+import { type CustomTheme, applyTheme, effectiveBase, isPresetId } from '../state/themes'
 import { openUrl } from '@tauri-apps/plugin-opener'
 
 /** 外部控制的 CLI/skill 文档仓（GitHub）。 */
 const KINY_CLI_DOCS_URL = 'https://github.com/firzencode/kiny-cli'
 
-type Theme = 'dark' | 'light'
+/** 主题态：活动主题 id（预设或自定义 id）+ 自定义主题列表，作为一个整体在弹窗草稿/保存流转。 */
+export interface ThemeState {
+  activeThemeId: string
+  customThemes: CustomTheme[]
+}
 
 // 设置分类 tab：数组描述便于扩展。
 type TabId = 'typography' | 'appearance' | 'editor' | 'ai' | 'shortcuts'
@@ -26,12 +32,28 @@ const TABS: { id: TabId; label: string }[] = [
 export interface SettingsDialogProps {
   open: boolean
   settings: Settings
-  theme: Theme
+  activeThemeId: string
+  customThemes: CustomTheme[]
   aiConfig: AiConfig
   /** 外部控制运行态（T040）：非 null 时显示「运行中 · 端口 N」，仅只读展示，不受此弹窗控制。 */
   controlInfo: { port: number } | null
-  onSave: (next: Settings, theme: Theme, aiConfig: AiConfig) => void
+  onSave: (next: Settings, theme: ThemeState, aiConfig: AiConfig) => void
   onCancel: () => void
+  /** 导出自定义主题到文件（外观页透传给 AppearanceSettings）；取消返 false。 */
+  onExportTheme: (defaultName: string, contents: string) => Promise<boolean>
+}
+
+/** 主题态语义相等（活动 id + 自定义列表逐项 id/name/base/overrides 同）。 */
+function themeStateEq(a: ThemeState, b: ThemeState): boolean {
+  if (a.activeThemeId !== b.activeThemeId) return false
+  if (a.customThemes.length !== b.customThemes.length) return false
+  return a.customThemes.every((t, i) => {
+    const o = b.customThemes[i]
+    if (!o || t.id !== o.id || t.name !== o.name || t.base !== o.base) return false
+    const tk = Object.keys(t.overrides)
+    const ok = Object.keys(o.overrides)
+    return tk.length === ok.length && tk.every((k) => t.overrides[k] === o.overrides[k])
+  })
 }
 
 const decimals = (step: number) => (step.toString().split('.')[1] || '').length
@@ -95,30 +117,45 @@ function FontRow({ label, value, presets, fallback, onChange }: {
   )
 }
 
-export function SettingsDialog({ open, settings, theme, aiConfig, controlInfo, onSave, onCancel }: SettingsDialogProps) {
+export function SettingsDialog({ open, settings, activeThemeId, customThemes, aiConfig, controlInfo, onSave, onCancel, onExportTheme }: SettingsDialogProps) {
   const [draft, setDraft] = useState<Settings>(settings)
-  const [draftTheme, setDraftTheme] = useState<Theme>(theme)
+  const [draftTheme, setDraftTheme] = useState<ThemeState>({ activeThemeId, customThemes })
   const [draftAi, setDraftAi] = useState<AiConfig>(aiConfig)
   const [showKey, setShowKey] = useState(false)
   const [activeTab, setActiveTab] = useState<TabId>('typography')
 
-  // 打开时从当前已提交值初始化草稿；activeTab 重置到「排版」（不跨会话记忆上次 tab）
-  useEffect(() => { if (open) { setDraft(settings); setDraftTheme(theme); setDraftAi(aiConfig); setShowKey(false); setActiveTab('typography') } }, [open, settings, theme, aiConfig])
+  // 草稿与已提交值对齐：打开时初始化、**关闭时也重置**——否则下次打开会先用上次取消的草稿主题
+  // 跑一帧实时预览（闪一下旧配色）再被本 effect 纠正。activeTab 仅打开时重置到「排版」（不跨会话记忆）。
+  useEffect(() => {
+    setDraft(settings); setDraftTheme({ activeThemeId, customThemes }); setDraftAi(aiConfig)
+    if (open) { setShowKey(false); setActiveTab('typography') }
+  }, [open, settings, activeThemeId, customThemes, aiConfig])
+
+  // 主题实时预览：草稿主题一变即 applyTheme 到 documentElement，用户马上看到（保存才落 localStorage）。
+  useEffect(() => { if (open) applyTheme(draftTheme.activeThemeId, draftTheme.customThemes) }, [open, draftTheme])
+
+  // 取消 / 关闭：把 documentElement 主题回滚到已提交态（撤销实时预览的临时改动），再走 onCancel。
+  const cancel = () => { applyTheme(activeThemeId, customThemes); onCancel() }
 
   // Esc = 取消（仅打开时挂）
   useEffect(() => {
     if (!open) return
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onCancel() }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') cancel() }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open, onCancel])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, onCancel, activeThemeId, customThemes])
 
   if (!open) return null
+  const draftBase = effectiveBase(draftTheme.activeThemeId, draftTheme.customThemes)
+  // 字体预览小样的 data-theme：预设直接用其自身 id（素雪白 plain 的明暗基底是 light，用 draftBase 会把
+  // 小样渲染成象牙稿米白而非纯白），自定义回落基底——与 applyTheme 一致。
+  const swatchTheme = isPresetId(draftTheme.activeThemeId) ? draftTheme.activeThemeId : draftBase
   const aiEq = draftAi.endpoint === aiConfig.endpoint && draftAi.model === aiConfig.model && draftAi.apiKey === aiConfig.apiKey
   // 按 tab 拆分脏标记分片（左栏各 tab 脏点用）；全局 dirty = 各分片之或（等价旧 eqSettings 组合）。
   const dirtyTypo = draft.codeFont !== settings.codeFont || draft.codeSize !== settings.codeSize || draft.codeLh !== settings.codeLh ||
     draft.proseFont !== settings.proseFont || draft.proseSize !== settings.proseSize || draft.proseLh !== settings.proseLh
-  const dirtyAppearance = draftTheme !== theme
+  const dirtyAppearance = !themeStateEq(draftTheme, { activeThemeId, customThemes })
   const dirtyEditor = draft.autosaveRecovery !== settings.autosaveRecovery || draft.previewRandomSeed !== settings.previewRandomSeed
   const dirtyShortcuts = !shortcutsEq(draft.shortcuts, settings.shortcuts)
   const dirtyAi = !aiEq || draft.aiChatRetentionDays !== settings.aiChatRetentionDays || draft.externalControl !== settings.externalControl
@@ -129,7 +166,7 @@ export function SettingsDialog({ open, settings, theme, aiConfig, controlInfo, o
     // 点遮罩空白处不关闭（避免误触丢失未保存改动）——仅 ×／取消／Esc 可关。
     <div className="settings-scrim">
       <div className="settings-dlg" role="dialog" aria-modal="true" aria-label="设置">
-        <button className="settings-close" aria-label="关闭" onClick={onCancel}>×</button>
+        <button className="settings-close" aria-label="关闭" onClick={cancel}>×</button>
         <div className="settings-head">
           <span className="settings-title"><b>设置</b></span>
           <span className="settings-ver">排版偏好</span>
@@ -160,7 +197,7 @@ export function SettingsDialog({ open, settings, theme, aiConfig, controlInfo, o
                   onChange={(v) => setDraft({ ...draft, codeSize: v })} />
                 <Stepper label="代码行距" unit="" bounds={SETTINGS_BOUNDS.codeLh} value={draft.codeLh}
                   onChange={(v) => setDraft({ ...draft, codeLh: v })} />
-                <div className="settings-swatch" data-theme={draftTheme}
+                <div className="settings-swatch" data-theme={swatchTheme}
                   style={{ fontFamily: draft.codeFont, fontSize: draft.codeSize, lineHeight: draft.codeLh }}>
                   <div className="settings-swatch-tag">预览</div>
                   <pre className="settings-pre">{`=== 雾港开场 ===\n~ let gold = 10\n你还剩 {gold} 枚金币。`}</pre>
@@ -175,7 +212,7 @@ export function SettingsDialog({ open, settings, theme, aiConfig, controlInfo, o
                   onChange={(v) => setDraft({ ...draft, proseSize: v })} />
                 <Stepper label="正文行距" unit="" bounds={SETTINGS_BOUNDS.proseLh} value={draft.proseLh}
                   onChange={(v) => setDraft({ ...draft, proseLh: v })} />
-                <div className="settings-swatch" data-theme={draftTheme}
+                <div className="settings-swatch" data-theme={swatchTheme}
                   style={{ fontFamily: draft.proseFont, fontSize: draft.proseSize, lineHeight: draft.proseLh }}>
                   <div className="settings-swatch-tag">预览</div>雾从港口涌上来，遮住了路灯。「想要点什么？」老板问。
                 </div>
@@ -183,19 +220,12 @@ export function SettingsDialog({ open, settings, theme, aiConfig, controlInfo, o
             </>)}
 
             {activeTab === 'appearance' && (
-              <div className="settings-grp">
-                <div className="settings-row">
-                  <div className="settings-label">主题</div>
-                  <div className="settings-seg" role="group" aria-label="主题">
-                    {(['dark', 'light'] as Theme[]).map((t) => (
-                      <button key={t} className={'settings-seg-btn' + (draftTheme === t ? ' on' : '')}
-                        aria-pressed={draftTheme === t} onClick={() => setDraftTheme(t)}>
-                        {t === 'dark' ? '石板墨' : '象牙稿'}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
+              <AppearanceSettings
+                activeThemeId={draftTheme.activeThemeId}
+                customThemes={draftTheme.customThemes}
+                onChange={(nextActive, nextCustom) => setDraftTheme({ activeThemeId: nextActive, customThemes: nextCustom })}
+                saveThemeFile={onExportTheme}
+              />
             )}
 
             {activeTab === 'editor' && (
@@ -334,9 +364,9 @@ export function SettingsDialog({ open, settings, theme, aiConfig, controlInfo, o
         </div>
 
         <div className="settings-foot">
-          <button className="settings-btn" onClick={() => { setDraft(DEFAULT_SETTINGS); setDraftTheme('dark'); setDraftAi(DEFAULT_AI_CONFIG) }}>恢复默认</button>
+          <button className="settings-btn" onClick={() => { setDraft(DEFAULT_SETTINGS); setDraftTheme({ activeThemeId: 'dark', customThemes: draftTheme.customThemes }); setDraftAi(DEFAULT_AI_CONFIG) }}>恢复默认</button>
           <span className="settings-foot-spacer" />
-          <button className="settings-btn" onClick={onCancel}>取消</button>
+          <button className="settings-btn" onClick={cancel}>取消</button>
           <button className="settings-btn primary" disabled={!dirty} onClick={() => onSave(draft, draftTheme, draftAi)}>保存</button>
         </div>
       </div>

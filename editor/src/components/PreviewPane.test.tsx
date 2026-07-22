@@ -19,10 +19,21 @@ const atChoice: PlayState = {
 describe('PreviewPane', () => {
   it('渲染 Player；点选项以位置回调 onChoose', async () => {
     const onChoose = vi.fn()
-    render(<PreviewPane play={atChoice} stale={false} seed={0x5eed} onChoose={onChoose} onSubmitInput={vi.fn()} onRestart={vi.fn()} />)
+    render(<PreviewPane play={atChoice} stale={false} seed={0x5eed} onChoose={onChoose} onSubmitInput={vi.fn()} onRestart={vi.fn()} onBack={vi.fn()} canGoBack={false} />)
     expect(screen.getByText('开场。')).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'B' }))
     expect(onChoose).toHaveBeenCalledWith(1)
+  })
+
+  it('「← 上一步」按钮：canGoBack 时点触发 onBack、否则禁用（T044）', async () => {
+    const onBack = vi.fn()
+    const { rerender } = render(<PreviewPane play={atChoice} stale={false} seed={0x5eed} onChoose={vi.fn()} onSubmitInput={vi.fn()} onRestart={vi.fn()} onBack={onBack} canGoBack={true} />)
+    const back = screen.getByRole('button', { name: /上一步/ })
+    expect(back).toBeEnabled()
+    await userEvent.click(back)
+    expect(onBack).toHaveBeenCalledTimes(1)
+    rerender(<PreviewPane play={atChoice} stale={false} seed={0x5eed} onChoose={vi.fn()} onSubmitInput={vi.fn()} onRestart={vi.fn()} onBack={onBack} canGoBack={false} />)
+    expect(screen.getByRole('button', { name: /上一步/ })).toBeDisabled() // seq 空（预览起点）→ 禁用
   })
 
   it('停在 @input：输入框可用，回车提交以文本回调 onSubmitInput', async () => {
@@ -31,7 +42,7 @@ describe('PreviewPane', () => {
       log: [{ kind: 'narration', spans: [{ text: '请报上名来。' }] }],
       host: emptyHost, choices: [], input: { placeholder: '你的名字' }, ended: false, error: null,
     }
-    render(<PreviewPane play={atInput} stale={false} seed={0x5eed} onChoose={vi.fn()} onSubmitInput={onSubmitInput} onRestart={vi.fn()} />)
+    render(<PreviewPane play={atInput} stale={false} seed={0x5eed} onChoose={vi.fn()} onSubmitInput={onSubmitInput} onRestart={vi.fn()} onBack={vi.fn()} canGoBack={false} />)
     const box = screen.getByPlaceholderText('你的名字')
     expect(box).not.toBeDisabled() // 非禁用态（对比 T037 的禁用占位）
     await userEvent.type(box, '旅人{Enter}')
@@ -40,39 +51,39 @@ describe('PreviewPane', () => {
 
   it('重开按钮回调 onRestart', async () => {
     const onRestart = vi.fn()
-    render(<PreviewPane play={atChoice} stale={false} seed={0x5eed} onChoose={vi.fn()} onSubmitInput={vi.fn()} onRestart={onRestart} />)
+    render(<PreviewPane play={atChoice} stale={false} seed={0x5eed} onChoose={vi.fn()} onSubmitInput={vi.fn()} onRestart={onRestart} onBack={vi.fn()} canGoBack={false} />)
     await userEvent.click(screen.getByRole('button', { name: /重开预览/ }))
     expect(onRestart).toHaveBeenCalled()
   })
 
   it('stale=true 显示「基于上一个有效版本」角标', () => {
-    render(<PreviewPane play={atChoice} stale seed={0x5eed} onChoose={vi.fn()} onSubmitInput={vi.fn()} onRestart={vi.fn()} />)
+    render(<PreviewPane play={atChoice} stale seed={0x5eed} onChoose={vi.fn()} onSubmitInput={vi.fn()} onRestart={vi.fn()} onBack={vi.fn()} canGoBack={false} />)
     expect(screen.getByText(/基于上一个有效版本/)).toBeInTheDocument()
   })
 
   it('play.error 非空显示运行时错误横幅', () => {
     const errored: PlayState = { ...atChoice, choices: [], error: { message: '炸了', file: 'main.kin', line: 2 } }
-    render(<PreviewPane play={errored} stale={false} seed={0x5eed} onChoose={vi.fn()} onSubmitInput={vi.fn()} onRestart={vi.fn()} />)
+    render(<PreviewPane play={errored} stale={false} seed={0x5eed} onChoose={vi.fn()} onSubmitInput={vi.fn()} onRestart={vi.fn()} onBack={vi.fn()} canGoBack={false} />)
     expect(screen.getByText(/运行时错误/)).toBeInTheDocument()
     expect(screen.getByText(/炸了/)).toBeInTheDocument()
   })
 
   it('play 为 null（尚无有效版本）显示占位', () => {
-    render(<PreviewPane play={null} stale={false} seed={0x5eed} onChoose={vi.fn()} onSubmitInput={vi.fn()} onRestart={vi.fn()} />)
+    render(<PreviewPane play={null} stale={false} seed={0x5eed} onChoose={vi.fn()} onSubmitInput={vi.fn()} onRestart={vi.fn()} onBack={vi.fn()} canGoBack={false} />)
     expect(screen.getByText(/暂无预览/)).toBeInTheDocument()
   })
 
   it('sfx 队列非空：透传到 Player 播放一次性音效', () => {
-    render(<PreviewPane play={atChoice} stale={false} sfx={['mem://s.mp3']} seed={0x5eed} onChoose={vi.fn()} onSubmitInput={vi.fn()} onRestart={vi.fn()} />)
+    render(<PreviewPane play={atChoice} stale={false} sfx={['mem://s.mp3']} seed={0x5eed} onChoose={vi.fn()} onSubmitInput={vi.fn()} onRestart={vi.fn()} onBack={vi.fn()} canGoBack={false} />)
     expect(window.HTMLMediaElement.prototype.play).toHaveBeenCalled()
   })
 
   it('种子指示器按传入 seed 渲染十六进制', () => {
     const { rerender } = render(
-      <PreviewPane play={atChoice} stale={false} seed={0x5eed} onChoose={vi.fn()} onSubmitInput={vi.fn()} onRestart={vi.fn()} />,
+      <PreviewPane play={atChoice} stale={false} seed={0x5eed} onChoose={vi.fn()} onSubmitInput={vi.fn()} onRestart={vi.fn()} onBack={vi.fn()} canGoBack={false} />,
     )
     expect(screen.getByText('种子 #5eed')).toBeInTheDocument()
-    rerender(<PreviewPane play={atChoice} stale={false} seed={0xa3f10b2c} onChoose={vi.fn()} onSubmitInput={vi.fn()} onRestart={vi.fn()} />)
+    rerender(<PreviewPane play={atChoice} stale={false} seed={0xa3f10b2c} onChoose={vi.fn()} onSubmitInput={vi.fn()} onRestart={vi.fn()} onBack={vi.fn()} canGoBack={false} />)
     expect(screen.getByText('种子 #a3f10b2c')).toBeInTheDocument()
   })
 
@@ -85,7 +96,7 @@ describe('PreviewPane', () => {
     }
     render(
       <PreviewPane play={long} stale={false} seed={0x5eed} onChoose={vi.fn()} onSubmitInput={vi.fn()} onRestart={vi.fn()}
-        reveal={reveal} onContentClick={onContentClick} />,
+        onBack={vi.fn()} canGoBack={false} reveal={reveal} onContentClick={onContentClick} />,
     )
     expect(screen.queryByText('这是一段用来验证揭示动画是否生效的长文字。')).toBeNull()
     await userEvent.click(document.querySelector('.player-content')!)
