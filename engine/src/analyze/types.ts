@@ -45,6 +45,8 @@ export interface FragmentInfo {
   references: string[]
   /** 自由标识符的赋值目标（`random = 5`）——供检测给内置函数赋值。 */
   assigns: string[]
+  /** `$nodes` 的字面成员访问（path + 字面调用 argc）——供编译期校验存在性 / arity。 */
+  nodesAccess: { path: string; argc: number | null }[]
   syntaxError: string | null
 }
 

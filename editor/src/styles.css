@@ -51,6 +51,33 @@
   --s-tag: #6fb0a8;
   --s-text: #cdd2dd;
 }
+
+/* 作品主题 token（player 公开契约）在编辑器皮肤下的取值：预览默认与当前编辑器主题同一套配色，
+   作者覆盖同名 token 即在预览里换肤（所见即读者所见）。
+   各值用 var(--bg-1) 这类编辑器语义变量而非字面量——三套主题（石板墨 / 象牙稿 / 素雪白）
+   各自定义了这些变量，故本块只需写一次、随 data-theme 自动跟随。
+   **必须放 :root**：作者 css 同样写 `:root { --kiny-* }`，其 <style> 注入在本文件之后，
+   同特异性下后来者胜、能覆盖本块；若改放 .preview-stage，则因「更近的祖先」永远赢过作者的
+   :root，换肤在预览里恒不生效。 */
+:root {
+  --kiny-page-bg: var(--bg-1);
+  --kiny-text: var(--text);
+  --kiny-prose-font: var(--prose-font);
+  --kiny-prose-size: var(--prose-size);
+  --kiny-prose-line-height: var(--prose-lh);
+  /* 阅读列宽**不覆盖**，继承 player 默认（680px）——预览与读者所见同一列宽（spec「五端一致」）。
+     此处曾覆盖为 504px，那是旧结构「560 容器扣去两侧 28 内边距」的推导；列宽改由子元素约束后
+     该推导不再成立，且预览区拖宽时会把正文卡在 504、两侧空出大片留白。窄预览区不受影响
+     （列宽本就由容器决定，上限用不上）。 */
+  --kiny-bg-overlay: color-mix(in srgb, var(--bg-0) 55%, transparent);
+  --kiny-control-bg: color-mix(in srgb, var(--bg-1) 55%, transparent);
+  --kiny-control-bg-hover: var(--accent-soft);
+  --kiny-control-text: var(--text);
+  --kiny-control-border: var(--border-2);
+  --kiny-accent: var(--text-dim);
+  --kiny-error: var(--err);
+}
+
 [data-theme='light'] {
   color-scheme: light;
   --backdrop: #cfc9ba;
@@ -613,6 +640,15 @@ button {
   border-radius: 999px;
   padding: 2px 9px;
 }
+/* 作品资源问题角标（悬浮看详情）：与 stale 同一档视觉，不抢正文注意力。 */
+.preview-asset-warn {
+  font-size: 11.5px;
+  color: var(--warn);
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
+  border-radius: 999px;
+  padding: 2px 9px;
+  cursor: help;
+}
 .preview-spacer {
   flex: 1;
 }
@@ -671,63 +707,57 @@ button {
 .preview-stage .player {
   position: absolute;
   inset: 0;
+  height: auto; /* 抵消基础样式的 height:100vh（显式高度会令 inset 的 bottom 失效、撑出预览区） */
   min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+/* 固定区域（@panel）：形态（整列 vs 折叠）已由 player 基础样式的容器查询按**预览区宽度**
+   自动判定，此处不再按端强制折叠——拖宽预览即恢复左右侧栏，与读者所见一致。
+   只剩定位基准要改：侧栏整列态用 `position: fixed`，而 `container-type` 的 layout containment
+   在 Chromium 实测**不**为 fixed 后代建立 containing block（侧栏仍相对视口、跑出预览区跨到
+   整个编辑器窗口）。故宽态改 absolute——相对 `.preview-stage .player`（absolute inset:0，
+   撑满预览区）定位。必须写在同一个 @container 条件内：折叠态基础样式是 `position: static`，
+   无条件的 `.preview-stage .panel-*{absolute}` 特异性更高会把折叠压掉。 */
+@container player (min-width: 720px) {
+  .preview-stage .panel-left,
+  .preview-stage .panel-right { position: absolute; }
+  /* 顶部留白：右侧栏须避让右上角静音键（.preview-stage .audio-toggle: top 12 + 高 ~30），
+     左侧栏虽无遮挡也取同一值——两栏内容起始高度对齐，视觉才成一对。
+     只下移内容不改 top，发丝线仍贯通全高。viewer / reader 里改用 top 值避让顶部控件。 */
+  .preview-stage .panel-left,
+  .preview-stage .panel-right { padding-top: 46px; }
 }
 .preview-stage .bg-layer {
   position: absolute;
   inset: 0;
   filter: blur(2px) brightness(0.6);
 }
-.preview-stage .bg-layer::after {
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--bg-0) 28%, transparent),
-    color-mix(in srgb, var(--bg-0) 72%, transparent)
-  );
-}
+/* 压暗遮罩、正文排版、选项配色一律走 `--kiny-*` token（上方 :root 已映射到编辑器皮肤），
+   此处不再直接写属性——否则 `.preview-stage .x` 的高特异性会盖过作者覆盖的 token，
+   预览就与读者所见不一致（spec「五端一致」）。 */
+/* 滚动容器 / 阅读列结构（全宽滚动 + 子元素约束列宽）已是 player 基础样式；
+   预览只收紧内边距与行距（默认列宽 token 504 = 原 560 容器扣去两侧 28 内边距，视觉列宽不变）。
+   margin/max-width 这两条是**防御性冗余**（player 基础样式里已有同样声明）：`.preview-stage .player`
+   是 column flex，交叉轴上只要出现 `margin:0 auto` 就会取消 stretch、令滚动容器 shrink-to-fit
+   ——预览正文一行到底 + 横向巨大滚动。这里特异性更高，能压住任何来源（旧版本 player 样式、
+   宿主皮肤、作品 css）引入的 auto margin。别当重复代码删掉。 */
 .preview-stage .player-content {
-  position: relative;
-  z-index: 1;
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow: auto;
-  /* 滚动容器占满整宽，让滚动条贴预览区右缘；阅读列宽改由内容子元素约束（下方规则）。
-     必须清掉基础样式的 margin:0 auto + max-width——.preview-stage .player 是 column flex，
-     横向 auto margin 会让本容器 shrink-to-fit 随内容宽度居中变化（打字机第一行从中间长出）。 */
   margin: 0;
   max-width: none;
   padding: 48px 28px 96px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
   gap: 16px;
-}
-/* 居中的阅读列：504 = 原 560 容器扣去两侧 28 内边距，视觉列宽不变。 */
-.preview-stage .player-content > * {
-  width: 100%;
-  max-width: 504px;
 }
 .preview-stage .audio-toggle {
   position: absolute;
   top: 12px;
   right: 14px;
 }
-.preview-stage .narration {
-  font-family: var(--prose-font);
-  font-size: var(--prose-size);
-  line-height: var(--prose-lh);
-  color: var(--text);
-}
 .preview-stage .story-end {
   text-align: center;
   letter-spacing: 0.4em;
   color: var(--text-faint);
-}
-.preview-stage .advance-indicator::after {
-  border-top-color: var(--text-dim); /* 跟随编辑器主题（预览底非恒暗） */
 }
 .preview-stage .choices {
   display: flex;
@@ -735,20 +765,15 @@ button {
   gap: 11px;
   margin-top: 8px;
 }
+/* 只调预览里的尺寸/间距（编辑器面板比整屏窄）；配色全走 control token。 */
 .preview-stage .choice {
-  text-align: left;
   padding: 13px 16px;
   border-radius: 9px;
-  cursor: pointer;
   font-size: 14.5px;
-  color: var(--text);
-  background: color-mix(in srgb, var(--bg-1) 55%, transparent);
-  border: 1px solid var(--border-2);
   transition: border-color 0.14s, background 0.14s;
 }
 .preview-stage .choice:hover {
-  border-color: var(--accent);
-  background: var(--accent-soft);
+  border-color: var(--kiny-accent);
 }
 
 /* ---------- 滚动条 ---------- */
@@ -1071,7 +1096,7 @@ button {
   display: flex; flex-direction: column;
 }
 .help-dlg-about { width: 460px; max-width: 100%; }
-.help-dlg-syntax { width: 760px; max-width: 100%; max-height: 100%; }
+.help-dlg-syntax, .help-dlg-theme { width: 760px; max-width: 100%; max-height: 100%; }
 .help-dlg-close {
   position: absolute; top: 14px; right: 14px; z-index: 3;
   width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center;
@@ -1114,6 +1139,11 @@ button {
 .help-syn-nav-cat:first-child { padding-top: 4px; }
 .help-syn-content { overflow: auto; padding: 6px 28px 28px; background: var(--bg-0); }
 .help-syn-cat { font-size: 11px; letter-spacing: .18em; text-transform: uppercase; color: var(--accent); padding: 24px 0 0; font-weight: 600; }
+/* 作品主题参考：token / class 契约两列表。 */
+.help-theme-table { width: 100%; border-collapse: collapse; margin: 0 0 8px; font-size: 13px; }
+.help-theme-table td { padding: 5px 10px 5px 0; vertical-align: top; border-bottom: 1px solid var(--border); color: var(--text-dim); }
+.help-theme-table td:first-child { white-space: nowrap; width: 1%; }
+.help-theme-table code { color: var(--text); }
 .help-syn-sec { padding: 22px 0 4px; border-bottom: 1px solid var(--border); }
 .help-syn-sec:last-child { border-bottom: none; }
 .help-syn-sec-h { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }

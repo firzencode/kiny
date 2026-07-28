@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Story, ValidatedProgram } from '@kiny/engine'
-import { Player, usePlayback, initialState, type PlayState, type ResolveAsset } from '@kiny/player'
+import { Player, usePlayback, initialState, ProjectStyles, type PlayState, type ResolveAsset } from '@kiny/player'
 import { listSaves, writeSaveSerial, deleteSave, genSaveId } from '../saves/store'
 import { captureSave, restoreSave } from '../saves/snapshot'
 import { AUTO_SAVE_ID, type SaveRecord } from '../saves/types'
@@ -17,7 +17,7 @@ function fmtTime(ts: number): string {
  * 「存档 / 读档」面板可手动存多份、择一读取、删除。storyId 缺省时禁用存档（如纯渲染测试）。
  */
 export function ReadingView({
-  story, program, storyId, resolveAsset, initial, title, onBack,
+  story, program, storyId, resolveAsset, initial, title, onBack, projectCss = '',
 }: {
   story: Story
   program?: ValidatedProgram
@@ -27,6 +27,8 @@ export function ReadingView({
   initial?: PlayState
   title: string
   onBack: () => void
+  /** 作品前端资源编译出的 css（字体 + 主题）；缺省为无（纯渲染测试）。 */
+  projectCss?: string
 }) {
   // 驱动交给 usePlayback（逐行揭示 + stepMode）；读档时整体换 story + 从存档态续。
   const [driven, setDriven] = useState<{ story: Story; initial: PlayState }>({ story, initial: initial ?? initialState })
@@ -136,6 +138,7 @@ export function ReadingView({
 
   return (
     <div className="reading">
+      <ProjectStyles css={projectCss} />
       <div className="reading-bar">
         <button className="back" onClick={onBack}>← 书架</button>
         <span className="title-chip">{title}</span>

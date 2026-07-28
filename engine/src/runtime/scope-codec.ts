@@ -1,4 +1,5 @@
 import { RuntimeError } from './types'
+import { nodeRefData } from './node-ref'
 
 /**
  * 作用域值的白名单容器编解码：把 `Map` / `Set` / `Date` 编成纯 JSON-able 的 tagged 中间结构，
@@ -17,6 +18,7 @@ export type Encoded =
   | { [KIN]: 'Map'; v: [Encoded, Encoded][] }
   | { [KIN]: 'Set'; v: Encoded[] }
   | { [KIN]: 'Date'; v: string }
+  | { [KIN]: 'Node'; v: string; args?: Encoded[] }
   | { [KIN]: 'obj'; v: Record<string, Encoded> }
   | Encoded[]
   | { [k: string]: Encoded }
@@ -50,6 +52,16 @@ export function encodeGlobals(scope: Record<string, unknown>): Record<string, En
  * 返回前弹出）——命中即真环，抛错；DAG 共享（非祖先）不在路径栈内，照常编码成独立副本。
  */
 function encodeValue(value: unknown, varName: string, seen: Set<object>): Maybe {
+  // 节点引用（实现是 function 对象）：须先于「函数丢弃」判内部标记，编成 Node 标签保真。
+  const ref = nodeRefData(value)
+  if (ref !== null) {
+    if (ref.args === null) return { [KIN]: 'Node', v: ref.path }
+    const args = ref.args.map((a) => {
+      const e = encodeValue(a, varName, seen)
+      return e === DISCARD ? null : e // 绑参里的函数/undefined 降为 null（与数组规则一致）
+    })
+    return { [KIN]: 'Node', v: ref.path, args }
+  }
   if (typeof value === 'function' || value === undefined) return DISCARD
   if (value === null || typeof value !== 'object') return value as Encoded // 原语原样
 
@@ -100,10 +112,13 @@ function encodeValue(value: unknown, varName: string, seen: Set<object>): Maybe 
   }
 }
 
-/** 解码一个作用域的编码结果：逐值 decode 还原 Map/Set/Date/转义对象。 */
-export function decodeGlobals(encoded: Record<string, unknown>): Record<string, unknown> {
+/** 读档重建节点引用的工厂（由 Story 提供，经 $nodes 同一签发口）；节点不存在时应抛错。 */
+export type ReviveNode = (path: string, args?: unknown[]) => unknown
+
+/** 解码一个作用域的编码结果：逐值 decode 还原 Map/Set/Date/Node/转义对象。 */
+export function decodeGlobals(encoded: Record<string, unknown>, reviveNode?: ReviveNode): Record<string, unknown> {
   const out: Record<string, unknown> = {}
-  for (const [k, v] of Object.entries(encoded)) out[k] = decodeValue(v)
+  for (const [k, v] of Object.entries(encoded)) out[k] = decodeValue(v, reviveNode)
   return out
 }
 
@@ -113,20 +128,26 @@ export function decodeGlobals(encoded: Record<string, unknown>): Record<string, 
  * `class Foo { __kin = 'Map' }`），无形状校验会当成真容器解码而崩（`v.map` on undefined），令整份
  * 存档 restore 失败判 corrupt——比「白名单外维持 JSON 现状失真」的契约更糟。形状不符即降级为普通对象。
  */
-function decodeValue(value: unknown): unknown {
+function decodeValue(value: unknown, reviveNode?: ReviveNode): unknown {
   if (value === null || typeof value !== 'object') return value
-  if (Array.isArray(value)) return value.map(decodeValue)
+  if (Array.isArray(value)) return value.map((el) => decodeValue(el, reviveNode))
   const tag = (value as Record<string, unknown>)[KIN]
   const v = (value as { v?: unknown }).v
-  if (tag === 'Map' && Array.isArray(v)) return new Map((v as [unknown, unknown][]).map(([k, val]) => [decodeValue(k), decodeValue(val)]))
-  if (tag === 'Set' && Array.isArray(v)) return new Set((v as unknown[]).map(decodeValue))
+  if (tag === 'Map' && Array.isArray(v)) return new Map((v as [unknown, unknown][]).map(([k, val]) => [decodeValue(k, reviveNode), decodeValue(val, reviveNode)]))
+  if (tag === 'Set' && Array.isArray(v)) return new Set((v as unknown[]).map((el) => decodeValue(el, reviveNode)))
   if (tag === 'Date' && typeof v === 'string') return new Date(v)
-  if (tag === 'obj' && v !== null && typeof v === 'object' && !Array.isArray(v)) return decodePlainFields(v as Record<string, unknown>) // 转义还原为普通对象
-  return decodePlainFields(value as Record<string, unknown>) // 普通对象（无 __kin）、或 tag/载荷不匹配的 passthrough 值 → 当普通对象逐值 decode（降级，不崩）
+  if (tag === 'Node' && typeof v === 'string' && reviveNode !== undefined) {
+    // 经 $nodes 同一工厂重建（含内部标记），顺带校验节点在当前故事仍存在——删了节点的旧档
+    // 在读档时明确报错（reviveNode 抛），而非静默坏掉。args 递归解码后按值重绑。
+    const rawArgs = (value as { args?: unknown }).args
+    return reviveNode(v, Array.isArray(rawArgs) ? rawArgs.map((a) => decodeValue(a, reviveNode)) : undefined)
+  }
+  if (tag === 'obj' && v !== null && typeof v === 'object' && !Array.isArray(v)) return decodePlainFields(v as Record<string, unknown>, reviveNode) // 转义还原为普通对象
+  return decodePlainFields(value as Record<string, unknown>, reviveNode) // 普通对象（无 __kin）、或 tag/载荷不匹配的 passthrough 值 → 当普通对象逐值 decode（降级，不崩）
 }
 
-function decodePlainFields(obj: Record<string, unknown>): Record<string, unknown> {
+function decodePlainFields(obj: Record<string, unknown>, reviveNode?: ReviveNode): Record<string, unknown> {
   const out: Record<string, unknown> = {}
-  for (const [k, v] of Object.entries(obj)) out[k] = decodeValue(v)
+  for (const [k, v] of Object.entries(obj)) out[k] = decodeValue(v, reviveNode)
   return out
 }

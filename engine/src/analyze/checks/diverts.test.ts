@@ -50,6 +50,43 @@ describe('checkDiverts', () => {
     expect(ds.map((d) => d.code)).not.toContain('param-knot-stitch-entry')
   })
 
+  it('动态 divert（targetExpr）不误报 unknown-divert-target', () => {
+    const src = ['=== A ===', '~ let t = "B"', '-> {t}', '=== B ===', '-> END'].join('\n')
+    expect(run(src).map((d) => d.code)).not.toContain('unknown-divert-target')
+  })
+
+  it('-> {"字面量"} 直写：不存在的目标编译期即报', () => {
+    const ds = run('=== A ===\n-> {"乌有乡"}')
+    expect(ds.map((d) => d.code)).toContain('unknown-node')
+  })
+
+  it('-> {"字面量"} 直写：存在的 knot 与全路径放行', () => {
+    const src = ['=== A ===', '-> {"B"}', '=== B ===', '-> {"B.s"}', '= s', '-> END'].join('\n')
+    expect(run(src)).toEqual([])
+  })
+
+  it('-> {"字面量"} 直写：裸 stitch 名不做同级相对解析（即使同级存在也报）', () => {
+    const src = ['=== A ===', '-> {"s"}', '= s', '-> END'].join('\n')
+    const ds = run(src)
+    expect(ds.map((d) => d.code)).toContain('unknown-node')
+  })
+
+  it('-> {"字面量"} 直写：带参 knot 报 node-string-param（字符串无处带实参）', () => {
+    const src = ['=== A ===', '-> {"店"}', '=== 店(cat) ===', '-> END'].join('\n')
+    const ds = run(src)
+    expect(ds.map((d) => d.code)).toContain('node-string-param')
+  })
+
+  it('-> {"字面量"} 直写：外部跳带参节点的 stitch 报 param-knot-stitch-entry', () => {
+    const src = ['=== A ===', '-> {"店.b1"}', '=== 店(cat) ===', '-> END', '= b1', '-> END'].join('\n')
+    const ds = run(src)
+    expect(ds.map((d) => d.code)).toContain('param-knot-stitch-entry')
+  })
+
+  it('-> {"END"} 直写放行', () => {
+    expect(run('=== A ===\n-> {"END"}')).toEqual([])
+  })
+
   // A5：顶层开场（首个 === 前的 preamble）里的坏跳转旧实现完全跳过、零诊断。
   it('A5：开场（preamble）里的坏跳转目标报 unknown-divert-target', () => {
     const ds = run('开场白\n-> 不存在的节点\n=== A ===\n-> END')

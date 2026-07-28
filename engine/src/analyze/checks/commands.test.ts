@@ -62,6 +62,66 @@ describe('checkCommands', () => {
     })
   })
 
+  describe('@sleep 形态特判', () => {
+    it('@sleep(1500) 合法：零诊断', () => {
+      expect(run('=== A ===\n@sleep(1500)\n-> END')).toEqual([])
+    })
+    it('@sleep(0) / 小数合法（0 = 不停顿）', () => {
+      expect(run('=== A ===\n@sleep(0)\n@sleep(1.5)\n-> END')).toEqual([])
+    })
+    it('@sleep() 零参 → sleep-arity', () => {
+      const ds = run('=== A ===\n@sleep()\n-> END')
+      expect(ds).toHaveLength(1)
+      expect(ds[0]!.code).toBe('sleep-arity')
+      expect(ds[0]!.line).toBe(2)
+    })
+    it('@sleep(1, 2) 多参 → sleep-arity', () => {
+      expect(run('=== A ===\n@sleep(1, 2)\n-> END').map((d) => d.code)).toContain('sleep-arity')
+    })
+    it('负数字面量 → sleep-duration', () => {
+      const ds = run('=== A ===\n@sleep(-1)\n-> END')
+      expect(ds).toHaveLength(1)
+      expect(ds[0]!.code).toBe('sleep-duration')
+    })
+    it('非数字字面量（字符串 / 布尔 / null）→ sleep-duration', () => {
+      for (const arg of ['"500"', 'true', 'null']) {
+        expect(run(`=== A ===\n@sleep(${arg})\n-> END`).map((d) => d.code), arg).toContain('sleep-duration')
+      }
+    })
+    it('变量 / 表达式参不静态拦截（运行期由 player 兜底）', () => {
+      expect(run('=== A ===\n@sleep(ms)\n-> END')).toEqual([])
+      expect(run('=== A ===\n@sleep(base * 2)\n-> END')).toEqual([])
+    })
+  })
+
+  describe('@panel 形态特判', () => {
+    it('四个合法槽位 + 模板：零诊断', () => {
+      expect(run('=== A ===\n@panel("left", "HP: {hp}")\n@panel("right", "菜单")\n@panel("bottom", "第 {c} 章")\n@panel("after", "")\n-> END')).toEqual([])
+    })
+    it('模板可为表达式（运行期求值）', () => {
+      expect(run('=== A ===\n@panel("left", tpl)\n-> END')).toEqual([])
+      expect(run('=== A ===\n@panel("left", "HP: " + hp)\n-> END')).toEqual([])
+    })
+    it('arity ≠ 2 → panel-arity', () => {
+      expect(run('=== A ===\n@panel("left")\n-> END').map((d) => d.code)).toContain('panel-arity')
+      expect(run('=== A ===\n@panel("left", "a", "b")\n-> END').map((d) => d.code)).toContain('panel-arity')
+    })
+    it('未知槽位 → panel-slot', () => {
+      const ds = run('=== A ===\n@panel("top", "x")\n-> END')
+      expect(ds).toHaveLength(1)
+      expect(ds[0]!.code).toBe('panel-slot')
+      expect(ds[0]!.message).toContain('top')
+    })
+    it('槽位非字符串字面量（变量 / 表达式）→ panel-slot（引擎登记时就要知道是哪个槽）', () => {
+      expect(run('=== A ===\n@panel(slot, "x")\n-> END').map((d) => d.code)).toContain('panel-slot')
+      expect(run('=== A ===\n@panel("si" + "de", "x")\n-> END').map((d) => d.code)).toContain('panel-slot')
+    })
+    it('模板写成数字 / 布尔字面量 → panel-template', () => {
+      expect(run('=== A ===\n@panel("left", 42)\n-> END').map((d) => d.code)).toContain('panel-template')
+      expect(run('=== A ===\n@panel("left", true)\n-> END').map((d) => d.code)).toContain('panel-template')
+    })
+  })
+
   describe('@input 集成（经 analyze：变量存在性由 checkVariables 覆盖）', () => {
     const diags = (src: string) => analyze([parse(src, 'f.kin')]).diagnostics
     it('已声明变量 → 无 error', () => {

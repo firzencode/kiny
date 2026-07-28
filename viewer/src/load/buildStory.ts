@@ -4,6 +4,8 @@ import type { Story, ValidatedProgram } from '@kiny/engine'
 export interface LoadedStory {
   story: Story
   assetBase: string
+  /** 作品前端资源编译成的一段 css（@font-face + 各 .css）；无资源为空串。 */
+  projectCss: string
   title: string
   /** 故事版本（manifest version）；与 title 一起作阅读进度持久化的 key（改版即弃旧进度）。 */
   version: string
@@ -22,6 +24,7 @@ export function randomSeed(): number {
 /**
  * engine 公共装配流水线的薄封装（packaging-spec §3）：manifest 文本 + .kin 文本表 → Story。
  * 文本来源（fetch demo / 内联导出数据）由调用方决定；assetBase 决定资源 URL 前缀。
+ * projectCss 为作品前端资源编译出的 css（调用方按各自的取文本方式产出）。
  * 返回 program/start/seed 供保位重放恢复进度。
  */
 export function buildStory(
@@ -30,6 +33,7 @@ export function buildStory(
   assetBase: string,
   seed: number,
   manifestName = 'kiny.json',
+  projectCss = '',
 ): LoadOutcome {
   const res = assembleFromFiles(manifestText, files, { seed, manifestName })
   if (!res.ok) return res
@@ -38,6 +42,7 @@ export function buildStory(
     value: {
       story: res.story,
       assetBase,
+      projectCss,
       title: res.meta.name,
       version: res.meta.version,
       program: res.program,

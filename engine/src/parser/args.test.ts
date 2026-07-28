@@ -63,6 +63,33 @@ describe('parseDivert', () => {
   it('实参缺右括号报错', () => {
     expect(() => parseDivert('-> 商店("x"', 1, 'f')).toThrow(ParseError)
   })
+
+  it('动态跳转 -> {表达式}', () => {
+    expect(parseDivert('-> {地图[方向]}', 1, 'f')).toEqual({ target: '', args: [], targetExpr: '地图[方向]' })
+    expect(parseDivert('-> {返回点}', 1, 'f')).toEqual({ target: '', args: [], targetExpr: '返回点' })
+  })
+
+  it('动态表达式内可含 ( " } 等任意 JS（花括号配对）', () => {
+    expect(parseDivert('-> {f("a}b", { k: 1 })}', 1, 'f')).toEqual({
+      target: '',
+      args: [],
+      targetExpr: 'f("a}b", { k: 1 })',
+    })
+  })
+
+  it('动态跳转 { 未闭合报错', () => {
+    expect(() => parseDivert('-> {表达式', 1, 'f')).toThrow(ParseError)
+  })
+
+  it('动态跳转 } 之后不允许再接内容（含实参形态）', () => {
+    expect(() => parseDivert('-> {x} 多余', 1, 'f')).toThrow(ParseError)
+    expect(() => parseDivert('-> {x}("实参")', 1, 'f')).toThrow(ParseError)
+  })
+
+  it('动态跳转表达式为空报错', () => {
+    expect(() => parseDivert('-> {}', 1, 'f')).toThrow(ParseError)
+    expect(() => parseDivert('-> {  }', 1, 'f')).toThrow(ParseError)
+  })
 })
 
 describe('parseCommand', () => {

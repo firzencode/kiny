@@ -1,22 +1,74 @@
+/* ── 作品主题 token（公开契约）──────────────────────────────────────────────
+   作者在项目内任意 `.css` 里覆盖这些变量即可换肤，无需改写选择器；深度定制则以
+   `.player` 为根书写选择器（避免越界影响宿主 UI，editor 预览尤甚）。
+   默认值 = player 原生外观；宿主（reader / shelf / editor）在自己的 `:root` 里覆盖
+   同名 token 让阅读页与其皮肤一致，作品 css 再覆盖之。新增 token 从紧——每个都是长期契约。 */
+:root {
+  --kiny-page-bg: #0d1117;                                  /* 页面底色 */
+  --kiny-text: #e8e8e8;                                     /* 正文文字色 */
+  --kiny-prose-font: system-ui, "Noto Sans SC", sans-serif; /* 正文字体族 */
+  --kiny-prose-size: 1.05rem;                               /* 正文字号 */
+  --kiny-prose-line-height: 1.9;                            /* 正文行高 */
+  --kiny-content-max-width: 680px;                          /* 阅读栏宽 */
+  --kiny-bg-overlay: rgba(10, 14, 20, .55);                 /* 氛围底图压暗遮罩 */
+  --kiny-control-bg: rgba(255, 255, 255, .06);              /* 选项按钮 / 输入框底色 */
+  --kiny-control-bg-hover: rgba(255, 255, 255, .14);
+  --kiny-control-text: #fff;
+  --kiny-control-border: rgba(255, 255, 255, .35);
+  --kiny-accent: rgba(255, 255, 255, .8);                   /* 推进提示等强调色 */
+  --kiny-error: #ff8585;                                    /* 错误文字色 */
+  /* 固定区域（@panel）默认外观「微光刻度」：不给面板容器（底色透明），文字与描边由正文色推导
+     ——作者换 --kiny-text，面板自动跟随。覆盖任一即生效（如 `--kiny-panel-bg: #223` 加底色）。 */
+  --kiny-panel-bg: transparent;                             /* 固定区域底色（默认透明，不遮氛围底图） */
+  --kiny-panel-text: color-mix(in srgb, var(--kiny-text) 62%, transparent);  /* 面板文字色（正文色降一档） */
+  --kiny-panel-border: color-mix(in srgb, var(--kiny-text) 12%, transparent);/* 面板发丝线色 */
+}
+
 /* 全屏氛围底图：模糊 + 压暗 */
 .bg-layer {
   position: fixed; inset: 0; z-index: 0;
   background-size: cover; background-position: center;
   filter: blur(3px) brightness(.45); transition: background-image .6s ease;
 }
-.bg-layer::after { content: ""; position: absolute; inset: 0; background: rgba(10, 14, 20, .55); }
+.bg-layer::after { content: ""; position: absolute; inset: 0; background: var(--kiny-bg-overlay); }
 
-/* 阅读流：居中单栏 */
-.player { position: relative; z-index: 1; min-height: 100vh; }
+/* 阅读流：视口高的 column flex，正文在内部滚动容器（.player-content）里滚——
+   固定区域（@panel 底栏）是流内 flex 项、占据实际空间，正文滚动区在其上方结束、
+   不从底栏底下穿过。正文色 / 字体 / 底色的定义权在此（token 化后宿主与作品共用同一入口）。 */
+.player { position: relative; z-index: 1; height: 100vh; height: 100dvh;
+  display: flex; flex-direction: column;
+  background: var(--kiny-page-bg); color: var(--kiny-text); font-family: var(--kiny-prose-font);
+  /* 连续无空格的西文（URL / 标识符 / 代码片段 / 英文长词）默认不在词内断行，会溢出阅读列
+     并顶出横向滚动条；中文可任意字间断行，故这类问题只在西文内容上暴露——别只拿中文样例验证。
+     overflow-wrap 是继承属性，挂在 .player 上一次覆盖正文 / 面板 / 选项 / 输入框全部文字。 */
+  overflow-wrap: break-word;
+  /* 阅读区自身即**尺寸查询容器**：侧栏「整列 vs 折叠」按本容器宽度判定，不按视口。
+     viewer / reader 里阅读区就是视口，行为与视口断点一致；editor 预览是嵌在编辑器里的
+     一小块，按视口判定会在「窗口宽、预览窄」时误用宽屏布局，把正文挤成一字一列的竖条。
+     附带收益：container-type 使 .player 成为内部 position:fixed 元素的定位基准，
+     侧栏 / 底图 / 静音键在 editor 里自动落在预览区内，无需按端覆盖成 absolute。 */
+  container-type: inline-size; container-name: player; }
 /* player-content 必须自成定位层（z-index ≥ 1）：它与 .bg-layer 同为 .player 的子元素，
    而 .bg-layer 是 positioned（fixed, z-index:0）。若 player-content 留在普通流（无定位），
    按 CSS 堆叠规则会被 positioned 的 .bg-layer 覆盖 —— 正文被压暗的背景层盖死，表现为「黑屏无文字」。
-   此守卫 jsdom 测不出（不渲染 CSS），删改前务必在浏览器验证。 */
+   此守卫 jsdom 测不出（不渲染 CSS），删改前务必在浏览器验证。
+   滚动容器占满整宽（滚动条贴视口 / 预览区右缘）；阅读列宽不设在本容器上，
+   而由「子元素 width:100% + max-width」约束——横向 auto margin 会让容器 shrink-to-fit
+   随内容宽度居中变化（打字机第一行从中间长出）。 */
 .player-content { position: relative; z-index: 1;
-  max-width: 680px; margin: 0 auto; padding: 64px 24px 120px;
-  display: flex; flex-direction: column; gap: 14px; }
+  flex: 1 1 auto; min-height: 0; overflow-y: auto;
+  /* 交叉轴尺寸显式锁死为「撑满」：flex 交叉轴上的 auto margin 会**取消 stretch**，令本容器
+     退化成 shrink-to-fit——宽度随内容走，表现为正文一行到底 + 横向巨大滚动。故这里显式
+     margin:0 + max-width:none 把任何上游（宿主皮肤 / 作品 css / 旧版本样式）引入的
+     `margin:0 auto` + `max-width` 挡在外面；阅读列宽改由下面的子元素规则约束。
+     min-width:0 让长串内容能收缩换行而不撑破容器。删改前务必在浏览器验证（jsdom 测不出）。 */
+  margin: 0; max-width: none; min-width: 0; align-self: stretch;
+  padding: 64px 24px 120px;
+  display: flex; flex-direction: column; align-items: center; gap: 14px; }
+/* 居中的阅读列：宽度由子元素约束（不设在滚动容器上，理由见上）。min-width:0 同理防撑破。 */
+.player-content > * { width: 100%; max-width: var(--kiny-content-max-width); min-width: 0; }
 .story-log { display: flex; flex-direction: column; gap: 14px; }
-.narration { margin: 0; line-height: 1.9; font-size: 1.05rem; }
+.narration { margin: 0; line-height: var(--kiny-prose-line-height); font-size: var(--kiny-prose-size); }
 .story-end { margin: 12px 0; text-align: center; opacity: .6; letter-spacing: .2em; }
 
 /* 打字机逐字淡入（T033）：每字挂 char-fade 动画，时长 = @text_fade。 */
@@ -33,7 +85,7 @@
 .advance-indicator::after {
   content: ""; width: 0; height: 0;
   border-left: 7px solid transparent; border-right: 7px solid transparent;
-  border-top: 9px solid rgba(255, 255, 255, .8);
+  border-top: 9px solid var(--kiny-accent);
   animation: advance-breathe 1.6s ease-in-out infinite;
 }
 @keyframes advance-breathe {
@@ -46,25 +98,77 @@
 
 /* 选项 */
 .choices { display: flex; flex-direction: column; gap: 10px; margin-top: 18px; }
-.choice { text-align: left; padding: 12px 16px; font-size: 1rem; color: #fff;
-  background: rgba(255, 255, 255, .06); border: 1px solid rgba(255, 255, 255, .35);
+.choice { text-align: left; padding: 12px 16px; font: inherit; font-size: 1rem; color: var(--kiny-control-text);
+  background: var(--kiny-control-bg); border: 1px solid var(--kiny-control-border);
   border-radius: 8px; cursor: pointer; transition: background .15s; }
-.choice:hover { background: rgba(255, 255, 255, .14); }
+.choice:hover { background: var(--kiny-control-bg-hover); }
 
-/* 输入框（@input 读者文本输入，与选项对偶） */
+/* 输入框（@input 读者文本输入，与选项对偶；与选项共用一组 control token） */
 .input-box { display: flex; align-items: center; gap: 10px; margin-top: 18px; flex-wrap: wrap; }
-.input-box-field { flex: 1 1 12rem; min-width: 0; padding: 12px 16px; font-size: 1rem; color: #fff;
-  background: rgba(255, 255, 255, .06); border: 1px solid rgba(255, 255, 255, .35); border-radius: 8px; }
-.input-box-field::placeholder { color: rgba(255, 255, 255, .45); }
-.input-box-field:focus { outline: none; border-color: rgba(255, 255, 255, .75); background: rgba(255, 255, 255, .1); }
+.input-box-field { flex: 1 1 12rem; min-width: 0; padding: 12px 16px; font: inherit; font-size: 1rem; color: var(--kiny-control-text);
+  background: var(--kiny-control-bg); border: 1px solid var(--kiny-control-border); border-radius: 8px; }
+.input-box-field::placeholder { color: var(--kiny-control-text); opacity: .45; }
+.input-box-field:focus { outline: none; border-color: var(--kiny-control-text); background: var(--kiny-control-bg-hover); }
 .input-box-field:disabled { opacity: .5; cursor: not-allowed; }
-.input-box-submit { padding: 12px 18px; font-size: 1rem; color: #fff; background: rgba(255, 255, 255, .12);
-  border: 1px solid rgba(255, 255, 255, .35); border-radius: 8px; cursor: pointer; transition: background .15s; }
-.input-box-submit:hover:not(:disabled) { background: rgba(255, 255, 255, .2); }
+.input-box-submit { padding: 12px 18px; font: inherit; font-size: 1rem; color: var(--kiny-control-text); background: var(--kiny-control-bg-hover);
+  border: 1px solid var(--kiny-control-border); border-radius: 8px; cursor: pointer; transition: background .15s; }
+.input-box-submit:hover:not(:disabled) { filter: brightness(1.3); }
 .input-box-submit:disabled { opacity: .5; cursor: not-allowed; }
-.input-box-hint { flex-basis: 100%; font-size: .82rem; color: rgba(255, 255, 255, .5); }
+.input-box-hint { flex-basis: 100%; font-size: .82rem; color: var(--kiny-control-text); opacity: .5; }
 
-.player-error { color: #ff8585; }
+.player-error { color: var(--kiny-error); }
 
-.audio-toggle { position: fixed; top: 14px; right: 16px; z-index: 2; font-size: 1.1rem;
+/* ── 固定区域（@panel）─────────────────────────────────────────────────────
+   四槽（左 / 右侧栏、底栏、正文后栏）。默认外观「微光刻度」——**不给面板容器**（底色透明、
+   氛围底图不被遮），只用**发丝线 + 字号降档 + 字距**把它压成正文之下的「元信息层」：
+   读者一眼分得出哪是状态、哪是叙述，观感仍是阅读器自己的排版而非贴上去的 UI。
+   `--kiny-panel-*` token（底色 / 文字色 / 描边色）+ `.panel-left` 等选择器是作者覆盖锚点，
+   覆盖 `--kiny-panel-bg` 即从「无容器」变「有容器」，深度定制走项目 css。
+   left / right 用 `position: fixed`：钉死在阅读区、不随正文滚动（定位基准是 .player 这个
+   查询容器，见其 container-type——viewer / reader 里即视口，editor 里即预览区）。 */
+.panel { color: var(--kiny-panel-text); background: var(--kiny-panel-bg);
+  border: 0 solid var(--kiny-panel-border);
+  /* 比正文降一档：字号走 clamp 流体，字距拉开——不靠容器也能与正文分层。
+     行距比正文（1.9）略紧但明显放开：面板多是逐行罗列的状态项，行挤在一起读着费劲。 */
+  font-size: clamp(.78rem, .72rem + .28vw, .93rem); letter-spacing: .07em; line-height: 1.75; }
+/* left / right：贴阅读区左 / 右缘、全高、内部可滚；内侧一条发丝线与正文分界。
+   宽度随阅读区流体收缩（20cqi = 容器宽的 20%），窄容器下侧栏更窄，能更早支持左右布局。
+   注意 cqi 相对**最近的祖先容器**——写在 .player 自身上会越级取错容器，故只能写在其后代
+   （这里的 .panel-* 与下方的 .player-content），两处各写一遍同样的 clamp，别提成变量。 */
+.panel-left, .panel-right { position: fixed; z-index: 2; top: 0; bottom: 0;
+  width: clamp(150px, 20cqi, 220px); padding: 20px 18px; overflow-y: auto; }
+.panel-left { left: 0; border-right-width: 1px; }
+.panel-right { right: 0; border-left-width: 1px; }
+/* bottom：流内 flex 项、占据实际空间——正文滚动区在其上方结束，不从底栏底下穿过。
+   DOM 里它在 .player-content 之前（Panels 组件），靠 order 排到滚动区之后、贴 .player 底缘。
+   position:relative + z-index 与 .player-content 同一守卫：普通流会被 positioned 的
+   .bg-layer（fixed, z-index:0）盖死，文字不可见。
+   上边一条发丝线把它与滚动区分开；字距再拉开一档（它是全局位置指示，最像书的页脚）。 */
+.panel-bottom { order: 1; position: relative; z-index: 1; padding: 10px 24px; text-align: center;
+  border-top-width: 1px; letter-spacing: .2em; }
+/* after：正文流末尾，随内容滚动（不脱流）。上方一道居中短横线作分节符——它在正文之内，
+   用整条横线会把叙事截断，短横线只作停顿。 */
+.panel-after { position: relative; padding: 14px 0 8px; margin-top: 6px; text-align: center;
+  letter-spacing: .16em; }
+.panel-after::before { content: ""; position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+  width: 44px; height: 1px; background: var(--kiny-panel-border); }
+
+/* 阅读区够宽：侧栏占整列，正文对应一侧让位（让位量 = 侧栏流体宽 + 24px 间距，随容器同步）。
+   断点按**容器**宽而非视口——editor 预览拖宽即恢复左右侧栏，与读者所见一致（单套流体设计，
+   @container 只作侧栏形态这一个离散开关）。 */
+@container player (min-width: 720px) {
+  .player:has(.panel-left) .player-content { padding-left: calc(clamp(150px, 20cqi, 220px) + 24px); }
+  .player:has(.panel-right) .player-content { padding-right: calc(clamp(150px, 20cqi, 220px) + 24px); }
+}
+/* 阅读区偏窄：侧栏折叠为横条（不再占整列），落回正文流——两侧各占一列会把正文挤到不可读。
+   内侧竖发丝线随之改为下边线（折叠后与正文的分界在下方，竖线会变成横条右缘的一段孤线）。 */
+@container player (max-width: 719px) {
+  /* 高度上限取 .player 的 40%（它是 flex 容器且高度由外部确定：viewer/reader 是视口高、
+     editor 是预览区高）——用 vh 会在 editor 里按整个窗口算、横条过高压扁正文。 */
+  .panel-left, .panel-right { position: static; width: auto; max-height: 40%; padding: 12px 24px;
+    border-width: 0 0 1px; }
+}
+
+/* z-index 3：高于固定区域（z-index 2），右侧栏存在时静音键仍浮在其上、可点。 */
+.audio-toggle { position: fixed; top: 14px; right: 16px; z-index: 3; font-size: 1.1rem;
   background: rgba(0, 0, 0, .4); border: none; border-radius: 16px; padding: 6px 12px; cursor: pointer; }

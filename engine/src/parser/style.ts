@@ -13,6 +13,15 @@ export function sameStyle(a: InlineStyle | undefined, b: InlineStyle | undefined
     !!a.underline === !!b.underline &&
     !!a.strike === !!b.strike &&
     a.color === b.color &&
-    a.size === b.size
+    a.size === b.size &&
+    a.font === b.font &&
+    sameClasses(a.classes, b.classes)
   )
+}
+
+/** 类名集合等价：累积序由标签嵌套决定且确定，故按序逐项比较即可（两侧都缺省 / 空视为等价）。 */
+function sameClasses(a: string[] | undefined, b: string[] | undefined): boolean {
+  const x = a ?? []
+  const y = b ?? []
+  return x.length === y.length && x.every((c, i) => c === y[i])
 }

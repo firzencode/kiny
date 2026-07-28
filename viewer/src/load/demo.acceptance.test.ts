@@ -20,7 +20,8 @@ function build(seed: number): Story {
   const found = findManifest(index)
   if (!found.ok) throw new Error('locate manifest: ' + found.message)
   const manifest = readFileSync(join(demoDir, found.name), 'utf8')
-  const files = new Map(index.filter((p) => p !== found.name).map((p) => [p, readFileSync(join(demoDir, p), 'utf8')]))
+  // files.json 列全部项目文件（含 css / 图片 / 音频）；故事文件集只取 .kin。
+  const files = new Map(index.filter((p) => p.endsWith('.kin')).map((p) => [p, readFileSync(join(demoDir, p), 'utf8')]))
   const res = loadProjectFromFiles(manifest, files, found.name)
   if (!res.ok) throw new Error('load: ' + res.errors.map((e) => e.message).join(';'))
   const { program } = analyze(res.files)

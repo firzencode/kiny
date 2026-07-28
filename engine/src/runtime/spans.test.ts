@@ -27,11 +27,30 @@ describe('coalesce', () => {
       { text: 'b' },
     ])
   })
+  it('pauseBefore 是硬边界：同样式也不合并（否则停顿位置丢失）', () => {
+    expect(coalesce([{ text: '甲' }, { text: '乙', pauseBefore: true }])).toEqual([
+      { text: '甲' },
+      { text: '乙', pauseBefore: true },
+    ])
+  })
 })
 
 describe('mergeSpans', () => {
   it('拼接两段并归并边界', () => {
     expect(mergeSpans([{ text: '甲' }], [{ text: '乙' }])).toEqual([{ text: '甲乙' }])
+  })
+  it('glue 拼行：后半行行首的停顿标记在拼接处保留', () => {
+    expect(mergeSpans([{ text: '前半' }], [{ text: '后半', pauseBefore: true }])).toEqual([
+      { text: '前半' },
+      { text: '后半', pauseBefore: true },
+    ])
+  })
+})
+
+describe('makeTextSpan —— pauseBefore', () => {
+  it('传入停顿标记时落 pauseBefore；否则不落该键', () => {
+    expect(makeTextSpan('a', undefined, true)).toEqual({ text: 'a', pauseBefore: true })
+    expect(makeTextSpan('a', undefined, false)).toEqual({ text: 'a' })
   })
 })
 

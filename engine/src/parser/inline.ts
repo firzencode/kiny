@@ -22,17 +22,41 @@ const FLAG_TAGS: Record<string, 'bold' | 'italic' | 'underline' | 'strike'> = {
   s: 'strike',
 }
 
+/** 取值型样式标签（`<名=值>` 开、`</名>` 闭）。 */
+const VALUE_TAGS = new Set(['color', 'size', 'font', 'class'])
+
 /** 一个栈帧记录开标签名与（取值标签的）已校验值；非法值标签 value 为 null（结构成对但不应用样式）。 */
 interface TagFrame {
-  tag: string // 'b' | 'i' | 'u' | 's' | 'color' | 'size'
+  tag: string // 'b' | 'i' | 'u' | 's' | 'color' | 'size' | 'font' | 'class'
   color?: string | null
   size?: number | null
+  font?: string | null
+  cls?: string | null
 }
 
 /** 颜色取值合法性：`#rgb` / `#rrggbb` / 纯字母具名色（防 style 注入：不接受空格 / 括号 / 分号等）。 */
 function validColor(v: string): boolean {
   if (/^#[0-9a-fA-F]{3}$/.test(v) || /^#[0-9a-fA-F]{6}$/.test(v)) return true
   return /^[a-zA-Z]+$/.test(v)
+}
+
+/**
+ * 字体族名合法性（防 font-family 注入 / 越界）：trim 后非空，且只含 Unicode 字母（含 CJK）、数字、
+ * 空格、点 `.`、下划线 `_`、连字符 `-`。拒绝 `; { } ( ) < > " '` / 逗号 / 反斜杠 / 控制字符等。
+ * 单个族名不含逗号（回退栈由宿主拼）；项目内字体文件的族名（= 文件名去扩展名）按同规则校验。
+ */
+export function validFont(v: string): boolean {
+  const s = v.trim()
+  return s !== '' && /^[\p{L}\p{N} ._-]+$/u.test(s)
+}
+
+/**
+ * 样式类名合法性：trim 后非空，只含 Unicode 字母（含 CJK）、数字、下划线 `_`、连字符 `-`。
+ * 比字体名更严（不含空格与点）——渲染时拼进 class 属性，空格会拆成多类、点是选择器边界字符。
+ */
+export function validClass(v: string): boolean {
+  const s = v.trim()
+  return s !== '' && /^[\p{L}\p{N}_-]+$/u.test(s)
 }
 
 /** 字号取值合法性：能解析为正有限数。 */
@@ -56,6 +80,14 @@ function activeStyle(stack: TagFrame[]): InlineStyle | undefined {
     } else if (f.tag === 'size' && f.size != null) {
       style.size = f.size
       any = true
+    } else if (f.tag === 'font' && f.font != null) {
+      style.font = f.font // 内层覆盖外层（同 color / size）
+      any = true
+    } else if (f.tag === 'class' && f.cls != null) {
+      // class 与取值标签不同：嵌套**累积**（外层 letter + 内层 old 同时生效），同名去重。
+      if (!style.classes) style.classes = []
+      if (!style.classes.includes(f.cls)) style.classes.push(f.cls)
+      any = true
     }
   }
   return any ? style : undefined
@@ -68,23 +100,32 @@ function activeStyle(stack: TagFrame[]): InlineStyle | undefined {
 function matchTag(
   text: string,
   i: number,
-): { len: number; kind: 'open'; tag: string; rawValue?: string } | { len: number; kind: 'close'; tag: string } | { len: number; kind: 'break' } | null {
+):
+  | { len: number; kind: 'open'; tag: string; rawValue?: string }
+  | { len: number; kind: 'close'; tag: string }
+  | { len: number; kind: 'break' }
+  | { len: number; kind: 'pause' }
+  | { len: number; kind: 'bad-pause'; rawValue: string }
+  | null {
   const close = text.indexOf('>', i + 1)
   if (close === -1) return null
   const inner = text.slice(i + 1, close)
   const len = close - i + 1
   if (inner === '') return null // `<>` 交给 glue 逻辑，不是标签
   if (inner === 'br' || inner === 'br/') return { len, kind: 'break' }
+  if (inner === 'pause' || inner === 'pause/') return { len, kind: 'pause' } // 自闭合写法与 <br/> 一致
+  // `<pause=毫秒>`（定时自动续显）是留给将来的语法位：本期明确报错，而不是当字面文本静默输出。
+  if (inner.startsWith('pause=')) return { len, kind: 'bad-pause', rawValue: inner.slice('pause='.length) }
   if (inner[0] === '/') {
     const name = inner.slice(1)
-    if (name === 'color' || name === 'size' || name in FLAG_TAGS) return { len, kind: 'close', tag: name }
+    if (VALUE_TAGS.has(name) || name in FLAG_TAGS) return { len, kind: 'close', tag: name }
     return null
   }
   if (inner in FLAG_TAGS) return { len, kind: 'open', tag: inner }
   const eq = inner.indexOf('=')
   if (eq !== -1) {
     const name = inner.slice(0, eq)
-    if (name === 'color' || name === 'size') return { len, kind: 'open', tag: name, rawValue: inner.slice(eq + 1) }
+    if (VALUE_TAGS.has(name)) return { len, kind: 'open', tag: name, rawValue: inner.slice(eq + 1) }
   }
   return null
 }
@@ -106,15 +147,28 @@ export function scanInline(text: string, startId: number, line: number, path: st
   let i = 0
   const n = text.length
 
+  // `<pause>` 停顿标记：作用于其**后首个非空段**（空插值 / 空字面段不消费它，自动顺延）。
+  // 扫完仍挂着 = 行尾标记，直接忽略（行尾本就是行边界）。连续多个标记天然合并为一次。
+  let pausePending = false
+  /** 把待挂的停顿标记打到刚产出的段上（并清标志）。 */
+  const takePause = <T extends InlineSegment>(seg: T): T => {
+    if (pausePending) {
+      seg.pauseBefore = true
+      pausePending = false
+    }
+    return seg
+  }
+
   const flush = (): void => {
     if (literal === '') return
     const style = activeStyle(stack)
     // 标签边界处样式未变时（错配 / 非法值忽略），与前一同样式 literal 归并，保持纯文本恒为单段。
+    // 但**不得跨停顿标记归并**——标记强制在此断开段。
     const prev = segments[segments.length - 1]
-    if (prev && prev.kind === 'literal' && sameStyle(prev.style, style)) {
+    if (!pausePending && prev && prev.kind === 'literal' && sameStyle(prev.style, style)) {
       prev.value += literal
     } else {
-      segments.push(style ? { kind: 'literal', value: literal, style } : { kind: 'literal', value: literal })
+      segments.push(takePause(style ? { kind: 'literal', value: literal, style } : { kind: 'literal', value: literal }))
     }
     literal = ''
   }
@@ -145,7 +199,7 @@ export function scanInline(text: string, startId: number, line: number, path: st
       flush()
       const style = activeStyle(stack)
       const code = text.slice(i + 1, end - 1)
-      segments.push(style ? { kind: 'interp', code, id, style } : { kind: 'interp', code, id })
+      segments.push(takePause(style ? { kind: 'interp', code, id, style } : { kind: 'interp', code, id }))
       id += 1
       i = end
       continue
@@ -164,7 +218,11 @@ export function scanInline(text: string, startId: number, line: number, path: st
       }
       flush()
       if (m.kind === 'break') {
-        segments.push({ kind: 'break' })
+        segments.push(takePause({ kind: 'break' }))
+      } else if (m.kind === 'pause') {
+        pausePending = true // 作用于后续首个非空段；行尾则自然作废
+      } else if (m.kind === 'bad-pause') {
+        issues.push({ code: 'rich-bad-pause', message: `<pause> 不接受取值：「${m.rawValue}」`, line })
       } else if (m.kind === 'open') {
         if (m.tag === 'color') {
           const ok = validColor(m.rawValue!)
@@ -174,6 +232,16 @@ export function scanInline(text: string, startId: number, line: number, path: st
           const sz = parseSize(m.rawValue!)
           if (sz === null) issues.push({ code: 'rich-bad-size', message: `非法字号倍数：「${m.rawValue}」`, line })
           stack.push({ tag: 'size', size: sz })
+        } else if (m.tag === 'font') {
+          const font = m.rawValue!.trim()
+          const ok = validFont(font)
+          if (!ok) issues.push({ code: 'rich-bad-font', message: `非法字体名：「${m.rawValue}」`, line })
+          stack.push({ tag: 'font', font: ok ? font : null })
+        } else if (m.tag === 'class') {
+          const cls = m.rawValue!.trim()
+          const ok = validClass(cls)
+          if (!ok) issues.push({ code: 'rich-bad-class', message: `非法类名：「${m.rawValue}」`, line })
+          stack.push({ tag: 'class', cls: ok ? cls : null })
         } else {
           stack.push({ tag: m.tag })
         }

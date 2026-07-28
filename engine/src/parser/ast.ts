@@ -8,6 +8,10 @@ export interface InlineStyle {
   color?: string
   /** 相对正文字号的正数倍数；非法值不落（诊断另出）。 */
   size?: number
+  /** 单个字体族名（项目内自动注册的族 / 系统字体；宿主补回退栈）；非法值不落（诊断另出，防 font-family 注入）。 */
+  font?: string
+  /** 语义样式类名（渲染加 `kin-` 前缀交给作品 css）；嵌套累积去重，非法值不落（诊断另出）。 */
+  classes?: string[]
 }
 
 /**
@@ -17,14 +21,18 @@ export interface InlineStyle {
  * - `break` 显式换行 `<br>`（自闭合，无文本）。
  * 无标签的纯文本不带 `style` 字段——向后兼容既有故事。
  */
+/**
+ * `pauseBefore` = 该段前有一处 `<pause>` 停顿标记（句中点击续显）：呈现层揭示到此处停住、等读者点击。
+ * 纯呈现层的段边界——不是引擎暂停点，整行仍是一个 text 事件、一条 log。
+ */
 export type InlineSegment =
-  | { kind: 'literal'; value: string; style?: InlineStyle }
-  | { kind: 'interp'; code: string; id: number; style?: InlineStyle }
-  | { kind: 'break' }
+  | { kind: 'literal'; value: string; style?: InlineStyle; pauseBefore?: true }
+  | { kind: 'interp'; code: string; id: number; style?: InlineStyle; pauseBefore?: true }
+  | { kind: 'break'; pauseBefore?: true }
 
-/** 一处内联富文本问题：未闭合 / 错配标签、非法颜色 / 字号值。由 scanInline 收集、analyze 转诊断。 */
+/** 一处内联富文本问题：未闭合 / 错配标签、非法颜色 / 字号 / 字体 / 类名值。由 scanInline 收集、analyze 转诊断。 */
 export interface RichTextIssue {
-  code: 'rich-unclosed' | 'rich-mismatch' | 'rich-bad-color' | 'rich-bad-size'
+  code: 'rich-unclosed' | 'rich-mismatch' | 'rich-bad-color' | 'rich-bad-size' | 'rich-bad-font' | 'rich-bad-class' | 'rich-bad-pause'
   message: string
   line: number
 }
@@ -38,8 +46,12 @@ export interface TextLine {
 
 export interface Divert {
   kind: 'divert'
+  /** 静态目标（节点名 / `父.子` / END / DONE）；动态形态（targetExpr 存在）时为 `''`。 */
   target: string
+  /** 静态带参跳转的实参表达式；动态形态恒为 `[]`（实参在 JS 侧经 `$nodes.名(实参)` 绑定）。 */
   args: string[]
+  /** 动态跳转 `-> {表达式}` 的 JS 表达式；与 target 互斥（有此字段则 target/args 无意义）。 */
+  targetExpr?: string
   line: number
 }
 

@@ -2,7 +2,7 @@ import { findManifest } from '@kiny/engine'
 import type { ResolveAsset } from '@kiny/player'
 import {
   type FileGateway, type LoadedProject, type Manifest, type ProjectFileEntry, type WindowMode,
-  STARTER_MAIN_KIN, STARTER_NEW_FILE, normalizeKinName, starterManifest, projectFileName, projectFolderName, assertSafeRelPath, assertRenameSafe,
+  STARTER_MAIN_KIN, STARTER_NEW_FILE, normalizeKinName, starterManifest, projectFileName, projectFolderName, assertSafeRelPath, assertRenameSafe, isTextFile,
 } from './gateway'
 import { type DraftStore, emptyDraftStore } from '../state/drafts'
 import type { ChatStore } from '../state/chatStore'
@@ -95,7 +95,8 @@ export function createMemoryGateway(init: MemoryGatewayInit): FileGateway {
     const rels = listAll(dir)
     const projFiles: ProjectFileEntry[] = rels.map((rel) => {
       const isKin = rel.endsWith('.kin')
-      return isKin
+      // 与真实现同口径：文本文件（.kin + 作品前端资源）带 source，二进制不带。
+      return isTextFile(rel)
         ? { path: rel, isKin, source: files.get(`${dir}/${rel}`)! }
         : { path: rel, isKin, source: undefined }
     })
@@ -126,6 +127,12 @@ export function createMemoryGateway(init: MemoryGatewayInit): FileGateway {
       return { path: rel, isKin: true, source: STARTER_NEW_FILE }
     },
     writeFile: async (dir, rel, text) => { assertSafeRelPath(rel); files.set(`${dir}/${rel}`, text) },
+    readTextFile: async (dir, rel) => {
+      assertSafeRelPath(rel)
+      const text = files.get(`${dir}/${rel}`)
+      if (text === undefined) throw new Error(`文件不存在: ${rel}`)
+      return text
+    },
     pickImportFiles: async () => init.importPicks ?? null,
     importAsset: async (dir, destRel, sourceAbsPath) => {
       assertSafeRelPath(destRel)
@@ -133,6 +140,12 @@ export function createMemoryGateway(init: MemoryGatewayInit): FileGateway {
       files.set(`${dir}/${destRel}`, `<binary:${sourceAbsPath}>`)
     },
     makeResolveAsset: (_dir): ResolveAsset => (rel) => `mem://${rel}`,
+    // 内存桩：把「文件内容」当字节，产出可断言的确定性 data-URI（真实现读盘 + base64）。
+    readAssetDataUri: async (dir, rel) => {
+      const content = files.get(`${dir}/${rel}`)
+      if (content === undefined) throw new Error(`文件不存在: ${rel}`)
+      return `data:application/octet-stream;base64,${btoa(unescape(encodeURIComponent(content)))}`
+    },
     createFolder: async (dir, relDir) => {
       assertSafeRelPath(relDir)
       const list = emptyDirs.get(dir) ?? []

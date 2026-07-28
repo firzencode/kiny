@@ -41,6 +41,7 @@ function trace(src: string, script: number[], opts: { start?: string; seed?: num
     while (s.canContinue) {
       const e: OutputEvent = s.continue()
       if (e.kind === 'text') lines.push(`T ${plainText(e.spans)}`)
+      else if (e.kind === 'panel') lines.push(`P ${e.slot} ${plainText(e.spans)}`)
       else lines.push(`C ${e.name}(${e.args.map(String).join(',')})`)
     }
     if (s.currentChoices.length > 0) {

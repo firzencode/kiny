@@ -1,5 +1,5 @@
 import { useEffect, useRef, type CSSProperties } from 'react'
-import { Player, type PlayState, type RevealBinding } from '@kiny/player'
+import { Player, ProjectStyles, type PlayState, type RevealBinding } from '@kiny/player'
 
 /**
  * 预览区：受控驱动 <Player>。
@@ -21,6 +21,8 @@ export function PreviewPane({
   reveal,
   onContentClick,
   style,
+  projectCss = '',
+  assetWarnings = [],
 }: {
   play: PlayState | null
   stale: boolean
@@ -37,6 +39,10 @@ export function PreviewPane({
   onContentClick?: () => void
   /** 作为 workbench grid 子项时的外部样式（如显式 grid-column 定位）。 */
   style?: CSSProperties
+  /** 作品主题 css（项目内 css + 字体）；空串 = 不注入（设置里关了「应用作品主题」或项目无资源）。 */
+  projectCss?: string
+  /** 作品资源问题（非法族名 / 同名冲突 / 读不到）的人话描述；播放端静默跳过，编辑器要提示作者。 */
+  assetWarnings?: string[]
 }) {
   // 叙事增长时把阅读区滚到底（用 scrollTop，绝不用 scrollIntoView——会搞坏容器滚动）。
   const stageRef = useRef<HTMLDivElement>(null)
@@ -48,9 +54,15 @@ export function PreviewPane({
 
   return (
     <div className="preview-pane" data-testid="preview" style={style}>
+      <ProjectStyles css={projectCss} />
       <div className="preview-bar">
         <span className="preview-label">预览</span>
         {stale && <span className="preview-stale">基于上一个有效版本</span>}
+        {assetWarnings.length > 0 && (
+          <span className="preview-asset-warn" role="status" title={assetWarnings.join('\n')}>
+            ⚠ 资源 {assetWarnings.length} 项问题
+          </span>
+        )}
         <span className="preview-spacer" />
         <span className="preview-seed">种子 #{seed.toString(16)}</span>
         <button className="preview-back" onClick={onBack} disabled={!canGoBack} title="撤销上一次选择 / 输入，回到上一步">

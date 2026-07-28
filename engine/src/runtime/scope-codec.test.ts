@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import { encodeGlobals, decodeGlobals } from './scope-codec'
 import { RuntimeError } from './types'
+import { parse } from '../parser'
+import { analyze } from '../analyze'
+import { makeNodes, nodeRefData } from './node-ref'
 
 /** 经真实落盘路径（JSON 往返）编解码一个作用域。 */
 const rt = (scope: Record<string, unknown>): Record<string, unknown> =>
@@ -112,5 +115,73 @@ describe('scope-codec 白名单容器编解码', () => {
     expect(out.w).not.toBeInstanceOf(WeakMap) // WeakMap 内容不可枚举 → {}
     expect(out.foo).not.toBeInstanceOf(Foo) // 类实例降为普通对象、方法丢失
     expect(out.foo).toEqual({ x: 3 }) // 自有可枚举属性仍在（JSON 默认行为）
+  })
+})
+
+describe('scope-codec —— Node 标签（节点引用往返）', () => {
+  const SRC = ['=== 商店 ===', '-> END', '= 内室', '-> END', '=== 带参店(item, rate) ===', '{item}{rate}', '-> END'].join('\n')
+
+  function nodesOf() {
+    const program = analyze([parse(SRC, 'main.kin')]).program
+    if (!program) throw new Error('fixture 不合法')
+    return makeNodes(program.knots, program.stitches)
+  }
+
+  /** 经 JSON 往返 + reviveNode 解码。 */
+  const rtn = (scope: Record<string, unknown>, nodes: ReturnType<typeof nodesOf>) =>
+    decodeGlobals(JSON.parse(JSON.stringify(encodeGlobals(scope))), (p, a) => nodes.revive(p, a))
+
+  it('无参 knot / stitch 引用编码为 Node 标签并经 revive 还原', () => {
+    const nodes = nodesOf()
+    const o = nodes.root as Record<string, unknown>
+    const enc = encodeGlobals({ a: o['商店'], b: o['商店.内室'] })
+    expect(enc.a).toEqual({ __kin: 'Node', v: '商店' })
+    expect(enc.b).toEqual({ __kin: 'Node', v: '商店.内室' })
+    const out = rtn({ a: o['商店'], b: o['商店.内室'] }, nodes)
+    expect(nodeRefData(out.a)).toEqual({ path: '商店', args: null })
+    expect(nodeRefData(out.b)).toEqual({ path: '商店.内室', args: null })
+  })
+
+  it('绑参引用带 args 编码（递归，含 Map）且往返还原', () => {
+    const nodes = nodesOf()
+    const f = (nodes.root as Record<string, unknown>)['带参店'] as (...a: unknown[]) => unknown
+    const bound = f('灯笼', new Map([['折', 8]]))
+    const out = rtn({ t: bound }, nodes)
+    const d = nodeRefData(out.t)!
+    expect(d.path).toBe('带参店')
+    expect(d.args![0]).toBe('灯笼')
+    expect(d.args![1]).toBeInstanceOf(Map)
+    expect((d.args![1] as Map<string, number>).get('折')).toBe(8)
+  })
+
+  it('引用藏在容器里（数组 / Map 值）同样往返', () => {
+    const nodes = nodesOf()
+    const o = nodes.root as Record<string, unknown>
+    const out = rtn({ arr: [o['商店']], m: new Map([['k', o['商店.内室']]]) }, nodes)
+    expect(nodeRefData((out.arr as unknown[])[0])).toEqual({ path: '商店', args: null })
+    expect(nodeRefData((out.m as Map<string, unknown>).get('k'))).toEqual({ path: '商店.内室', args: null })
+  })
+
+  it('END 伪引用往返', () => {
+    const nodes = nodesOf()
+    const out = rtn({ e: (nodes.root as Record<string, unknown>)['END'] }, nodes)
+    expect(nodeRefData(out.e)).toEqual({ path: 'END', args: null })
+  })
+
+  it('读档时节点已删除 → reviveNode 抛（明确报错而非静默坏掉）', () => {
+    const nodes = nodesOf()
+    const enc = JSON.parse(JSON.stringify({ t: { __kin: 'Node', v: '已删除的节点' } }))
+    expect(() => decodeGlobals(enc, (p, a) => nodes.revive(p, a))).toThrow(/存档引用的节点不存在/)
+  })
+
+  it('无 reviveNode 时 Node 标签降级为普通对象（不崩）', () => {
+    const out = decodeGlobals({ t: { __kin: 'Node', v: '商店' } })
+    expect(out.t).toEqual({ __kin: 'Node', v: '商店' })
+  })
+
+  it('作者伪造 { __kin:"Node" } 形状不符时降级不崩', () => {
+    const nodes = nodesOf()
+    const out = decodeGlobals({ t: { __kin: 'Node', v: 42 } }, (p, a) => nodes.revive(p, a))
+    expect(out.t).toEqual({ __kin: 'Node', v: 42 })
   })
 })

@@ -13,8 +13,8 @@ describe('内置 demo 项目', () => {
     expect(found.ok).toBe(true)
     if (!found.ok) return
     const manifest = readFileSync(join(demoDir, found.name), 'utf8')
-    // manifest 从故事文件集里排除（其余条目才是 .kin）。
-    const files = new Map(index.filter((p) => p !== found.name).map((p) => [p, readFileSync(join(demoDir, p), 'utf8')]))
+    // files.json 列全部项目文件（含 css / 图片 / 音频）；故事文件集只取 .kin。
+    const files = new Map(index.filter((p) => p.endsWith('.kin')).map((p) => [p, readFileSync(join(demoDir, p), 'utf8')]))
 
     const res = loadProjectFromFiles(manifest, files, found.name)
     expect(res.ok).toBe(true)

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Story, ValidatedProgram } from '@kiny/engine'
-import { Player, usePlayback, initialState, type PlayState, type ResolveAsset } from '@kiny/player'
+import { Player, usePlayback, initialState, ProjectStyles, type PlayState, type ResolveAsset } from '@kiny/player'
 import { listSaves, writeSave, deleteSave, genSaveId } from '../saves/store'
 import { captureSave, restoreSave } from '../saves/snapshot'
 import { AUTO_SAVE_ID, type SaveRecord } from '../saves/types'
@@ -18,7 +18,7 @@ function fmtTime(ts: number): string {
  * localStorage 同步 API：读写存档均同步（无 reader 的 IPC async 与串行队列）。
  */
 export function ReadingView({
-  story, program, storyId, resolveAsset, initial, title, onBack,
+  story, program, storyId, resolveAsset, initial, title, onBack, projectCss = '',
 }: {
   story: Story
   program?: ValidatedProgram
@@ -28,6 +28,8 @@ export function ReadingView({
   initial?: PlayState
   title: string
   onBack: () => void
+  /** 作品前端资源编译出的 css（字体 + 主题）；缺省为无（纯渲染测试）。 */
+  projectCss?: string
 }) {
   const [driven, setDriven] = useState<{ story: Story; initial: PlayState }>({ story, initial: initial ?? initialState })
   const pb = usePlayback(driven.story, resolveAsset, driven.initial)
@@ -132,6 +134,7 @@ export function ReadingView({
 
   return (
     <div className="reading">
+      <ProjectStyles css={projectCss} />
       <div className="reading-bar">
         <button className="back" onClick={onBack}>← 书架</button>
         <span className="title-chip">{title}</span>

@@ -118,4 +118,137 @@ describe('RevealingLine（打字机逐字揭示）', () => {
     expect(first.textContent).toBe('粗')
     expect(first.style.fontWeight).toBe('700')
   })
+
+  describe('<pause> 句中分段揭示', () => {
+    // 「凶手就是…」5 字 + 「你自己！」4 字，边界在第 5 字（下标 5）。
+    const PAUSED: RichSpan[] = [{ text: '凶手就是…' }, { text: '你自己！', pauseBefore: true }]
+
+    it('揭示到标记处停住，不再自己往下走', () => {
+      const { container } = render(<RevealingLine spans={PAUSED} speed={SPEED} fade={0} />)
+      act(() => { vi.advanceTimersByTime(50) }) // 前半段 5 字
+      expect(revealed(container)).toBe('凶手就是…')
+      act(() => { vi.advanceTimersByTime(500) }) // 继续等：不该自己续显
+      expect(revealed(container)).toBe('凶手就是…')
+    })
+
+    it('整行未完时不触发 onComplete；续段揭示完整行才触发一次', () => {
+      const onComplete = vi.fn()
+      const { rerender } = render(<RevealingLine spans={PAUSED} speed={SPEED} fade={0} skipToken={0} onComplete={onComplete} />)
+      act(() => { vi.advanceTimersByTime(500) })
+      expect(onComplete).not.toHaveBeenCalled() // 停在标记 ≠ 整行完成
+      act(() => { rerender(<RevealingLine spans={PAUSED} speed={SPEED} fade={0} skipToken={1} onComplete={onComplete} />) })
+      act(() => { vi.advanceTimersByTime(500) })
+      expect(onComplete).toHaveBeenCalledTimes(1)
+    })
+
+    it('点击档位②：停在标记时点击 → 揭示下一段', () => {
+      const { container, rerender } = render(<RevealingLine spans={PAUSED} speed={SPEED} fade={0} skipToken={0} />)
+      act(() => { vi.advanceTimersByTime(50) })
+      act(() => { rerender(<RevealingLine spans={PAUSED} speed={SPEED} fade={0} skipToken={1} />) })
+      act(() => { vi.advanceTimersByTime(20) }) // 续段逐字推进
+      expect(revealed(container)).toBe('凶手就是…你自')
+      act(() => { vi.advanceTimersByTime(30) })
+      expect(revealed(container)).toBe('凶手就是…你自己！')
+    })
+
+    it('点击档位①：段中打字时点击 → 当前段立显但**停在标记**，不穿透', () => {
+      const { container, rerender } = render(<RevealingLine spans={PAUSED} speed={SPEED} fade={0} skipToken={0} />)
+      act(() => { vi.advanceTimersByTime(20) }) // 前半段刚出 2 字
+      act(() => { rerender(<RevealingLine spans={PAUSED} speed={SPEED} fade={0} skipToken={1} />) })
+      expect(revealed(container)).toBe('凶手就是…') // 当前段立显
+      act(() => { vi.advanceTimersByTime(500) })
+      expect(revealed(container)).toBe('凶手就是…') // 停在标记，没穿透到后半句
+    })
+
+    it('多个标记：逐次点击逐段揭示', () => {
+      const three: RichSpan[] = [{ text: '一' }, { text: '二', pauseBefore: true }, { text: '三', pauseBefore: true }]
+      const { container, rerender } = render(<RevealingLine spans={three} speed={SPEED} fade={0} skipToken={0} />)
+      act(() => { vi.advanceTimersByTime(100) })
+      expect(revealed(container)).toBe('一')
+      act(() => { rerender(<RevealingLine spans={three} speed={SPEED} fade={0} skipToken={1} />) })
+      act(() => { vi.advanceTimersByTime(100) })
+      expect(revealed(container)).toBe('一二')
+      act(() => { rerender(<RevealingLine spans={three} speed={SPEED} fade={0} skipToken={2} />) })
+      act(() => { vi.advanceTimersByTime(100) })
+      expect(revealed(container)).toBe('一二三')
+    })
+
+    it('行首标记：先等一次点击才出文字', () => {
+      const spans: RichSpan[] = [{ text: '迟来的一句。', pauseBefore: true }]
+      const { container, rerender } = render(<RevealingLine spans={spans} speed={SPEED} fade={0} skipToken={0} />)
+      act(() => { vi.advanceTimersByTime(500) })
+      expect(revealed(container)).toBe('')
+      act(() => { rerender(<RevealingLine spans={spans} speed={SPEED} fade={0} skipToken={1} />) })
+      act(() => { vi.advanceTimersByTime(500) })
+      expect(revealed(container)).toBe('迟来的一句。')
+    })
+
+    it('reduced-motion（瞬显）下分段停顿仍保留：每段瞬显、标记处仍等点击', () => {
+      const { container, rerender } = render(<RevealingLine spans={PAUSED} speed={0} fade={0} skipToken={0} />)
+      expect(revealed(container)).toBe('凶手就是…') // 首段瞬显
+      act(() => { vi.advanceTimersByTime(500) })
+      expect(revealed(container)).toBe('凶手就是…') // 仍停着
+      act(() => { rerender(<RevealingLine spans={PAUSED} speed={0} fade={0} skipToken={1} />) })
+      expect(revealed(container)).toBe('凶手就是…你自己！') // 点击后下一段瞬显
+    })
+
+    it('上报停在标记 / 续段（宿主据此亮灭推进提示三角）', () => {
+      const onAwaitingPause = vi.fn()
+      const { rerender } = render(<RevealingLine spans={PAUSED} speed={SPEED} fade={0} skipToken={0} onAwaitingPause={onAwaitingPause} />)
+      act(() => { vi.advanceTimersByTime(50) })
+      expect(onAwaitingPause).toHaveBeenLastCalledWith(true)
+      act(() => { rerender(<RevealingLine spans={PAUSED} speed={SPEED} fade={0} skipToken={1} onAwaitingPause={onAwaitingPause} />) })
+      expect(onAwaitingPause).toHaveBeenLastCalledWith(false)
+    })
+
+    it('空 spans 的行（glue 拼出的空 text 事件）照常完成，不卡在「等点击」', () => {
+      // 回归：空行的段末 limit 也是 0，若与「行首标记」共用同一判断就会落进等待分支，
+      // onComplete 永不触发 → flow 模式故事停住。
+      const onComplete = vi.fn()
+      render(<RevealingLine spans={[]} speed={SPEED} fade={0} onComplete={onComplete} />)
+      act(() => { vi.advanceTimersByTime(50) })
+      expect(onComplete).toHaveBeenCalledTimes(1)
+    })
+
+    it('瞬显模式：整行完成时不补报 awaiting=false（否则盖掉宿主的「整行完等点击」）', () => {
+      // 回归：瞬显下「续段」与「整行完成」同批发生，上报 effect 事后补报 false 会把
+      // onComplete 刚设上的 line 模式等待态覆盖掉——三角该亮不亮。
+      const calls: boolean[] = []
+      const onAwaitingPause = (w: boolean) => calls.push(w)
+      const onComplete = vi.fn()
+      const { rerender } = render(
+        <RevealingLine spans={PAUSED} speed={0} fade={0} skipToken={0} onComplete={onComplete} onAwaitingPause={onAwaitingPause} />,
+      )
+      expect(calls).toEqual([true]) // 首段瞬显后停在标记
+      act(() => {
+        rerender(<RevealingLine spans={PAUSED} speed={0} fade={0} skipToken={1} onComplete={onComplete} onAwaitingPause={onAwaitingPause} />)
+      })
+      expect(onComplete).toHaveBeenCalledTimes(1) // 续段后整行完成
+      expect(calls).toEqual([true]) // 且**没有**补报 false
+    })
+
+    it('<pause/> 自闭合写法等价（与 <br/> 一致）', () => {
+      // 解析层等价性由 engine 测试覆盖，这里确认渲染层对同样的 spans 行为一致。
+      const { container } = render(<RevealingLine spans={PAUSED} speed={0} fade={0} />)
+      expect(revealed(container)).toBe('凶手就是…')
+    })
+
+    it('无标记的行：行为与此前完全一致（整行一段、点击即整行立显）', () => {
+      const spans: RichSpan[] = [{ text: '一二三四五' }]
+      const { container, rerender } = render(<RevealingLine spans={spans} speed={SPEED} fade={0} skipToken={0} />)
+      act(() => { vi.advanceTimersByTime(20) })
+      act(() => { rerender(<RevealingLine spans={spans} speed={SPEED} fade={0} skipToken={1} />) })
+      expect(revealed(container)).toBe('一二三四五')
+    })
+  })
+
+  it('作品 class 挂在整段外层、不逐字重复（盒模型 / 伪元素只出现一次）', () => {
+    const spans: RichSpan[] = [{ text: '他说' }, { text: '三个字', classes: ['whisper'] }]
+    const { container } = render(<RevealingLine spans={spans} speed={SPEED} fade={50} />)
+    act(() => { vi.advanceTimersByTime(40) }) // 4 字：两字无 class + 两字带 class
+    const boxes = container.querySelectorAll('.kin-whisper')
+    expect(boxes).toHaveLength(1)
+    // 逐字 rchar 在其内层（淡入动画照旧逐字）
+    expect(boxes[0]!.querySelectorAll('.rchar').length).toBeGreaterThan(0)
+  })
 })

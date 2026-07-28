@@ -5,6 +5,15 @@ import { Credit } from '../Credit'
 /** 打开方式：从头开始 / 从自动续读存档继续。 */
 export type OpenMode = 'start' | 'continue'
 
+/** 免责声明：空书架放引导文案下方、有书放列表底部署名旁——任一状态下恰好可见一次（不同屏重复）。 */
+function Disclaimer() {
+  return (
+    <p className="disclaimer">
+      所有数据仅保存在你的浏览器本地，本站不上传、不存储任何内容。请勿导入违法违规或侵权内容，责任由使用者自行承担。
+    </p>
+  )
+}
+
 function EmptyShelf() {
   return (
     <div className="empty">
@@ -15,6 +24,7 @@ function EmptyShelf() {
       </div>
       <h2>书架还空着</h2>
       <p>把作者分发给你的 <span className="kip">.kip</span> 故事包拖进窗口，或点「导入故事」选择文件，就能开始阅读。</p>
+      <Disclaimer />
     </div>
   )
 }
@@ -92,6 +102,7 @@ export function LibraryView({
               )
             })}
           </div>
+          <Disclaimer />
           <Credit />
         </div>
       )}

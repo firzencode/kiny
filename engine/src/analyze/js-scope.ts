@@ -1,11 +1,19 @@
 import { parse as acornParse } from 'acorn'
 import { forEachChild, collectPatternNames, type AstNode } from '../js-ast'
 
+/** 一处对 `$nodes` 的字面成员访问：path 为字面链（`商店` / `商店.内室`），argc 为字面调用实参数（非调用 null）。 */
+export interface NodesAccess {
+  path: string
+  argc: number | null
+}
+
 export interface JsAnalysis {
   declares: string[]
   references: string[]
   /** 自由（非局部绑定）标识符的赋值目标：`random = 5` / `random++`——供检测「给内置函数赋值」。 */
   assigns: string[]
+  /** `$nodes` 的字面成员访问（编译期可校验存在性 / arity 的部分；计算下标不记）。 */
+  nodesAccess: NodesAccess[]
 }
 
 /**
@@ -25,9 +33,39 @@ export function analyzeJs(code: string, mode: 'expr' | 'stmt'): JsAnalysis | { e
 
   const references = new Set<string>()
   const assigns = new Set<string>()
+  const nodesAccess: NodesAccess[] = []
   const scopes: Set<string>[] = [new Set<string>()]
   const top = scopes[0]!
   const isBound = (name: string) => scopes.some((s) => s.has(name))
+
+  /** 成员节点的属性名：非 computed 取标识符名；computed 只认字符串字面量；其余（动态）null。 */
+  const propNameOf = (m: AstNode): string | null => {
+    if (!m.computed) return m.property.type === 'Identifier' ? (m.property.name as string) : null
+    const p = m.property
+    return p.type === 'Literal' && typeof p.value === 'string' ? p.value : null
+  }
+
+  /**
+   * 尝试把一个 MemberExpression 解析成 `$nodes` 字面链（一级 `$nodes.X` / 二级 `$nodes.X.Y`），
+   * 返回完整路径；非 $nodes 链或含动态环节返回 null（交默认遍历，内层一级链会再被访问到）。
+   */
+  const nodesMemberPath = (node: AstNode): string | null => {
+    const obj = node.object
+    if (obj.type === 'Identifier' && obj.name === '$nodes' && !isBound('$nodes')) {
+      return propNameOf(node) // 一级：`$nodes.X` / `$nodes["X"]`（可含带点全路径）
+    }
+    if (
+      obj.type === 'MemberExpression' &&
+      obj.object.type === 'Identifier' &&
+      obj.object.name === '$nodes' &&
+      !isBound('$nodes')
+    ) {
+      const parent = propNameOf(obj)
+      const child = propNameOf(node)
+      if (parent !== null && child !== null) return `${parent}.${child}` // 二级：`$nodes.X.Y`
+    }
+    return null
+  }
 
   /** 收模式绑定名进 target（不求值默认值）；var/function 提升与顶层声明收集用。 */
   const collectNames = (p: AstNode, target: Set<string>): void =>
@@ -175,10 +213,29 @@ export function analyzeJs(code: string, mode: 'expr' | 'stmt'): JsAnalysis | { e
           if (!isBound(node.argument.name)) { references.add(node.argument.name); assigns.add(node.argument.name) }
         } else visit(node.argument)
         return
-      case 'MemberExpression':
+      case 'CallExpression': {
+        // `$nodes.X(...)` 字面调用：记 path + argc（callee 已消费，不再当普通成员访问重复记）。
+        if (node.callee.type === 'MemberExpression') {
+          const path = nodesMemberPath(node.callee)
+          if (path !== null) {
+            nodesAccess.push({ path, argc: node.arguments.length })
+            for (const a of node.arguments) visit(a)
+            return
+          }
+        }
+        forEachChild(node, visit)
+        return
+      }
+      case 'MemberExpression': {
+        const path = nodesMemberPath(node)
+        if (path !== null) {
+          nodesAccess.push({ path, argc: null })
+          return // 字面链已整体消费（属性为字面量，无自由引用可下钻）
+        }
         visit(node.object)
         if (node.computed) visit(node.property)
         return
+      }
       case 'Property':
         if (node.computed) visit(node.key)
         visit(node.value)
@@ -212,5 +269,5 @@ export function analyzeJs(code: string, mode: 'expr' | 'stmt'): JsAnalysis | { e
 
   for (const stmt of program.body) visit(stmt)
 
-  return { declares, references: [...references], assigns: [...assigns] }
+  return { declares, references: [...references], assigns: [...assigns], nodesAccess }
 }

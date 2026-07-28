@@ -149,6 +149,32 @@ describe('usePreviewPlayback', () => {
     expect(container.textContent).toContain('后续文字很长用于验证打字机。')
   })
 
+  it('@sleep：人工交互的预览真实等待，等满才出下一行', () => {
+    const { program, start } = build('@text_speed(0)\n第一行。\n@sleep(1000)\n第二行。\n-> END\n')
+    let pb!: PreviewPlayback
+    const { container } = render(<Harness onReady={(p) => { pb = p }} />)
+    act(() => { pb.restart(program, start, 1, RESOLVE) })
+    pump(200, 50)
+    expect(container.textContent).toContain('第一行。')
+    expect(container.textContent).not.toContain('第二行。') // 停顿中
+    act(() => { fireEvent.click(content(container)) }) // 不可跳过：点击无效
+    pump(300, 50)
+    expect(container.textContent).not.toContain('第二行。')
+    pump(900, 100)
+    expect(container.textContent).toContain('第二行。')
+  })
+
+  it('@sleep：cancel（编辑触发重算）作废在飞停顿，不再续步', () => {
+    const { program, start } = build('@text_speed(0)\n第一行。\n@sleep(1000)\n第二行。\n-> END\n')
+    let pb!: PreviewPlayback
+    const { container } = render(<Harness onReady={(p) => { pb = p }} />)
+    act(() => { pb.restart(program, start, 1, RESOLVE) })
+    pump(200, 50)
+    act(() => { pb.cancel() })
+    pump(2000, 100)
+    expect(container.textContent).not.toContain('第二行。')
+  })
+
   it('cancel：立即中止在飞动画，之后不再有新的提交', () => {
     const { program, start } = build('第一行。\n第二行。\n* [继续] -> END\n')
     const commits: PlayState[] = []

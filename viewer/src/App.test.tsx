@@ -25,7 +25,7 @@ function realLoaded(): LoadedStory {
   const { program } = analyze(res.files)
   const start = resolveStart(program!, res.entry)!
   const seed = 12345
-  return { story: createStory(program!, { start, seed }), assetBase: 'demo/', title: '雾港之夜', version: '1.0.0', program: program!, start, seed }
+  return { story: createStory(program!, { start, seed }), assetBase: 'demo/', projectCss: '', title: '雾港之夜', version: '1.0.0', program: program!, start, seed }
 }
 
 describe('App', () => {

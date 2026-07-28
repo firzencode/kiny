@@ -11,6 +11,8 @@ export async function play(story: Story, term: Term): Promise<'ended' | 'quit'> 
     while (story.canContinue) {
       const e = story.continue()
       if (e.kind === 'text') term.write(plainText(e.spans))
+      // 固定区域：终端无固定栏可用，按「区域更新」打一行示意（空内容 = 清空该槽）。
+      else if (e.kind === 'panel') term.write(dim(`[${e.slot}] ${plainText(e.spans) || '（清空）'}`))
       else if (e.name === 'clear') term.write(dim('———— 清屏 ————')) // 终端无法真清历史，打分隔标记示意
       else term.write(dim(`» ${e.name}(${e.args.map(String).join(', ')})`))
     }

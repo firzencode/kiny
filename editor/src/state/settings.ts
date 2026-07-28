@@ -16,6 +16,8 @@ export interface Settings {
   autosaveRecovery: boolean
   /** 预览随机种子：开启后每次「重开预览」（↺）换新随机种子；关则恒用固定种子（确定性）。默认关。 */
   previewRandomSeed: boolean
+  /** 预览应用作品主题（项目内 css / 字体）：默认开；作者 css 越界污染编辑器 UI 时可一键关。 */
+  previewProjectTheme: boolean
   /** AI 对话记录自动清理阈值（天）：距今超此天数无新增的对话在启动时删除。null = 关闭（永久保留）。默认 30。 */
   aiChatRetentionDays: number | null
   /** 外部控制（T040）：开启后本地起 HTTP 服务，供 CLI/skill 经动作层驱动编辑器。默认关。 */
@@ -39,6 +41,7 @@ export const DEFAULT_SETTINGS: Settings = {
   proseLh: 1.95,
   autosaveRecovery: true,
   previewRandomSeed: false,
+  previewProjectTheme: true,
   aiChatRetentionDays: 30,
   externalControl: false,
   shortcuts: {},
@@ -80,6 +83,7 @@ export function clampSettings(s: Settings): Settings {
     proseLh: clampNum(s.proseLh, SETTINGS_BOUNDS.proseLh, DEFAULT_SETTINGS.proseLh),
     autosaveRecovery: typeof s.autosaveRecovery === 'boolean' ? s.autosaveRecovery : DEFAULT_SETTINGS.autosaveRecovery,
     previewRandomSeed: typeof s.previewRandomSeed === 'boolean' ? s.previewRandomSeed : DEFAULT_SETTINGS.previewRandomSeed,
+    previewProjectTheme: typeof s.previewProjectTheme === 'boolean' ? s.previewProjectTheme : DEFAULT_SETTINGS.previewProjectTheme,
     aiChatRetentionDays: clampRetention(s.aiChatRetentionDays),
     externalControl: typeof s.externalControl === 'boolean' ? s.externalControl : DEFAULT_SETTINGS.externalControl,
     shortcuts: sanitizeShortcuts(s.shortcuts),

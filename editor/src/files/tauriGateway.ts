@@ -1,5 +1,5 @@
 import { open, ask, save } from '@tauri-apps/plugin-dialog'
-import { readTextFile, writeTextFile, readDir, mkdir, exists, rename, remove, copyFile, BaseDirectory } from '@tauri-apps/plugin-fs'
+import { readTextFile, writeTextFile, readFile, readDir, mkdir, exists, rename, remove, copyFile, BaseDirectory } from '@tauri-apps/plugin-fs'
 import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow, currentMonitor, LogicalSize } from '@tauri-apps/api/window'
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
@@ -9,7 +9,7 @@ import { findManifest } from '@kiny/engine'
 import type { ResolveAsset } from '@kiny/player'
 import {
   type FileGateway, type LoadedProject, type Manifest, type ProjectFileEntry, type WindowMode,
-  STARTER_MAIN_KIN, STARTER_NEW_FILE, normalizeKinName, starterManifest, projectFileName, projectFolderName, assertSafeRelPath, assertRenameSafe,
+  STARTER_MAIN_KIN, STARTER_NEW_FILE, normalizeKinName, starterManifest, projectFileName, projectFolderName, assertSafeRelPath, assertRenameSafe, isTextFile,
 } from './gateway'
 import { loadWorkbenchSize, computeLaunchSize, LAUNCH_WINDOW, WORKBENCH_WINDOW, WORKBENCH_MIN_SIZE } from '../state/windowSize'
 import { type DraftStore, parseDraftStore, emptyDraftStore } from '../state/drafts'
@@ -25,6 +25,25 @@ const CHATS_DIR = 'ai-chats'
 const chatPath = (key: string) => `${CHATS_DIR}/${key}.json`
 
 // 外部控制信息落 app-data（T040）：CLI/skill 按同一路径发现端口 + token，identifier 见 tauri.conf.json。
+
+/** 二进制资源的 data-URI MIME（导出网页内联字体用；未知扩展名交浏览器嗅探）。 */
+const DATA_URI_MIME: Record<string, string> = {
+  woff2: 'font/woff2', woff: 'font/woff', ttf: 'font/ttf', otf: 'font/otf',
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif', svg: 'image/svg+xml',
+}
+function mimeOf(path: string): string {
+  const ext = path.slice(path.lastIndexOf('.') + 1).toLowerCase()
+  return DATA_URI_MIME[ext] ?? 'application/octet-stream'
+}
+/** 字节 → base64。分块喂 btoa：字体动辄数 MB，一次性 spread 会爆调用栈。 */
+function base64(bytes: Uint8Array): string {
+  let bin = ''
+  const CHUNK = 0x8000
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK))
+  }
+  return btoa(bin)
+}
 
 async function pickDir(): Promise<string | null> {
   const picked = await open({ directory: true, multiple: false })
@@ -115,7 +134,18 @@ async function readProject(dir: string): Promise<LoadedProject> {
   const files: ProjectFileEntry[] = []
   for (const rel of rels) {
     const isKin = rel.endsWith('.kin')
-    files.push(isKin ? { path: rel, isKin, source: await readTextFile(await join(dir, rel)) } : { path: rel, isKin })
+    // 文本文件（.kin + css/js/json/txt/md/html）载入文本供编辑；二进制只列名。
+    // 读不出文本（非 UTF-8 的 .txt/.json 在中文环境里很常见）时降级成「只列名」——
+    // 一个编码异常的旁挂文件不该让整个项目打不开；`.kin` 例外，它读不了就是真错误。
+    let source: string | undefined
+    if (isTextFile(rel)) {
+      try {
+        source = await readTextFile(await join(dir, rel))
+      } catch (e) {
+        if (isKin) throw e
+      }
+    }
+    files.push(source !== undefined ? { path: rel, isKin, source } : { path: rel, isKin })
   }
   if (!files.some((f) => f.path === manifest.entry)) throw new Error(`缺少入口文件 ${manifest.entry}`)
   return { dir, manifest, manifestFile, files, emptyDirs }
@@ -164,8 +194,12 @@ export const tauriFileGateway: FileGateway = {
     assertSafeRelPath(rel)
     await writeTextFile(await join(dir, rel), text)
   },
+  readTextFile: async (dir, rel) => {
+    assertSafeRelPath(rel)
+    return readTextFile(await join(dir, rel))
+  },
   async pickImportFiles() {
-    const picked = await open({ multiple: true, filters: [{ name: '媒体资源', extensions: MEDIA_EXTS }] })
+    const picked = await open({ multiple: true, filters: [{ name: '作品资源（图 / 音 / 字体 / css）', extensions: MEDIA_EXTS }] })
     if (picked === null) return null
     return Array.isArray(picked) ? picked : [picked]
   },
@@ -180,6 +214,11 @@ export const tauriFileGateway: FileGateway = {
   },
   makeResolveAsset(dir: string): ResolveAsset {
     return (rel) => convertFileSrc(`${dir}/${rel}`)
+  },
+  async readAssetDataUri(dir, rel) {
+    assertSafeRelPath(rel)
+    const bytes = await readFile(await join(dir, rel))
+    return `data:${mimeOf(rel)};base64,${base64(bytes)}`
   },
   async createFolder(dir, relDir) {
     assertSafeRelPath(relDir)

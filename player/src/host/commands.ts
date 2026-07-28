@@ -1,4 +1,4 @@
-import type { OutputEvent } from '@kiny/engine'
+import type { OutputEvent, RichSpan, PanelSlot } from '@kiny/engine'
 
 type CommandEvent = Extract<OutputEvent, { kind: 'command' }>
 
@@ -23,6 +23,11 @@ export interface HostState {
   textSpeed: number
   /** 每字淡入时长（ms，@text_fade）；0 = 无淡入。 */
   textFade: number
+  /**
+   * 固定区域内容（`@panel` 活模板的最新求值结果）。缺席 = 该槽未登记 / 已清空，不渲染。
+   * 与 bg / bgm 并列的持续状态：随播放态序列化，读档即渲染。
+   */
+  panels: { left?: RichSpan[]; right?: RichSpan[]; bottom?: RichSpan[]; after?: RichSpan[] }
 }
 
 export const emptyHost: HostState = {
@@ -31,6 +36,18 @@ export const emptyHost: HostState = {
   stepMode: 'flow',
   textSpeed: DEFAULT_TEXT_SPEED,
   textFade: DEFAULT_TEXT_FADE,
+  panels: {},
+}
+
+/**
+ * 固定区域更新（engine 的 `panel` 事件）→ HostState.panels。
+ * 空 spans = 清空并隐藏该槽（删键，而非留空数组——渲染层据「有无键」决定是否出容器）。
+ */
+export function applyPanel(s: HostState, slot: PanelSlot, spans: RichSpan[]): HostState {
+  const panels = { ...s.panels }
+  if (spans.length === 0) delete panels[slot]
+  else panels[slot] = spans
+  return { ...s, panels }
 }
 
 /** 非负有限数取值，否则回落。 */

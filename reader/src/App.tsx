@@ -14,7 +14,7 @@ import { AUTO_SAVE_ID } from './saves/types'
 import type { LibraryItem } from './types'
 import { logErrorEntry, ErrorDetailsDialog, type ErrorSource } from '@kiny/error-report'
 
-type Reading = { story: Story; program: ValidatedProgram; storyId: string; resolveAsset: ResolveAsset; initial?: PlayState; title: string }
+type Reading = { story: Story; program: ValidatedProgram; storyId: string; resolveAsset: ResolveAsset; initial?: PlayState; title: string; projectCss: string }
 type View = { kind: 'library' } | { kind: 'reading'; reading: Reading }
 
 export function App() {
@@ -124,7 +124,7 @@ export function App() {
     const out = await loadStory(item.dir)
     if (!out.ok) { logErrorEntry({ source: 'operation:openStory', message: out.message }); setError(out.message); return }
     const enter = (story: Story, initial?: PlayState) =>
-      setView({ kind: 'reading', reading: { story, program: out.program, storyId: item.id, resolveAsset: out.resolveAsset, initial, title: out.title } })
+      setView({ kind: 'reading', reading: { story, program: out.program, storyId: item.id, resolveAsset: out.resolveAsset, initial, title: out.title, projectCss: out.projectCss } })
     try {
       if (mode === 'continue') {
         const save = await readSave(item.id, AUTO_SAVE_ID)

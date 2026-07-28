@@ -4,6 +4,9 @@ export const BUILTINS = new Set([
   'seq', 'cycle', 'once', 'shuffle',
 ])
 
+/** 引擎保留名（非函数的内置成员）：可引用，但声明 / 赋值均报 error。 */
+export const RESERVED_NAMES = new Set(['$nodes'])
+
 /** §11.1 内置命令名。 */
 export const COMMAND_NAMES = new Set([
   'bg_show', 'bg_hide', 'bgm_play', 'bgm_pause', 'bgm_stop',
@@ -12,6 +15,8 @@ export const COMMAND_NAMES = new Set([
   'step_mode', // 推进模式：line=逐行等点击 / flow=一路流到选项（默认），宿主落地
   'text_speed', // 打字机出字速度（字 / 秒；0=瞬显），宿主落地
   'text_fade', // 每字淡入时长（毫秒），宿主落地
+  'sleep', // 演出停顿（毫秒）：在输出流中插入不可跳过的定时停顿，宿主落地
+  'panel', // 固定区域（side/bottom/after）活模板登记：engine 内部处理、不透传，见 checks/commands.ts 特判
   'input', // 唯一的交互命令：暂停请求读者文本，写回变量（engine 内部处理，不透传），见 checks/commands.ts 特判
 ])
 

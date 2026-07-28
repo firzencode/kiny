@@ -156,7 +156,8 @@ export function SettingsDialog({ open, settings, activeThemeId, customThemes, ai
   const dirtyTypo = draft.codeFont !== settings.codeFont || draft.codeSize !== settings.codeSize || draft.codeLh !== settings.codeLh ||
     draft.proseFont !== settings.proseFont || draft.proseSize !== settings.proseSize || draft.proseLh !== settings.proseLh
   const dirtyAppearance = !themeStateEq(draftTheme, { activeThemeId, customThemes })
-  const dirtyEditor = draft.autosaveRecovery !== settings.autosaveRecovery || draft.previewRandomSeed !== settings.previewRandomSeed
+  const dirtyEditor = draft.autosaveRecovery !== settings.autosaveRecovery || draft.previewRandomSeed !== settings.previewRandomSeed ||
+    draft.previewProjectTheme !== settings.previewProjectTheme
   const dirtyShortcuts = !shortcutsEq(draft.shortcuts, settings.shortcuts)
   const dirtyAi = !aiEq || draft.aiChatRetentionDays !== settings.aiChatRetentionDays || draft.externalControl !== settings.externalControl
   const tabDirty: Record<TabId, boolean> = { typography: dirtyTypo, appearance: dirtyAppearance, editor: dirtyEditor, shortcuts: dirtyShortcuts, ai: dirtyAi }
@@ -252,6 +253,17 @@ export function SettingsDialog({ open, settings, activeThemeId, customThemes, ai
                   </button>
                 </div>
                 <div className="settings-help">开启后，每次「重开预览」（↺）都换一枚新随机种子，便于查看 random / shuffle 的多样性。关闭则恒用固定种子，预览可复现（默认）。</div>
+                <div className="settings-row">
+                  <span className="settings-label">预览应用作品主题</span>
+                  <button
+                    className={'settings-toggle' + (draft.previewProjectTheme ? ' on' : '')}
+                    role="switch" aria-checked={draft.previewProjectTheme} aria-label="预览应用作品主题"
+                    onClick={() => setDraft({ ...draft, previewProjectTheme: !draft.previewProjectTheme })}
+                  >
+                    <span className="settings-toggle-knob" />
+                  </button>
+                </div>
+                <div className="settings-help">开启后，预览会加载项目内的 `.css` 与字体（作品主题），所见即读者所见（默认）。若作品 css 写了越界选择器、影响到编辑器界面，可关掉它。</div>
               </div>
             )}
 

@@ -1,5 +1,5 @@
 import { assembleFromFiles, type Story, type ValidatedProgram } from '@kiny/engine'
-import type { ResolveAsset } from '@kiny/player'
+import { discoverAssets, buildProjectCss, type ResolveAsset } from '@kiny/player'
 import type { UnzippedKip } from '../kip/unzipKip'
 
 export interface Loaded {
@@ -10,6 +10,8 @@ export interface Loaded {
   version: string
   /** 本次会话建的全部资源 objectURL；调用方离开阅读 / 切书 / 卸载时逐一 revokeObjectURL 回收。 */
   assetUrls: string[]
+  /** 作品前端资源编译出的 css（字体 objectURL 已就位、`url()` 已重写）。 */
+  projectCss: string
 }
 
 /**
@@ -29,6 +31,12 @@ export function loadFromLibrary(pkg: UnzippedKip): Loaded {
     assetUrls.push(url)
   }
   const resolveAsset: ResolveAsset = (name) => urlByName.get(name) ?? ''
+  // 作品前端资源：css 取解包出的文本（`url()` 重写为对应 objectURL）、字体按族名注册 @font-face。
+  const assets = discoverAssets(pkg.assets.keys())
+  const projectCss = buildProjectCss(assets, {
+    readCss: (p) => pkg.cssFiles.get(p) ?? null,
+    resolveAsset,
+  }).css
   return {
     story: res.story,
     program: res.program,
@@ -36,5 +44,6 @@ export function loadFromLibrary(pkg: UnzippedKip): Loaded {
     title: res.meta.name,
     version: res.meta.version,
     assetUrls,
+    projectCss,
   }
 }

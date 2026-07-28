@@ -93,6 +93,39 @@ describe('transform —— 选项', () => {
   })
 })
 
+describe('transform —— 动态跳转 -> {表达式}', () => {
+  it('独立跳转行', () => {
+    const body = knotBody('=== A ===\n-> {地图[方向]}')
+    expect(body[0]).toEqual({ kind: 'divert', target: '', args: [], targetExpr: '地图[方向]', line: 2 })
+  })
+
+  it('行内跳转：文本 -> {表达式}', () => {
+    const body = knotBody('=== A ===\n走吧 -> {返回点}')
+    expect(body).toHaveLength(2)
+    expect(body[0]!.kind).toBe('text')
+    expect(body[1]).toEqual({ kind: 'divert', target: '', args: [], targetExpr: '返回点', line: 2 })
+  })
+
+  it('选项 resultDivert 动态目标', () => {
+    const group = knotBody('=== A ===\n* [出发] -> {地图["北"]}')[0] as ChoiceGroup
+    expect(group.choices[0]!.resultDivert).toEqual({
+      kind: 'divert', target: '', args: [], targetExpr: '地图["北"]', line: 2,
+    })
+  })
+
+  it('fallback 动态目标', () => {
+    const group = knotBody('=== A ===\n* -> {返回点}')[0] as ChoiceGroup
+    const c = group.choices[0]!
+    expect(c.fallback).toBe(true)
+    expect(c.resultDivert).toMatchObject({ targetExpr: '返回点' })
+  })
+
+  it('表达式含字符串字面量里的 -> 与 } 不受干扰', () => {
+    const body = knotBody('=== A ===\n-> {pick("a->b}c")}')
+    expect(body[0]).toMatchObject({ kind: 'divert', targetExpr: 'pick("a->b}c")' })
+  })
+})
+
 describe('transform —— @if 链', () => {
   it('提取分支条件，@else 为 null', () => {
     const src = ['=== A ===', '@if {x === 0}', '> 甲', '@else', '> 乙'].join('\n')

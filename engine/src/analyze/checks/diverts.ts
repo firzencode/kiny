@@ -1,13 +1,71 @@
+import { parse as acornParse } from 'acorn'
 import type { ProjectFile, ContentBlock, Knot, Divert } from '../../parser/ast'
 import type { Diagnostic, SymbolTable } from '../types'
 import { openingKnotName } from '../opening'
 import { visitBlockTree } from '../../parser/visit'
+import type { AstNode } from '../../js-ast'
+
+/** 表达式整体是否为单个字符串字面量；是则返回其值，否则 null（语法错也 null，交 js-syntax-error）。 */
+function stringLiteralValue(code: string): string | null {
+  let program: AstNode
+  try {
+    program = acornParse(`(${code})`, { ecmaVersion: 'latest' }) as AstNode
+  } catch {
+    return null
+  }
+  const stmt = program.body[0]
+  if (!stmt || stmt.type !== 'ExpressionStatement') return null
+  const e = stmt.expression
+  return e.type === 'Literal' && typeof e.value === 'string' ? e.value : null
+}
 
 /** 跳转目标存在性 + 带参实参个数 + 非法进入带参节点子节点。 */
 export function checkDiverts(files: ProjectFile[], table: SymbolTable): Diagnostic[] {
   const out: Diagnostic[] = []
 
+  const authorKnot = (name: string) => {
+    const k = table.knots.get(name)
+    return k !== undefined && k.scope !== 'global' ? k : null
+  }
+
+  /**
+   * `-> {"字面量"}` 直写：目标编译期已知，按运行时字符串档规则校验——只认 knot 名 / `父.子`
+   * 全路径 / END/DONE（裸 stitch 不做同级相对解析）；带参 knot 拒（字符串无处带实参）；
+   * 外部跳带参节点的 stitch 拒（与静态 param-knot-stitch-entry 同规则）。
+   */
+  const checkStringLiteralTarget = (t: string, host: Knot, file: string, line: number) => {
+    if (t === 'END' || t === 'DONE') return
+    const dot = t.indexOf('.')
+    if (dot !== -1) {
+      const parent = t.slice(0, dot)
+      const child = t.slice(dot + 1)
+      const knot = authorKnot(parent)
+      if (knot === null || table.stitches.get(parent)?.has(child) !== true) {
+        out.push({ severity: 'error', code: 'unknown-node', message: `节点不存在：「${t}」`, file, line })
+        return
+      }
+      if (knot.params.length > 0 && parent !== host.name) {
+        out.push({ severity: 'error', code: 'param-knot-stitch-entry', message: `不能从外部跳进带参节点「${parent}」的子节点（参数无从绑定）`, file, line })
+      }
+      return
+    }
+    const knot = authorKnot(t)
+    if (knot === null) {
+      out.push({ severity: 'error', code: 'unknown-node', message: `节点不存在：「${t}」`, file, line })
+      return
+    }
+    if (knot.params.length > 0) {
+      out.push({ severity: 'error', code: 'node-string-param', message: `带参节点「${t}」须经 $nodes.${t}(实参) 绑定实参后跳转（字符串目标无处带实参）`, file, line })
+    }
+  }
+
   const checkOne = (d: Divert, host: Knot, file: string) => {
+    if (d.targetExpr !== undefined) {
+      // 动态跳转：目标运行时才定，存在性检查跳过；表达式整体为字符串字面量时编译期即校验。
+      const lit = stringLiteralValue(d.targetExpr)
+      if (lit !== null) checkStringLiteralTarget(lit, host, file, d.line)
+      return
+    }
     const t = d.target
     if (t === 'END' || t === 'DONE') return
 

@@ -172,4 +172,22 @@ describe('buildGraph', () => {
     const b = build(src, 'main.kin').graph
     expect(a).toEqual(b)
   })
+
+  it('动态 divert（-> {表达式}）不产边（目标运行时才定）', () => {
+    const { graph, diagnostics } = build({
+      'main.kin': [
+        '-> 甲',
+        '=== 甲 ===',
+        '~ let t = $nodes.乙',
+        '* [走] -> {t}',
+        '-> {t}',
+        '=== 乙 ===',
+        '-> END',
+      ].join('\n'),
+    })
+    expect(diagnostics.filter((d) => d.severity === 'error')).toEqual([])
+    // 动态目标既不加未解析边、更不加指向 '' 的坏边。
+    expect(graph.edges.filter((e) => ownerKnotId(e.from) === '甲')).toEqual([])
+    expect(graph.edges.every((e) => e.to !== '')).toBe(true)
+  })
 })

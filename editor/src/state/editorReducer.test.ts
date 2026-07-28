@@ -47,6 +47,48 @@ describe('editorReducer 多文件', () => {
     expect(s.openTabs).toEqual(['main.kin'])
   })
 
+  it('project_loaded：作品前端资源（css）进可编辑缓冲，但不进 fileOrder（非故事文件）', () => {
+    const proj: LoadedProject = {
+      dir: '/p',
+      manifest: { name: 'P', version: '1', engine: '0.1.0', entry: 'main.kin' },
+      manifestFile: 'kiny.json',
+      files: [
+        { path: 'main.kin', isKin: true, source: '=== a ===\n' },
+        { path: 'theme/skin.css', isKin: false, source: '.player{}' },
+        { path: 'fonts/楷体.woff2', isKin: false },
+      ],
+      emptyDirs: [],
+    }
+    const s = editorReducer(initialEditorState, { type: 'project_loaded', project: proj })
+    expect(Object.keys(s.files).sort()).toEqual(['main.kin', 'theme/skin.css'])
+    expect(s.fileOrder).toEqual(['main.kin']) // 入口候选只列 .kin
+    expect(s.openTabs).toEqual(['main.kin']) // 仍只开入口
+  })
+
+  it('file_created：新建 css 进缓冲并开 tab；二进制不进', () => {
+    const withCss = editorReducer(loaded, { type: 'file_created', file: { path: 'a.css', isKin: false, source: '' } })
+    expect(withCss.files['a.css']).toBeDefined()
+    expect(withCss.openTabs).toContain('a.css')
+    expect(withCss.activeFile).toBe('a.css')
+    expect(withCss.fileOrder).not.toContain('a.css')
+    const withPng = editorReducer(loaded, { type: 'file_created', file: { path: 'a.png', isKin: false } })
+    expect(withPng.files['a.png']).toBeUndefined()
+    expect(withPng.openTabs).not.toContain('a.png')
+  })
+
+  it('buffer_reloaded：覆盖式导入后缓冲与基线一起对齐新文本，不留脏', () => {
+    const dirty = editorReducer(loaded, { type: 'source_changed', path: 'main.kin', source: '旧改动' })
+    expect(dirty.files['main.kin']!.dirty).toBe(true)
+    const reloaded = editorReducer(dirty, { type: 'buffer_reloaded', path: 'main.kin', source: '磁盘新内容' })
+    expect(reloaded.files['main.kin']).toMatchObject({ source: '磁盘新内容', savedSource: '磁盘新内容', dirty: false })
+    expect(reloaded.runId).toBe(dirty.runId + 1)
+  })
+
+  it('buffer_reloaded：内容未变 / 无该缓冲 → 原样返回（不空转 runId）', () => {
+    expect(editorReducer(loaded, { type: 'buffer_reloaded', path: 'main.kin', source: '-> 开场' })).toBe(loaded)
+    expect(editorReducer(loaded, { type: 'buffer_reloaded', path: '不存在.css', source: 'x' })).toBe(loaded)
+  })
+
   it('project_loaded：建全缓冲、entry 记录、只开入口 tab、runId++', () => {
     expect(Object.keys(loaded.files).sort()).toEqual(['main.kin', '末.kin'])
     expect(loaded.entry).toBe('main.kin')

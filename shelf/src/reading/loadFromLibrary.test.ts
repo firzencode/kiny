@@ -22,6 +22,26 @@ describe('loadFromLibrary', () => {
     expect(loaded.assetUrls).toHaveLength(1)
   })
 
+  it('作品前端资源：css 取文本编译、url() 重写为 objectURL、字体注册 @font-face', () => {
+    const bytes = zipSync({
+      'kiny.json': strToU8(MANIFEST),
+      'main.kin': strToU8(MAIN),
+      'theme/skin.css': strToU8('.kin-letter{background:url(paper.png)}'),
+      'theme/paper.png': new Uint8Array([1]),
+      'fonts/楷体.woff2': new Uint8Array([2]),
+    })
+    const loaded = loadFromLibrary(unzipKip(bytes))
+    expect(loaded.projectCss).toContain('font-family: "楷体"')
+    expect(loaded.projectCss).toContain('.kin-letter{background:url("blob:')
+    // 三个非 .kin 资源各一个 objectURL（css 自身也在 assets 里）。
+    expect(loaded.assetUrls).toHaveLength(3)
+  })
+
+  it('无 css / 字体 → projectCss 空串', () => {
+    const bytes = zipSync({ 'kiny.json': strToU8(MANIFEST), 'main.kin': strToU8(MAIN) })
+    expect(loadFromLibrary(unzipKip(bytes)).projectCss).toBe('')
+  })
+
   it('装配失败（manifest 非法 JSON）→ 抛错', () => {
     const bytes = zipSync({ 'kiny.json': strToU8('not json'), 'main.kin': strToU8(MAIN) })
     expect(() => loadFromLibrary(unzipKip(bytes))).toThrow()

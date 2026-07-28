@@ -36,10 +36,10 @@ export function buildSymbolTable(files: ProjectFile[]): SymbolTable {
     for (const frag of collectFragments(file)) {
       const r = analyzeJs(frag.code, frag.mode)
       if ('error' in r) {
-        fragments.push({ file: frag.file, line: frag.line, scope: frag.scope, references: [], assigns: [], syntaxError: r.error })
+        fragments.push({ file: frag.file, line: frag.line, scope: frag.scope, references: [], assigns: [], nodesAccess: [], syntaxError: r.error })
         continue
       }
-      fragments.push({ file: frag.file, line: frag.line, scope: frag.scope, references: r.references, assigns: r.assigns, syntaxError: null })
+      fragments.push({ file: frag.file, line: frag.line, scope: frag.scope, references: r.references, assigns: r.assigns, nodesAccess: r.nodesAccess, syntaxError: null })
       for (const name of r.declares) declarations.push({ name, file: frag.file, line: frag.line, scope: frag.scope })
     }
   }

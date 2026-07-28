@@ -8,7 +8,7 @@ import { GOLDEN_SEED } from './rng'
 import type { Frame } from './frames'
 
 export { Story } from './story'
-export type { OutputEvent, ChoiceView, StoryOptions } from './types'
+export type { OutputEvent, ChoiceView, StoryOptions, PanelSlot } from './types'
 export { RuntimeError } from './types'
 export type { StorySnapshot } from './snapshot'
 export type { RichSpan } from './spans'
@@ -37,7 +37,7 @@ export function restoreStory(
   | { ok: false; reason: 'fingerprint-mismatch' }
   | { ok: false; reason: 'corrupt'; detail?: string }
   | { ok: false; reason: 'story-error'; message: string } {
-  if (!snapshot || snapshot.version !== 3) return { ok: false, reason: 'corrupt' }
+  if (!snapshot || snapshot.version !== 4) return { ok: false, reason: 'corrupt' }
   if (fingerprint(program) !== snapshot.fingerprint) {
     return { ok: false, reason: 'fingerprint-mismatch' }
   }
@@ -81,6 +81,7 @@ export function restoreStory(
       locals: snapshot.current.locals,
       frames,
       park,
+      panels: snapshot.panels,
     }
   } catch (e) {
     return { ok: false, reason: 'corrupt', detail: (e as Error).message }

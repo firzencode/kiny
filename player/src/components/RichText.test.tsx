@@ -32,6 +32,22 @@ describe('RichText', () => {
     expect(container.textContent).toBe('上下')
   })
 
+  it('classes 落 kin- 前缀的 className（作者 css 写 .kin-whisper）', () => {
+    const { container } = render(<RichText spans={[{ text: '低语', classes: ['whisper', 'old'] }]} />)
+    const span = container.querySelector('span')!
+    expect(span.className).toBe('kin-whisper kin-old')
+  })
+
+  it('只有 class 无内联样式时仍包 span（否则 class 无处可挂）', () => {
+    const { container } = render(<RichText spans={[{ text: 'x', classes: ['a'] }]} />)
+    expect(container.querySelector('span.kin-a')).not.toBeNull()
+  })
+
+  it('font 落 fontFamily 回退链', () => {
+    const { container } = render(<RichText spans={[{ text: '信', font: '楷体' }]} />)
+    expect(container.querySelector('span')!.style.fontFamily).toContain('楷体')
+  })
+
   it('纯文本 span 不包裹任何样式标签', () => {
     const { container } = render(<RichText spans={[{ text: '普通' }]} />)
     expect(container.querySelector('strong')).toBeNull()

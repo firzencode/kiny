@@ -28,6 +28,12 @@ describe('HelpDialog', () => {
     expect(screen.getAllByText('内置命令').length).toBeGreaterThan(0)
   })
 
+  it('语法参考屏：动态跳转（$nodes / -> {表达式}）有条目', () => {
+    render(<HelpDialog screen="syntax" onClose={vi.fn()} />)
+    expect(screen.getAllByText('动态跳转').length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/\$nodes/).length).toBeGreaterThan(0)
+  })
+
   it('Esc 关闭', async () => {
     const onClose = vi.fn()
     render(<HelpDialog screen="about" onClose={onClose} />)

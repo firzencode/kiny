@@ -25,7 +25,7 @@ function inlineTokens(s: string): Token[] {
   const out: Token[] = []
   // 富文本标签放最前、优先匹配：仅当 < 后构成合法标签（§3.6）才识别，否则裸 < 落入正文（如 1 < 2）。
   const re =
-    /(<\/?(?:b|i|u|s|color|size)(?:=[^>]*)?>|<br\s*\/?>)|("(?:[^"\\]|\\.)*")|(\{[^}]*\})|(->\s*[^\s[\](){}]+)|(\[[^\]]*\])|(@[A-Za-z_]\w*)|([A-Za-z_]\w*)|(\d+(?:\.\d+)?)/g
+    /(<\/?(?:b|i|u|s|color|size|font|class)(?:=[^>]*)?>|<br\s*\/?>|<pause\s*\/?>)|("(?:[^"\\]|\\.)*")|(\{[^}]*\})|(->\s*[^\s[\](){}]+)|(\[[^\]]*\])|(@[A-Za-z_]\w*)|([A-Za-z_]\w*)|(\d+(?:\.\d+)?)/g
   let m: RegExpExecArray | null
   let last = 0
   while ((m = re.exec(s))) {

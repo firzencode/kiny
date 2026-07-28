@@ -13,6 +13,11 @@ export interface InlineProject {
   manifest: string
   files: Record<string, string>
   assetBase?: string
+  /**
+   * 作品前端资源编译出的 css（导出管线已把 `.css` 内联、项目内字体 `url()` 重写为 data-URI）。
+   * `file://` 下无法 fetch 旁挂文本、且 Chrome 拒载外链字体，故必须内联随页面走。
+   */
+  css?: string
 }
 
 /** 内联数据探测结果：无注入（占位/缺 manifest）| 合法 | 有 manifest 但形状损坏。 */
@@ -46,7 +51,8 @@ export async function loadStory(seed = randomSeed()): Promise<LoadOutcome> {
   if (probe.kind === 'ok') {
     const inline = probe.project
     const files = new Map(Object.entries(inline.files))
-    return buildStory(inline.manifest, files, inline.assetBase ?? '', seed)
+    const css = typeof inline.css === 'string' ? inline.css : ''
+    return buildStory(inline.manifest, files, inline.assetBase ?? '', seed, 'kiny.json', css)
   }
   return loadDemo('demo/', seed)
 }

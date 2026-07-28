@@ -7,6 +7,7 @@ import { InputBox } from './InputBox'
 import { AudioController } from './AudioController'
 import { AudioToggle } from './AudioToggle'
 import { SfxController } from './SfxController'
+import { FixedPanels, AfterPanel } from './Panels'
 
 // 模块级稳定空数组：不传 sfx 时的默认值。用 `sfx = []` 默认参会每次渲染新建数组，
 // 令下游 SfxController 的「引用变化即播」误判为有新音效（Q3）。
@@ -37,6 +38,7 @@ export function Player({
       <AudioController bgm={state.host.bgm} muted={muted} />
       <SfxController sfx={sfx} muted={muted} />
       <AudioToggle muted={muted} onToggle={() => setMuted((m) => !m)} />
+      <FixedPanels panels={state.host.panels} />
       <div
         className="player-content"
         onClick={onContentClick ? () => onContentClick() : undefined}
@@ -48,6 +50,8 @@ export function Player({
             运行期错误 {state.error.file ?? ''}{state.error.line != null ? `:${state.error.line}` : ''} {state.error.message}
           </p>
         )}
+        {/* 正文后固定栏：排在选项 / 输入框之前、随正文流滚动。 */}
+        <AfterPanel panels={state.host.panels} />
         {!state.ended && !state.error && (
           state.input !== null
             ? <InputBox placeholder={state.input.placeholder} onSubmit={onSubmitInput} />

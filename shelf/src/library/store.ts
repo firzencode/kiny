@@ -64,11 +64,19 @@ export async function openPackage(id: string): Promise<UnzippedKip> {
     db.close()
   }
   if (!pkg) throw new Error('故事包不存在')
+  const assets = new Map(Object.entries(pkg.assets))
+  // 作品主题需要 css 文本（重写其中的 url()）。库里只存了 Blob，故在此现读——
+  // 不动存储 schema，早于本特性入库的书也照样能用主题。
+  const cssFiles = new Map<string, string>()
+  for (const [name, blob] of assets) {
+    if (name.toLowerCase().endsWith('.css')) cssFiles.set(name, await blob.text())
+  }
   return {
     manifestName: pkg.manifestName,
     manifestText: pkg.manifestText,
     kinFiles: new Map(Object.entries(pkg.kinFiles)),
-    assets: new Map(Object.entries(pkg.assets)),
+    assets,
+    cssFiles,
   }
 }
 

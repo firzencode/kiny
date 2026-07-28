@@ -17,5 +17,8 @@ export function spanStyle(s: Extract<RichSpan, { text: string }>): CSSProperties
   if (deco.length) style.textDecoration = deco.join(' ')
   if (s.color) style.color = s.color
   if (s.size) style.fontSize = `${s.size}em`
+  // 行内字体：作者单族名 + 回退栈。族名未注册（拼错 / 字体文件缺失 / 加载失败）时落回正文字体 token，
+  // 不至于掉到浏览器默认衬线字体。解析期 validFont 已挡住引号 / 分号等注入字符。
+  if (s.font) style.fontFamily = `"${s.font}", var(--kiny-prose-font, sans-serif)`
   return style
 }

@@ -36,6 +36,7 @@ export function collectFragments(file: ProjectFile): RawFragment[] {
           case 'divert':
           case 'command':
             for (const a of el.args) pushExpr(a, el.line, scope)
+            if (el.kind === 'divert' && el.targetExpr !== undefined) pushExpr(el.targetExpr, el.line, scope)
             break
           case 'logicLine':
           case 'logicBlock':
@@ -50,6 +51,7 @@ export function collectFragments(file: ProjectFile): RawFragment[] {
         fromSegments(c.after, c.line, scope)
         if (c.resultDivert !== null) {
           for (const a of c.resultDivert.args) pushExpr(a, c.line, scope)
+          if (c.resultDivert.targetExpr !== undefined) pushExpr(c.resultDivert.targetExpr, c.line, scope)
         }
       },
       branch: (b) => {

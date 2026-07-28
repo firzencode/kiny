@@ -7,6 +7,7 @@ import {
   sanitizeProjectBase,
   projectFolderName,
   assertRenameSafe,
+  isTextFile,
   type Manifest,
 } from './gateway'
 
@@ -75,6 +76,30 @@ describe('buildProjectData', () => {
     // \uXXXX 是合法 JSON 转义，往返还原原文
     const data = JSON.parse(json) as { files: Record<string, string> }
     expect(data.files['main.kin']).toBe('教程：写 </script> 与 a<b & c>d')
+  })
+
+  it('只收 .kin：作品前端资源（css 等）不进故事文件表，走 css 字段内联', () => {
+    const json = buildProjectData(
+      manifest,
+      [{ path: 'main.kin', source: '开场' }, { path: 'theme/skin.css', source: '.player{}' }],
+      '@font-face{}',
+    )
+    const data = JSON.parse(json) as { files: Record<string, string>; css: string }
+    expect(Object.keys(data.files)).toEqual(['main.kin'])
+    expect(data.css).toBe('@font-face{}')
+  })
+})
+
+describe('isTextFile', () => {
+  it('.kin 与作品前端文本资源可编辑', () => {
+    for (const p of ['main.kin', 'theme/skin.css', 'a.js', 'x.json', 'r.txt', 'r.md', 'p.html', 'A.CSS']) {
+      expect(isTextFile(p), p).toBe(true)
+    }
+  })
+  it('二进制（图 / 音 / 字体）不可编辑', () => {
+    for (const p of ['assets/x.png', 'a.mp3', 'fonts/楷体.woff2', 'b.ttf', 'noext']) {
+      expect(isTextFile(p), p).toBe(false)
+    }
   })
 })
 

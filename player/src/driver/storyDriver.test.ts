@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { loadProjectFromFiles, analyze, resolveStart, createStory, plainText } from '@kiny/engine'
 import type { Story } from '@kiny/engine'
 import { initialState, advance, step, choose, submitInput, submitInputStep } from './storyDriver'
@@ -30,6 +30,14 @@ const KIN = `@bg_show("a.jpg")
 -> END
 `
 const RESOLVE: ResolveAsset = (name) => 'demo/assets/' + name
+
+/** 取第 n 条 narration 的 spans（断言正文用）。 */
+function logSpans(s: PlayState, n: number) {
+  const narrations = s.log.filter((e) => e.kind === 'narration')
+  const e = narrations[n]
+  if (!e || e.kind !== 'narration') throw new Error(`no narration at ${n}`)
+  return e.spans
+}
 
 describe('advance', () => {
   it('推进到选项前：text 进 log、command 改 host、停在 choices；无 @sfx 时 sfx 为空', () => {
@@ -155,6 +163,125 @@ describe('step（逐行推进）', () => {
       expect(st.ended).toBe(full.state.ended)
       expect(allSfx).toEqual(full.sfx)
     }
+  })
+})
+
+describe('@panel 固定区域', () => {
+  const KIN = '~ let hp = 10\n@panel("left", "HP: {hp}")\n开场。\n~ hp = 3\n次行。\n-> END\n'
+
+  it('panel 事件归约进 host.panels（不产出 log 行）', () => {
+    const r = advance(makeStory(KIN), initialState, RESOLVE)
+    expect(r.state.host.panels.left).toEqual([{ text: 'HP: 3' }]) // 排空后是最终值
+    expect(r.state.log.filter((e) => e.kind === 'narration')).toHaveLength(2) // 面板不占 log
+  })
+
+  it('step 逐步推进：面板随变量更新', () => {
+    const story = makeStory(KIN)
+    let s: PlayState = initialState
+    const seen: (string | undefined)[] = []
+    for (let g = 0; g < 20 && !s.ended; g++) {
+      s = step(story, s, RESOLVE).state
+      seen.push(s.host.panels.left ? plainText(s.host.panels.left) : undefined)
+    }
+    expect(seen).toContain('HP: 10') // 登记后先出 10
+    expect(seen[seen.length - 1]).toBe('HP: 3') // 改后是 3
+  })
+
+  it('step 累积态 == 一次 advance 排空（面板不破坏不变量）', () => {
+    const stepStory = makeStory(KIN)
+    let s: PlayState = initialState
+    for (let g = 0; g < 20 && !s.ended; g++) s = step(stepStory, s, RESOLVE).state
+    const adv = advance(makeStory(KIN), initialState, RESOLVE).state
+    expect(s).toEqual(adv)
+  })
+
+  it('空串清槽：host.panels 删键', () => {
+    const kin = '@panel("right", "有")\n一行。\n@panel("right", "")\n二行。\n-> END\n'
+    const r = advance(makeStory(kin), initialState, RESOLVE)
+    expect(r.state.host.panels.right).toBeUndefined()
+  })
+})
+
+describe('@sleep 演出停顿', () => {
+  const KIN_SLEEP = `第一行。
+@sleep(1500)
+第二行。
+-> END
+`
+  it('step 在 sleep 处中断排空并返回 pendingSleep（不产出新行）', () => {
+    const story = makeStory(KIN_SLEEP)
+    const s1 = step(story, initialState, RESOLVE)
+    expect(plainText(logSpans(s1.state, 0))).toBe('第一行。')
+    expect(s1.pendingSleep).toBeUndefined()
+
+    const s2 = step(story, s1.state, RESOLVE) // 撞上 sleep：中断，log 不变
+    expect(s2.pendingSleep).toBe(1500)
+    expect(s2.state.log).toEqual(s1.state.log)
+    expect(s2.state.ended).toBe(false)
+
+    const s3 = step(story, s2.state, RESOLVE) // 续步：出下一行
+    expect(plainText(logSpans(s3.state, 1))).toBe('第二行。')
+    expect(s3.pendingSleep).toBeUndefined()
+  })
+
+  it('advance 直接吞掉 sleep：重放 / 读档零等待', () => {
+    const r = advance(makeStory(KIN_SLEEP), initialState, RESOLVE)
+    expect(r.pendingSleep).toBeUndefined()
+    expect(r.state.log.filter((e) => e.kind === 'narration')).toHaveLength(2)
+    expect(r.state.ended).toBe(true)
+  })
+
+  it('连续 sleep 各自中断一次（等待自然累计）', () => {
+    const story = makeStory(`开场。\n@sleep(100)\n@sleep(200)\n结束行。\n-> END\n`)
+    const s1 = step(story, initialState, RESOLVE)
+    const s2 = step(story, s1.state, RESOLVE)
+    expect(s2.pendingSleep).toBe(100)
+    const s3 = step(story, s2.state, RESOLVE)
+    expect(s3.pendingSleep).toBe(200)
+    const s4 = step(story, s3.state, RESOLVE)
+    expect(plainText(logSpans(s4.state, 1))).toBe('结束行。')
+  })
+
+  it('sleep 不改变归约结果：连续 step 累积态 == 一次 advance 排空', () => {
+    const stepStory = makeStory(KIN_SLEEP)
+    let s: PlayState = initialState
+    for (let guard = 0; guard < 20 && !s.ended; guard++) s = step(stepStory, s, RESOLVE).state
+    const adv = advance(makeStory(KIN_SLEEP), initialState, RESOLVE).state
+    expect(s).toEqual(adv)
+  })
+
+  it('运行期非法时长（负 / 非数 / 缺参）按 0 处理，不崩', () => {
+    const story = makeStory(`~ let ms = -5\n开场。\n@sleep(ms)\n尾行。\n-> END\n`)
+    const s1 = step(story, initialState, RESOLVE)
+    const s2 = step(story, s1.state, RESOLVE)
+    expect(s2.pendingSleep).toBe(0)
+  })
+
+  it('超大时长夹到 int32 上限（否则 setTimeout 回绕成「立即触发」，作者在预览里看不出写错数量级）', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const story = makeStory(`~ let ms = 3e9\n开场。\n@sleep(ms)\n尾行。\n-> END\n`)
+    const s1 = step(story, initialState, RESOLVE)
+    const s2 = step(story, s1.state, RESOLVE)
+    expect(s2.pendingSleep).toBe(2 ** 31 - 1)
+    expect(warn).toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
+  it('advance（重放路径）不为用不上的时长刷 warn', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    advance(makeStory(`~ let ms = -5\n开场。\n@sleep(ms)\n尾行。\n-> END\n`), initialState, RESOLVE)
+    expect(warn).not.toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
+  it('选项前的 sleep：等满后选项才浮现（中断时 choices 仍为空）', () => {
+    const story = makeStory(`开场。\n@sleep(300)\n* [继续] -> END\n`)
+    const s1 = step(story, initialState, RESOLVE)
+    const s2 = step(story, s1.state, RESOLVE)
+    expect(s2.pendingSleep).toBe(300)
+    expect(s2.state.choices).toEqual([])
+    const s3 = step(story, s2.state, RESOLVE)
+    expect(s3.state.choices).toHaveLength(1)
   })
 })
 

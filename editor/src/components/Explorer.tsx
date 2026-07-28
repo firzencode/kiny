@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { buildTree, collectDirs, moveTarget, type TreeNode } from '../files/tree'
 import { resolveImportDir } from '../files/importAssets'
-import type { ProjectFileEntry } from '../files/gateway'
+import { isTextFile, type ProjectFileEntry } from '../files/gateway'
 
 const FileIcon = () => (
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
@@ -168,9 +168,11 @@ export function Explorer({
     return (
       <li
         key={n.path}
-        className={'frow' + (n.path === activeFile ? ' active' : '') + (n.isKin ? '' : ' frow-other')}
+        // 可编辑的文本文件（.kin + 作品前端资源 css/js/json/txt/md/html）正常显示且可点开；
+        // 二进制（图片 / 音频 / 字体）灰显只列名。
+        className={'frow' + (n.path === activeFile ? ' active' : '') + (isTextFile(n.path) ? '' : ' frow-other')}
         style={pad}
-        onClick={() => { if (!isRenaming && n.isKin) onOpenFile(n.path) }}
+        onClick={() => { if (!isRenaming && isTextFile(n.path)) onOpenFile(n.path) }}
         onContextMenu={(e) => handleCtxMenu(e, n.path, 'file')}
       >
         <span className="frow-icon"><FileIcon /></span>

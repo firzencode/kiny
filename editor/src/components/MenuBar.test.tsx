@@ -25,6 +25,7 @@ function setup(over: Partial<ComponentProps<typeof MenuBar>> = {}) {
     onSetTheme: vi.fn(),
     onToggleView: vi.fn(),
     onSyntaxRef: vi.fn(),
+    onThemeRef: vi.fn(),
     onAbout: vi.fn(),
     onReportIssue: vi.fn(),
     onOpenSettings: vi.fn(),
@@ -111,6 +112,13 @@ describe('MenuBar', () => {
     await openMenu('帮助')
     await userEvent.click(await screen.findByRole('menuitem', { name: /Kiny 语法参考/ }))
     expect(p.onSyntaxRef).toHaveBeenCalled()
+  })
+
+  it('帮助菜单：作品主题参考 → onThemeRef', async () => {
+    const p = setup()
+    await openMenu('帮助')
+    await userEvent.click(await screen.findByRole('menuitem', { name: /作品主题参考/ }))
+    expect(p.onThemeRef).toHaveBeenCalled()
   })
 
   it('帮助菜单：问题反馈 → onReportIssue', async () => {

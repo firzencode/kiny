@@ -30,6 +30,8 @@ export type EditorAction =
   | { type: 'project_loaded'; project: LoadedProject; restore?: { openTabs: string[]; activeFile: string | null } }
   | { type: 'source_changed'; path: string; source: string }
   | { type: 'file_created'; file: ProjectFileEntry }
+  /** 磁盘内容被外部替换（覆盖式导入）→ 缓冲与基线一并对齐到新文本，不留脏。 */
+  | { type: 'buffer_reloaded'; path: string; source: string }
   | { type: 'open_tab'; path: string }
   | { type: 'set_active'; path: string }
   | { type: 'close_tab'; path: string }
@@ -44,6 +46,10 @@ export type EditorAction =
   | { type: 'project_closed' }
 
 const sortNames = (ns: string[]) => [...ns].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+/** 可编辑缓冲 = gateway 载入了文本的文件（.kin + 作品前端资源 css/js/json/txt/md/html）。 */
+const hasText = (f: ProjectFileEntry) => f.source !== undefined
+/** 故事文件顺序（入口候选）只含 `.kin`——css 等资源不是故事文件。 */
+const kinOnly = (paths: string[]) => sortNames(paths.filter((p) => p.endsWith('.kin')))
 const byPath = (a: ProjectFileEntry, b: ProjectFileEntry) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)
 // key 在 from 子树下则改名，否则原样返回（entryAfterRename 返回 null 即不在子树下）。
 const renameKey = (key: string, from: string, to: string): string => entryAfterRename(key, from, to) ?? key
@@ -52,7 +58,7 @@ export function editorReducer(s: EditorState, a: EditorAction): EditorState {
   switch (a.type) {
     case 'project_loaded': {
       const files: Record<string, FileBuffer> = {}
-      for (const f of a.project.files) if (f.isKin) { const src = f.source ?? ''; files[f.path] = { path: f.path, source: src, savedSource: src, dirty: false } }
+      for (const f of a.project.files) if (hasText(f)) { const src = f.source ?? ''; files[f.path] = { path: f.path, source: src, savedSource: src, dirty: false } }
       const entry = a.project.manifest.entry
       const hasEntry = files[entry] !== undefined
       // restore（会话恢复）优先；调用方已用 resolveSession 对当前文件校验降级过，这里直接采用。
@@ -60,7 +66,7 @@ export function editorReducer(s: EditorState, a: EditorAction): EditorState {
       const activeFile = a.restore ? a.restore.activeFile : hasEntry ? entry : null
       return {
         projectDir: a.project.dir, manifest: a.project.manifest, manifestFile: a.project.manifestFile, entry,
-        files, fileOrder: sortNames(Object.keys(files)),
+        files, fileOrder: kinOnly(Object.keys(files)),
         entries: [...a.project.files].sort(byPath),
         emptyDirs: a.project.emptyDirs,
         openTabs, activeFile,
@@ -75,14 +81,26 @@ export function editorReducer(s: EditorState, a: EditorAction): EditorState {
     case 'file_created': {
       const f = a.file
       const src = f.source ?? ''
-      const files = f.isKin ? { ...s.files, [f.path]: { path: f.path, source: src, savedSource: src, dirty: false } } : s.files
+      const text = hasText(f)
+      const files = text ? { ...s.files, [f.path]: { path: f.path, source: src, savedSource: src, dirty: false } } : s.files
       return {
         ...s, files,
         fileOrder: f.isKin ? sortNames([...s.fileOrder, f.path]) : s.fileOrder,
         entries: [...s.entries, f].sort(byPath),
-        openTabs: f.isKin && !s.openTabs.includes(f.path) ? [...s.openTabs, f.path] : s.openTabs,
-        activeFile: f.isKin ? f.path : s.activeFile,
+        openTabs: text && !s.openTabs.includes(f.path) ? [...s.openTabs, f.path] : s.openTabs,
+        activeFile: text ? f.path : s.activeFile,
         runId: f.isKin ? s.runId + 1 : s.runId,
+      }
+    }
+    case 'buffer_reloaded': {
+      // 覆盖式导入把磁盘换成了新内容：缓冲若还留着旧文本，之后一次保存就会把导入的内容写没。
+      // 故连同已保存基线一起对齐（dirty=false），并 bump runId 让预览 / 校验重算。
+      const cur = s.files[a.path]
+      if (!cur || cur.source === a.source) return s
+      return {
+        ...s,
+        files: { ...s.files, [a.path]: { ...cur, source: a.source, savedSource: a.source, dirty: false } },
+        runId: s.runId + 1,
       }
     }
     case 'open_tab':
@@ -146,7 +164,7 @@ export function editorReducer(s: EditorState, a: EditorAction): EditorState {
       const activeFile = s.activeFile ? renameKey(s.activeFile, from, to) : null
       const entry = s.entry && underPath(s.entry, from) ? renameKey(s.entry, from, to) : s.entry
       const manifest = s.manifest && entry !== s.entry ? { ...s.manifest, entry: entry! } : s.manifest
-      return { ...s, files, entries, emptyDirs, fileOrder: sortNames(Object.keys(files)), openTabs, activeFile, entry, manifest, runId: s.runId + 1 }
+      return { ...s, files, entries, emptyDirs, fileOrder: kinOnly(Object.keys(files)), openTabs, activeFile, entry, manifest, runId: s.runId + 1 }
     }
     case 'path_deleted': {
       const p = a.path
@@ -162,7 +180,7 @@ export function editorReducer(s: EditorState, a: EditorAction): EditorState {
         const right = s.openTabs.slice(idx + 1).filter((t) => !underPath(t, p))
         activeFile = left[left.length - 1] ?? right[0] ?? null
       }
-      return { ...s, files, entries, emptyDirs, fileOrder: sortNames(Object.keys(files)), openTabs, activeFile, runId: s.runId + 1 }
+      return { ...s, files, entries, emptyDirs, fileOrder: kinOnly(Object.keys(files)), openTabs, activeFile, runId: s.runId + 1 }
     }
     case 'folder_created':
       return s.emptyDirs.includes(a.relDir) ? s : { ...s, emptyDirs: sortNames([...s.emptyDirs, a.relDir]) }

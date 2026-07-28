@@ -50,4 +50,15 @@ describe('checkVariables', () => {
     const ds = run('~ let g = 0\n=== A ===\n~ g = 5\n-> END')
     expect(ds.map((d) => d.code)).not.toContain('assign-builtin')
   })
+
+  // $nodes 保留名：可引用，但声明 / 赋值均报 error。
+  it('引用 $nodes 不报 undeclared-var', () => {
+    expect(run('=== A ===\n{Object.keys($nodes).length}\n-> END')).toEqual([])
+  })
+  it('给 $nodes 赋值报 reserved-name', () => {
+    expect(run('~ $nodes = 5\n=== A ===\n-> END').map((d) => d.code)).toContain('reserved-name')
+  })
+  it('顶层声明 $nodes 报 reserved-name', () => {
+    expect(run('~ let $nodes = 1\n=== A ===\n-> END').map((d) => d.code)).toContain('reserved-name')
+  })
 })

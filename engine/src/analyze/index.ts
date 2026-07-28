@@ -4,6 +4,7 @@ import { buildSymbolTable } from './symbols'
 import { checkNames } from './checks/names'
 import { checkCommands } from './checks/commands'
 import { checkDiverts } from './checks/diverts'
+import { checkNodes } from './checks/nodes'
 import { checkIdentifiers } from './checks/identifiers'
 import { checkLabels } from './checks/labels'
 import { checkVariables } from './checks/variables'
@@ -25,6 +26,7 @@ export function analyze(files: ProjectFile[]): AnalyzeResult {
     ...checkNames(files),
     ...checkCommands(files),
     ...checkDiverts(files, table),
+    ...checkNodes(table),
     ...checkIdentifiers(table),
     ...checkLabels(table),
     ...checkVariables(table),

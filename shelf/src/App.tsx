@@ -154,6 +154,7 @@ export function App() {
           resolveAsset={view.reading.loaded.resolveAsset}
           initial={view.reading.initial}
           title={view.reading.loaded.title}
+          projectCss={view.reading.loaded.projectCss}
           onBack={onBack}
         />
       ) : (

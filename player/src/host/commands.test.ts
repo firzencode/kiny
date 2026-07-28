@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { OutputEvent } from '@kiny/engine'
-import { emptyHost, applyCommand, DEFAULT_TEXT_SPEED, DEFAULT_TEXT_FADE, type ResolveAsset } from './commands'
+import { emptyHost, applyCommand, applyPanel, DEFAULT_TEXT_SPEED, DEFAULT_TEXT_FADE, type ResolveAsset } from './commands'
 
 const cmd = (name: string, args: unknown[]): Extract<OutputEvent, { kind: 'command' }> => ({
   kind: 'command', name, args,
@@ -58,5 +58,33 @@ describe('applyCommand', () => {
     const before = { ...emptyHost }
     applyCommand(emptyHost, cmd('bg_show', ['a.jpg']), RESOLVE)
     expect(emptyHost).toEqual(before)
+  })
+})
+
+describe('applyPanel', () => {
+  it('默认 host：panels 为空对象', () => {
+    expect(emptyHost.panels).toEqual({})
+  })
+  it('设槽内容；左 / 右 / 底各槽独立', () => {
+    const s1 = applyPanel(emptyHost, 'left', [{ text: 'HP: 10' }])
+    expect(s1.panels).toEqual({ left: [{ text: 'HP: 10' }] })
+    const s2 = applyPanel(s1, 'right', [{ text: '菜单' }])
+    const s3 = applyPanel(s2, 'bottom', [{ text: '第 1 章' }])
+    expect(s3.panels).toEqual({ left: [{ text: 'HP: 10' }], right: [{ text: '菜单' }], bottom: [{ text: '第 1 章' }] })
+  })
+  it('同槽再设 = 替换', () => {
+    const s1 = applyPanel(emptyHost, 'left', [{ text: '旧' }])
+    expect(applyPanel(s1, 'left', [{ text: '新' }]).panels.left).toEqual([{ text: '新' }])
+  })
+  it('空 spans = 删键（清空并隐藏该槽）', () => {
+    const s1 = applyPanel(emptyHost, 'left', [{ text: '有' }])
+    expect(applyPanel(s1, 'left', []).panels.left).toBeUndefined()
+    expect('left' in applyPanel(s1, 'left', []).panels).toBe(false)
+  })
+  it('不修改入参（纯）', () => {
+    const s1 = applyPanel(emptyHost, 'left', [{ text: 'x' }])
+    const before = JSON.parse(JSON.stringify(s1.panels))
+    applyPanel(s1, 'bottom', [{ text: 'y' }])
+    expect(s1.panels).toEqual(before)
   })
 })

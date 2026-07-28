@@ -17,13 +17,16 @@ import { makeRng, GOLDEN_SEED } from './rng'
 import type { Rng } from './rng'
 import { makeVariants } from './variants'
 import type { Variants } from './variants'
-import { RuntimeError } from './types'
-import type { ChoiceView, OutputEvent, StoryOptions } from './types'
+import { RuntimeError, PANEL_SLOTS } from './types'
+import type { ChoiceView, OutputEvent, StoryOptions, PanelSlot } from './types'
 import type { RichSpan } from './spans'
-import { makeTextSpan, mergeSpans } from './spans'
+import { makeTextSpan, mergeSpans, sameSpans } from './spans'
+import { scanInline } from '../parser/inline'
 import { buildBlockPaths, enumerateChoices, fingerprint } from './snapshot'
 import type { StorySnapshot, RestoreData, ParkSnapshot } from './snapshot'
 import { encodeGlobals, decodeGlobals } from './scope-codec'
+import { makeNodes, nodeRefData } from './node-ref'
+import type { Nodes } from './node-ref'
 import { sortByPath } from '../order'
 
 // 无玩家交互的累计自动推进步数上限（仅 choose() 清零）。取值是「尽早报错」与
@@ -51,7 +54,14 @@ export class Story {
   private readonly taken = new Set<Choice>() // 一次性已选（按节点身份）
   private pendingChoices: { view: ChoiceView; choice: Choice }[] = []
   private pendingInput: { varName: string; placeholder: string | null } | null = null // 停在 @input：等读者提交文本（与 pendingChoices 对偶）
-  private pendingDivert: { target: string; args: string[]; line: number } | null = null // 点击正文产出后待消费的跳转
+  private pendingDivert: { target: string; args: string[]; targetExpr?: string; line: number } | null = null // 点击正文产出后待消费的跳转
+  /**
+   * `@panel` 登记的活模板：槽位 → 模板源串 + 已解析段 + 上次重估结果。
+   * 模板本体入快照（读档重登记）；`last` 不入——读档后首次重估必发事件，宿主据此立刻渲染。
+   */
+  private readonly panels = new Map<PanelSlot, { source: string; segments: InlineSegment[]; line: number; last: RichSpan[] | null }>()
+  private pendingPanelEvents: OutputEvent[] = [] // 重估出的待产出 panel 事件（先进先出）
+  private readonly nodes: Nodes // $nodes 节点表（B 层注入 + 存档 revive）
   private turns = 0
   private autoSteps = 0 // 自上次玩家交互(choose)起的累计自动推进步数；死循环兜底用
   private readonly visitedAt = new Map<string, number>() // knot 名 → 最近访问回合
@@ -75,12 +85,14 @@ export class Story {
     // 在 buildGlobals 之前填充内置层 B，使 preamble 逻辑也能用变体 / random / seed_random。
     // counters 存于 makeVariants 闭包内（Story 级持久），跨经过累积。
     this.variants = makeVariants(this.rng)
+    this.nodes = makeNodes(this.program.knots, this.program.stitches)
     Object.assign(this.B, this.variants.fns, {
       random: (min: number, max: number) => min + Math.floor(this.rng.next() * (max - min + 1)),
       seed_random: (n: number) => this.rng.reseed(n),
       turns: () => this.turns,
       turns_since: (name: string) =>
         this.visitedAt.has(name) ? this.turns - this.visitedAt.get(name)! : -1,
+      $nodes: this.nodes.root,
     })
     // buildGlobals + 标签初始化在两条路径都跑（this.start 此时已是真正的入口起点，两路一致）。正常启动
     // 跳过入口开场 knot 所属文件（其 preamble 留待进入开场 knot 时按序执行、即最后跑）。restore 无
@@ -106,7 +118,8 @@ export class Story {
   private restoreFrom(r: RestoreData): void {
     this.turns = r.turns
     this.ended = r.ended
-    Object.assign(this.G, decodeGlobals(r.globals)) // 覆盖可序列化全局数据（先 decode 还原 Map/Set/Date）；函数已由 buildGlobals 重建、不在 r.globals 里
+    const revive = (p: string, a?: unknown[]) => this.nodes.revive(p, a) // Node 标签经 $nodes 同一工厂重建（节点已删则抛普通 Error → restore 判 corrupt）
+    Object.assign(this.G, decodeGlobals(r.globals, revive)) // 覆盖可序列化全局数据（先 decode 还原 Map/Set/Date/Node）；函数已由 buildGlobals 重建、不在 r.globals 里
     this.rng.setState(r.rng) // 覆盖 buildGlobals 重跑 preamble 消耗掉的 rng 状态
     this.variants.importCounters(r.variantCounters) // 同理覆盖变体计数
     for (const [k, v] of Object.entries(r.visitedAt)) this.visitedAt.set(k, v)
@@ -114,7 +127,7 @@ export class Story {
     this.currentKnot = r.currentKnot
     this.currentFile = this.knotFile.get(r.currentKnot.name)
     this.currentStitch = r.currentStitch
-    this.L = r.localIsGlobal ? this.G : Object.assign(makeScope(), decodeGlobals(r.locals ?? {}))
+    this.L = r.localIsGlobal ? this.G : Object.assign(makeScope(), decodeGlobals(r.locals ?? {}, revive))
     if (!r.ended) {
       this.stack.restoreFrames(r.frames)
       // 直接重建 park 态（park 快照存的是已求值结果），不调 advanceToEvent——A2 的修复核心。
@@ -126,6 +139,12 @@ export class Story {
       } else if (r.park?.kind === 'input') {
         this.pendingInput = { varName: r.park.varName, placeholder: r.park.placeholder }
       }
+    }
+    // 重登记活模板（只存了本体）：`last` 留 null → 首次重估必发事件，读档即渲染出当前值。
+    for (const [slot, source] of Object.entries(r.panels ?? {})) {
+      if (!(PANEL_SLOTS as readonly string[]).includes(slot)) continue // 未知槽位（跨版本存档）：忽略
+      // 与 registerPanel 同构解析（含剥离 <pause>）——否则读档后含 <pause> 的模板会与现场播放分叉。
+      this.panels.set(slot as PanelSlot, { source, segments: this.parsePanelTemplate(source, 0), line: 0, last: null })
     }
   }
 
@@ -175,8 +194,12 @@ export class Story {
       }
     }
 
+    // 活模板只存**本体**（槽位 → 源串）：restore 重登记，首次重估必发事件 → 读档即渲染出当前值。
+    const panels: Record<string, string> = {}
+    for (const [slot, p] of this.panels) panels[slot] = p.source
+
     return {
-      version: 3,
+      version: 4,
       fingerprint: fingerprint(this.program),
       entry: this.start,
       turns: this.turns,
@@ -194,6 +217,7 @@ export class Story {
       taken,
       stack,
       ...(park ? { park } : {}),
+      ...(Object.keys(panels).length > 0 ? { panels } : {}),
     }
   }
 
@@ -272,14 +296,30 @@ export class Story {
     // 注意：此判断须先于 ended 短路——到达 END 时末段缓冲已定型成行（bufferGlued 清零），
     // 仍要报告可继续以便 flush 出最后一行。
     if (this.buffer !== null && !this.bufferGlued) return true
-    if (this.ended) return false
+    if (this.pendingPanelEvents.length > 0) return true
+    if (this.ended) {
+      this.repanel() // 终局也重估一次：最后一步改的变量要反映到固定区域
+      return this.pendingPanelEvents.length > 0
+    }
     this.advanceToEvent()
+    // 抵达一个事件边界（有行待 flush / park 命令 / park 选项 / park 输入 / 结束）——在此重估活模板。
+    // 放这里而非 continue() 里：暂停点上宿主不会再调 continue()，重估必须由 canContinue 驱动，
+    // 且本函数有幂等缓存（invalidateCanContinue 后才重算），不会对同一状态重复求值作者表达式。
+    this.repanel()
     if (this.buffer !== null && !this.bufferGlued) return true
+    if (this.pendingPanelEvents.length > 0) return true
     if (this.pendingInput !== null) return false // 停在输入框，等读者提交（与 pendingChoices 对偶，须先于 parkedCommand——@input 元素亦是 command）
     if (this.parkedCommand() !== null) return true // 停在命令，下次 continue 产出 command 事件
     if (this.pendingChoices.length > 0) return false // 停在选项，让玩家选
     return !this.ended
   }
+
+  /**
+   * engine 内部处理、**不透传**给宿主的命令：`@input`（park 成输入暂停）、`@panel`（登记活模板）。
+   * 它们在 advanceToEvent 的循环里被消化，故不能被「停在命令 → 等 continue 产出 command 事件」的
+   * 早退守卫拦下。
+   */
+  private static readonly INTERPRETED = new Set(['input', 'panel'])
 
   /** 栈顶游标是否停在一个待产出的命令元素（advanceToEvent 在命令硬边界停下）。 */
   private parkedCommand(): Command | null {
@@ -287,6 +327,46 @@ export class Story {
     if (!frame) return null
     const el = frame.block[frame.index]
     return el && el.kind === 'command' ? el : null
+  }
+
+  /**
+   * 登记 / 替换一个槽的活模板（`@panel(槽位, 模板)`）。模板**登记时不求值**，只解析成段
+   * （插值 + 富文本），求值发生在每次重估。再次对同槽登记 = 整体替换（buffer 整体改写语义）。
+   */
+  /**
+   * 解析面板模板源串为段。模板里的 `<pause>` 无揭示流程可言，解析后直接丢掉段边界（spec：面板中忽略）
+   * ——登记（registerPanel）与读档重登记（restoreFrom）**共用本函数**，两条路径产出同构的段。
+   */
+  private parsePanelTemplate(source: string, line: number): InlineSegment[] {
+    return scanInline(source, 0, line, this.currentFile ?? '').segments.map((s) => {
+      if (!('pauseBefore' in s) || !s.pauseBefore) return s
+      const { pauseBefore: _drop, ...rest } = s
+      return rest as InlineSegment
+    })
+  }
+
+  private registerPanel(el: Command): void {
+    const slot = String(this.evalArg(el.args[0]!, el.line))
+    if (!(PANEL_SLOTS as readonly string[]).includes(slot)) {
+      throw new RuntimeError(`未知的面板槽位「${slot}」`, this.currentFile, el.line)
+    }
+    const source = String(this.evalArg(el.args[1]!, el.line))
+    this.panels.set(slot as PanelSlot, { source, segments: this.parsePanelTemplate(source, el.line), line: el.line, last: null })
+  }
+
+  /**
+   * 重估全部活模板（每到一个事件边界调一次）：结果与上次不同才入队 `panel` 事件。
+   * 模板表达式须**纯读取**——这里每步都会求值它们。
+   */
+  private repanel(): void {
+    for (const slot of PANEL_SLOTS) {
+      const p = this.panels.get(slot)
+      if (!p) continue
+      const spans = this.renderSpans(p.segments, p.line)
+      if (sameSpans(p.last, spans)) continue
+      p.last = spans
+      this.pendingPanelEvents.push({ kind: 'panel', slot, spans })
+    }
   }
 
   /** 缓冲非空则定型成行（清 glue 标记）并返回 true，表示有完整行待 continue() flush。 */
@@ -315,6 +395,8 @@ export class Story {
       this.bufferGlued = false
       return { kind: 'text', spans: t }
     }
+    // 固定区域更新排在正文之后：本行改的变量，其面板刷新紧跟该行出现。
+    if (this.pendingPanelEvents.length > 0) return this.pendingPanelEvents.shift()!
     // buffer 空：取 parked 元素产出事件（当前唯一 park 即命令）。
     const cmd = this.parkedCommand()
     if (cmd === null) {
@@ -402,8 +484,9 @@ export class Story {
       return
     }
     const parked = this.parkedCommand()
-    if (this.pendingDivert === null && parked !== null && parked.name !== 'input') {
-      // @input 例外：它虽是 command 元素但由循环转成 pendingInput 暂停态，不能在此拦下。
+    if (this.pendingDivert === null && parked !== null && !Story.INTERPRETED.has(parked.name)) {
+      // 解释型命令（@input / @panel）例外：它们虽是 command 元素，但由循环内部消化
+      //（park 成输入暂停 / 登记活模板后继续推进），不能在此当「待产出的透传命令」拦下。
       this.settleBufferIntoLine()
       return
     }
@@ -426,7 +509,8 @@ export class Story {
       if (this.pendingDivert !== null) {
         const pd = this.pendingDivert
         this.pendingDivert = null
-        this.doDivert(pd.target, pd.args, pd.line)
+        if (pd.targetExpr !== undefined) this.doDynamicDivert(pd.targetExpr, pd.line)
+        else this.doDivert(pd.target, pd.args, pd.line)
         continue
       }
       if (this.pendingChoices.length > 0) {
@@ -460,6 +544,14 @@ export class Story {
         continue
       }
       if (el.kind === 'command') {
+        if (el.name === 'panel') {
+          // @panel 是 engine 内部处理、不透传的命令（同 @input 一类）：登记 / 替换该槽的活模板后
+          // **继续推进**（它不是暂停点）。命令是硬边界，故先把已成行文本交出去。
+          if (this.settleBufferIntoLine()) return
+          this.registerPanel(el)
+          frame.index++
+          continue
+        }
         if (el.name === 'input') {
           // @input 是唯一 engine 内部处理、不透传的命令：先 flush 已成行文本（命令硬边界），
           // 再 park 成输入暂停。游标**停在** @input 元素上（不推进）——快照据此天然重建（无需 index 回退）。
@@ -545,6 +637,7 @@ export class Story {
       this.pendingDivert = {
         target: c.resultDivert.target,
         args: c.resultDivert.args,
+        ...(c.resultDivert.targetExpr !== undefined ? { targetExpr: c.resultDivert.targetExpr } : {}),
         line: c.resultDivert.line,
       }
     }
@@ -569,6 +662,7 @@ export class Story {
       }
       case 'divert': {
         frame.index++
+        if (el.targetExpr !== undefined) return this.doDynamicDivert(el.targetExpr, el.line)
         return this.doDivert(el.target, el.args, el.line)
       }
       case 'logicLine':
@@ -649,15 +743,111 @@ export class Story {
   }
 
   /**
+   * 动态跳转 `-> {表达式}`：求值后按类型分派——
+   * - 节点引用（$nodes 签发、带内部标记）→ 按其规范化路径（+ 已绑定实参值）跳；
+   * - 字符串 → `$nodes[该字符串]` 查表糖：只认 knot 名 / `"父.子"` 全路径 / END/DONE，
+   *   不做同级 stitch 相对解析（歧义从规则上消灭）；带参 knot 拒（字符串无处带实参）；
+   * - 其他值拒跳。
+   */
+  private doDynamicDivert(expr: string, line: number): null {
+    let v: unknown
+    try {
+      v = evalExpr(expr, this.B, this.G, this.L, `${this.currentKnot.name}:dyndivert${line}`)
+    } catch (e) {
+      // $nodes 访问期抛的 RuntimeError（节点不存在等）透传并补源定位；其余包成 JS 执行错误。
+      if (e instanceof RuntimeError) throw new RuntimeError(e.message, this.currentFile, line)
+      throw new RuntimeError(`JS 执行错误：${(e as Error).message}`, this.currentFile, line)
+    }
+    const ref = nodeRefData(v)
+    if (ref !== null) {
+      return this.doDivertResolved(ref.path, ref.args, line)
+    }
+    if (typeof v === 'string') {
+      // 查表糖须先验存在性（与 $nodes 访问同规则）：合成开场 knot 不可及、不存在抛。
+      this.assertNodeExists(v, line)
+      return this.doDivertResolved(v, null, line)
+    }
+    throw new RuntimeError(
+      `跳转目标须是 $nodes 引用或节点名字符串，收到：${v === null ? 'null' : typeof v}`,
+      this.currentFile,
+      line,
+    )
+  }
+
+  /** 校验路径（END/DONE / knot / `父.子`）在节点表中存在；否则抛「节点不存在」。 */
+  private assertNodeExists(path: string, line: number): void {
+    if (path === 'END' || path === 'DONE') return
+    const dot = path.indexOf('.')
+    const knotName = dot === -1 ? path : path.slice(0, dot)
+    const knot = this.program.knots.get(knotName)
+    const knotOk = knot !== undefined && knot.scope !== 'global'
+    const ok = dot === -1 ? knotOk : knotOk && this.program.stitches.get(knotName)?.has(path.slice(dot + 1)) === true
+    if (!ok) throw new RuntimeError(`节点不存在：「${path}」`, this.currentFile, line)
+  }
+
+  /**
+   * 按规范化完整路径 + 已绑定实参**值**执行跳转（动态跳转的落地半程）。
+   * - `boundArgs` 为 null 表示未绑定：目标是带参 knot 时拒跳（引用与字符串两档同规则）。
+   * - 运行时防线（静态 `param-knot-stitch-entry` 的等价物）：跳带参 knot 的 stitch 时，
+   *   跳转时所在 knot 不是该 knot → 拒（参数无从绑定）。
+   */
+  private doDivertResolved(path: string, boundArgs: unknown[] | null, line: number): null {
+    if (path === 'END' || path === 'DONE') {
+      this.ended = true
+      return null
+    }
+    const dot = path.indexOf('.')
+    if (dot !== -1) {
+      const parent = path.slice(0, dot)
+      const child = path.slice(dot + 1)
+      const knot = this.program.knots.get(parent)
+      const stitch = this.program.stitches.get(parent)?.get(child)
+      if (!knot || !stitch) throw new RuntimeError(`节点不存在：「${path}」`, this.currentFile, line)
+      if (knot.params.length > 0 && knot !== this.currentKnot) {
+        throw new RuntimeError(
+          `不能从外部跳进带参节点「${parent}」的子节点（参数无从绑定）`,
+          this.currentFile,
+          line,
+        )
+      }
+      if (knot !== this.currentKnot) this.switchKnot(knot)
+      this.enterStitch(stitch)
+      return null
+    }
+    const knot = this.program.knots.get(path)
+    if (!knot || knot.scope === 'global') {
+      throw new RuntimeError(`节点不存在：「${path}」`, this.currentFile, line)
+    }
+    if (knot.params.length > 0 && boundArgs === null) {
+      throw new RuntimeError(
+        `带参节点「${path}」须经 $nodes.${path}(实参) 绑定实参后跳转`,
+        this.currentFile,
+        line,
+      )
+    }
+    const values = boundArgs ?? []
+    this.enterKnot(knot)
+    knot.params.forEach((p, i) => {
+      ;(this.L as Record<string, unknown>)[p] = values[i]
+    })
+    return null
+  }
+
+  /**
    * 渲染行内片段为富文本 spans：literal 取 value + 其 style；interp 段求值转串（null/undefined→空串）
    * 并承继其 style；break → 换行 span。空文本段不产 span；相邻同样式文本段归并（纯文本恒为单 span）。
    * `line` 为片段所在行（TextLine.line / Choice.line），出错时透传给 RuntimeError 定位。
    */
   private renderSpans(segments: InlineSegment[], line = 0): RichSpan[] {
     const raw: RichSpan[] = []
+    // `<pause>` 标记落在「其后首个**有内容**的 span」上：空插值（`{undefined}`）不消费它，
+    // 否则 `前半…<pause>{空}后半` 的停顿会凭空消失。
+    let pausePending = false
     for (const seg of segments) {
+      if (seg.pauseBefore) pausePending = true
       if (seg.kind === 'break') {
-        raw.push({ kind: 'break' })
+        raw.push(pausePending ? { kind: 'break', pauseBefore: true } : { kind: 'break' })
+        pausePending = false
         continue
       }
       let text: string
@@ -671,8 +861,9 @@ export class Story {
         }
         text = v === undefined || v === null ? '' : String(v)
       }
-      if (text === '') continue
-      raw.push(makeTextSpan(text, seg.style))
+      if (text === '') continue // 空段：pausePending 保留，顺延给下一个有内容的段
+      raw.push(makeTextSpan(text, seg.style, pausePending))
+      pausePending = false
     }
     return mergeSpans([], raw) // 经 coalesce 归并相邻同样式段
   }

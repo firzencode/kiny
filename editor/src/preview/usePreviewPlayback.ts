@@ -1,9 +1,9 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { createStory } from '@kiny/engine'
 import type { ValidatedProgram, Story } from '@kiny/engine'
 import {
   initialState, step, chooseStep, submitInputStep, replayToStory,
-  type PlayState, type ResolveAsset, type RevealBinding, type InteractionStep,
+  type PlayState, type ResolveAsset, type RevealBinding, type InteractionStep, type AdvanceResult,
 } from '@kiny/player'
 
 /**
@@ -43,44 +43,73 @@ export function usePreviewPlayback(onCommit: (state: PlayState, sfx: string[]) =
   const resolveRef = useRef<ResolveAsset>((n) => n)
   const lastStateRef = useRef<PlayState>(initialState)
   const revealingRef = useRef(false)
+  /** 最新一行正停在句中 `<pause>` 标记处（RevealingLine 上报），参与点击门控。 */
+  const awaitingPauseRef = useRef(false)
   // 代龄计数：当前所有 commit 都同步发起，故下面 commit 里的 gen 校验实际不会命中——
   // cancel 的真正生效靠 storyRef=null（令在飞 timer 回调的 doStep 早退）+ setActive(false)。
   // genRef 是为「将来若改成异步调度 commit」留的防线；届时 storyRef=null 不再足够，代龄校验才兜底。
   const genRef = useRef(0)
+  // @sleep 演出停顿：人工交互的预览按真实时长等待（编辑重算走 replay，那条路径直接吞 sleep、零等待）。
+  const sleepTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const waitingSleepRef = useRef(false)
+  const doStepRef = useRef<() => void>(() => {})
+  const clearSleep = useCallback(() => {
+    if (sleepTimerRef.current !== null) {
+      clearTimeout(sleepTimerRef.current)
+      sleepTimerRef.current = null
+    }
+    waitingSleepRef.current = false
+  }, [])
 
   const cancel = useCallback(() => {
     genRef.current++
     storyRef.current = null
     revealingRef.current = false
+    clearSleep() // 编辑触发重算：在飞的停顿也一并作废（编辑优先）
     setActive(false)
     setAwaitingClick(false)
-  }, [])
+  }, [clearSleep])
 
-  const commit = useCallback((gen: number, state: PlayState, sfx: string[]) => {
+  // 卸载：清掉未决停顿定时器。
+  useEffect(() => clearSleep, [clearSleep])
+
+  const commit = useCallback((gen: number, state: PlayState, sfx: string[], pendingSleep?: number) => {
     if (gen !== genRef.current) return // 已被 cancel / 新一轮 restart-choose 取代
     lastStateRef.current = state
     onCommit(state, sfx)
     setAwaitingClick(false) // 新状态：要么开始打新行，要么抵暂停点——都不在「等点击」
+    clearSleep()
+    if (pendingSleep !== undefined) {
+      revealingRef.current = false // 停顿中：既不在揭示、也不在等读者
+      waitingSleepRef.current = true
+      sleepTimerRef.current = setTimeout(() => {
+        sleepTimerRef.current = null
+        waitingSleepRef.current = false
+        doStepRef.current()
+      }, pendingSleep)
+      return
+    }
     revealingRef.current = !(state.ended || state.choices.length > 0 || state.input !== null || state.error != null)
     if (!revealingRef.current) setActive(false) // 抵暂停点（含 @input 输入框）：动画收尾
-  }, [onCommit])
+  }, [onCommit, clearSleep])
 
   const doStep = useCallback(() => {
     const gen = genRef.current
     const story = storyRef.current
     if (story == null) return
     const r = step(story, lastStateRef.current, resolveRef.current)
-    commit(gen, r.state, r.sfx)
+    commit(gen, r.state, r.sfx, r.pendingSleep)
   }, [commit])
+  doStepRef.current = doStep
 
-  const run = useCallback((story: Story, resolve: ResolveAsset, first: { state: PlayState; sfx: string[] }) => {
+  const run = useCallback((story: Story, resolve: ResolveAsset, first: AdvanceResult) => {
     genRef.current++
     const gen = genRef.current
     storyRef.current = story
     resolveRef.current = resolve
     revealingRef.current = false
     setActive(true)
-    commit(gen, first.state, first.sfx)
+    commit(gen, first.state, first.sfx, first.pendingSleep)
   }, [commit])
 
   const restart = useCallback((program: ValidatedProgram, start: string, seed: number, resolve: ResolveAsset) => {
@@ -119,14 +148,22 @@ export function usePreviewPlayback(onCommit: (state: PlayState, sfx: string[]) =
   }, [doStep])
 
   const onContentClick = useCallback(() => {
-    if (revealingRef.current) { setSkipToken((t) => t + 1); return } // 打字中点击 → 跳过
+    if (waitingSleepRef.current) return // @sleep 停顿不可跳过（与 usePlayback 同语义）
+    // 打字中 → 当前段立显；停在句中 `<pause>` → 续下一段（两者都递增 skipToken，由 RevealingLine 分档）。
+    if (revealingRef.current || awaitingPauseRef.current) { setSkipToken((t) => t + 1); return }
     const cur = lastStateRef.current
     const atPause = cur.ended || cur.choices.length > 0 || cur.input !== null || cur.error != null
     if (!atPause && cur.host.stepMode === 'line') doStep() // 已显示完、逐行模式 → 下一行
   }, [doStep])
 
+  // 句中 `<pause>` 停在标记处 = 另一种「等你点击」（与 usePlayback 同语义）。
+  const onAwaitingPause = useCallback((waiting: boolean) => {
+    awaitingPauseRef.current = waiting
+    setAwaitingClick(waiting)
+  }, [])
+
   const reveal: RevealBinding | undefined = active
-    ? { speed: lastStateRef.current.host.textSpeed, fade: lastStateRef.current.host.textFade, skipToken, onLatestRevealed, awaitingClick }
+    ? { speed: lastStateRef.current.host.textSpeed, fade: lastStateRef.current.host.textFade, skipToken, onLatestRevealed, onAwaitingPause, awaitingClick }
     : undefined
 
   return { active, reveal, onContentClick: active ? onContentClick : undefined, restart, choose, submit, cancel }

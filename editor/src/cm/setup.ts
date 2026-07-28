@@ -22,7 +22,7 @@ import {
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search'
 import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete'
 import { lintGutter, lintKeymap } from '@codemirror/lint'
-import { kinLanguage } from './kinLanguage'
+import { languageCompartment, languageFor } from './langs'
 import { kinHighlightStyle } from './highlight'
 import { kinTheme } from './theme'
 import { kinContextField, getKinContext } from './context'
@@ -81,7 +81,13 @@ function gotoAt(view: EditorView, pos: number, cb: KinEditorCallbacks): boolean 
   return true
 }
 
-export function kinSetup(cb: KinEditorCallbacks, highlightOn: boolean, shortcuts: Overrides = {}, readOnly = false): Extension[] {
+export function kinSetup(
+  cb: KinEditorCallbacks,
+  highlightOn: boolean,
+  shortcuts: Overrides = {},
+  readOnly = false,
+  path: string | null = null,
+): Extension[] {
   return [
     readonlyCompartment.of(readonlyExtensionFor(readOnly)),
     lineNumbers(),
@@ -100,7 +106,8 @@ export function kinSetup(cb: KinEditorCallbacks, highlightOn: boolean, shortcuts
     kinFoldService,
     highlightSelectionMatches(),
     lintGutter(),
-    kinLanguage,
+    // 语言按扩展名选（.kin 走 Kin 语言，作品前端资源走对应 CM6 语言包），随切档热切换。
+    languageCompartment.of(languageFor(path)),
     highlightCompartment.of(highlightExtensionFor(highlightOn)),
     kinContextField,
     autocompletion({ override: [kinCompletionSource] }),

@@ -133,4 +133,13 @@ describe('App', () => {
     await screen.findByText(/书架还空着/)
     expect(screen.getByRole('link', { name: /Made with Kiny/ })).toBeInTheDocument()
   })
+
+  it('免责声明：空书架与有书两态均恰好出现一次', async () => {
+    render(<App />)
+    await screen.findByText(/书架还空着/)
+    expect(screen.getAllByText(/本站不上传、不存储任何内容/)).toHaveLength(1)
+    await userEvent.upload(screen.getByLabelText('导入故事包（.kip）'), kipFile('声明书'))
+    await screen.findByText('声明书')
+    expect(screen.getAllByText(/本站不上传、不存储任何内容/)).toHaveLength(1)
+  })
 })

@@ -1,6 +1,8 @@
 :root { color-scheme: dark; }
 * { box-sizing: border-box; }
-body { margin: 0; font-family: system-ui, "Noto Sans SC", sans-serif; background: #0d1117; color: #e8e8e8; }
+/* 页面底色 / 正文色 / 字体的定义权在 player 的作品主题 token（`--kiny-*`，默认值即以下外观）；
+   此处只引用，作者覆盖 token 即整页换肤。 */
+body { margin: 0; font-family: var(--kiny-prose-font); background: var(--kiny-page-bg); color: var(--kiny-text); }
 
 .app-status { display: flex; align-items: center; justify-content: center; min-height: 100vh; opacity: .7; }
 .app-error { color: #ff8585; padding: 0 24px; text-align: center; }
@@ -17,6 +19,8 @@ body { margin: 0; font-family: system-ui, "Noto Sans SC", sans-serif; background
   color: #cdd2dd; background: rgba(30, 34, 44, .8); border: 1px solid rgba(255, 255, 255, .18); border-radius: 6px;
 }
 .restart-btn:hover { background: rgba(45, 50, 62, .9); }
+/* @panel 左 / 右侧栏从右上角控件（重新开始 / 静音键，高 ~40px）下方开始，不与其重叠（对齐 reader 的 52px）。 */
+.panel-left, .panel-right { top: 52px; }
 
 /* 首屏门 */
 .start-gate { position: relative; z-index: 1; min-height: 100vh; display: flex; flex-direction: column;

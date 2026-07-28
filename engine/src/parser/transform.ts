@@ -39,7 +39,9 @@ export function transform(file: RawFile): ProjectFile {
 
   function toDivert(raw: string, line: number): Divert {
     const d = parseDivert(raw, line, path)
-    return { kind: 'divert', target: d.target, args: d.args, line }
+    return d.targetExpr !== undefined
+      ? { kind: 'divert', target: '', args: [], targetExpr: d.targetExpr, line }
+      : { kind: 'divert', target: d.target, args: d.args, line }
   }
 
   function transformBranch(b: RawBranch): ConditionalBranch {

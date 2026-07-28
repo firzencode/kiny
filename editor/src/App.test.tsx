@@ -835,6 +835,121 @@ describe('App 导出独立网页', () => {
     const err = await screen.findByRole('alert')
     expect(err).toHaveTextContent('导出失败：磁盘已满')
   })
+
+  it('作品主题：css 内联进 css 字段（不进故事文件表），字体 url() 重写为 data-URI', async () => {
+    const sink: { dest: string; projectData: string; files: string[] }[] = []
+    const g = createMemoryGateway({
+      pickedDir: '/proj',
+      files: {
+        '/proj/kiny.json': JSON.stringify({ name: '雾港', version: '1.0.0', engine: '0.1.0', entry: 'main.kin' }),
+        '/proj/main.kin': MAIN,
+        '/proj/theme/skin.css': '.player{--kiny-page-bg:#fff}',
+        '/proj/fonts/楷体.woff2': 'FONTBYTES',
+      },
+      webpageDir: '/out',
+      webpageSink: sink,
+    })
+    render(<App gateway={g} />)
+    await fileMenu('打开项目...')
+    await fileMenu('导出独立网页...')
+    // 等导出真正落到 sink（字体 data-URI 是额外一轮异步读，别只等提示出现）
+    await waitFor(() => expect(sink.length).toBe(1))
+    const data = JSON.parse(sink[0].projectData) as { files: Record<string, string>; css: string }
+    expect(Object.keys(data.files)).toEqual(['main.kin']) // css 不混进故事文件
+    expect(data.css).toContain('--kiny-page-bg:#fff')
+    expect(data.css).toContain('font-family: "楷体"')
+    expect(data.css).toContain('url("data:') // 字体内联，file:// 下才加载得到
+  })
+})
+
+describe('App 作品前端资源（T077）', () => {
+  function gwTheme(css = '.player{--kiny-page-bg:#fff}') {
+    return createMemoryGateway({
+      pickedDir: '/proj',
+      files: {
+        '/proj/kiny.json': JSON.stringify({ name: '雾港', version: '1.0.0', engine: '0.1.0', entry: 'main.kin' }),
+        '/proj/main.kin': MAIN,
+        '/proj/skin.css': css,
+        '/proj/assets/bg.png': 'PNGBYTES',
+      },
+    })
+  }
+  const styleTexts = () => Array.from(document.querySelectorAll('style[data-kiny-project-styles]')).map((s) => s.textContent ?? '')
+
+  it('打开项目 → 预览注入作品主题 css；点资源管理器里的 .css 可打开编辑', async () => {
+    render(<App gateway={gwTheme()} />)
+    await fileMenu('打开项目...')
+    await screen.findAllByText('main.kin')
+    expect(styleTexts().join('')).toContain('--kiny-page-bg:#fff')
+
+    // 文本资源可点开编辑（二进制只列名）
+    await userEvent.click((await screen.findAllByText('skin.css'))[0])
+    await waitFor(() => expect(cmView().state.doc.toString()).toBe('.player{--kiny-page-bg:#fff}'))
+  })
+
+  it('编辑 css → 预览即时重注入（无需保存）', async () => {
+    render(<App gateway={gwTheme()} />)
+    await fileMenu('打开项目...')
+    await userEvent.click((await screen.findAllByText('skin.css'))[0])
+    await typeInEditor('/*x*/')
+    await waitFor(() => expect(styleTexts().join('')).toContain('/*x*/'))
+  })
+
+  it('校验只吃 .kin：css 内容不产出 Kin 诊断', async () => {
+    render(<App gateway={gwTheme('这不是 Kin 语法 @@@ {')} />)
+    await fileMenu('打开项目...')
+    await screen.findAllByText('main.kin')
+    await new Promise((r) => setTimeout(r, 400)) // 等防抖校验跑完
+    expect(screen.queryByText(/skin\.css/)).not.toBeNull() // 文件在资源管理器里
+    expect(document.querySelector('.diag-row')).toBeNull() // 但没有诊断
+  })
+
+  it('导入 .css 资源 → 立刻可编辑且即刻计入预览主题（不必重开项目）', async () => {
+    const g = createMemoryGateway({
+      pickedDir: '/proj',
+      files: {
+        '/proj/kiny.json': JSON.stringify({ name: '雾港', version: '1.0.0', engine: '0.1.0', entry: 'main.kin' }),
+        '/proj/main.kin': MAIN,
+        // 导入源：memoryGateway 的 importAsset 会把内容写成 <binary:…> 占位，
+        // 故这里断言「文本资源被回读进缓冲」而非具体内容。
+      },
+      importPicks: ['/ext/theme.css'],
+    })
+    render(<App gateway={g} />)
+    await fileMenu('打开项目...')
+    const explorer = await screen.findByRole('navigation', { name: '资源管理器' })
+    fireEvent.contextMenu(within(explorer).getByText('main.kin')) // 右键根级文件 → 导入到项目根
+    fireEvent.click(screen.getByText('导入资源…'))
+    // 导入后进了缓冲：新 tab 打开且编辑区拿到文本（不是「未打开文件」的空态）
+    await waitFor(() => expect(cmView().state.doc.toString()).toContain('binary'))
+  })
+
+  it('资源问题（非法族名）→ 预览栏出现提示角标', async () => {
+    const g = createMemoryGateway({
+      pickedDir: '/proj',
+      files: {
+        '/proj/kiny.json': JSON.stringify({ name: '雾港', version: '1.0.0', engine: '0.1.0', entry: 'main.kin' }),
+        '/proj/main.kin': MAIN,
+        '/proj/字体(粗).woff2': 'FONT',
+      },
+    })
+    render(<App gateway={g} />)
+    await fileMenu('打开项目...')
+    expect(await screen.findByText(/资源 1 项问题/)).toBeInTheDocument()
+  })
+
+  it('设置里关掉「预览应用作品主题」→ 不再注入', async () => {
+    localStorage.clear()
+    render(<App gateway={gwTheme()} />)
+    await fileMenu('打开项目...')
+    await screen.findAllByText('main.kin')
+    await userEvent.click(screen.getByRole('menuitem', { name: '视图' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: '设置...' }))
+    await userEvent.click(await screen.findByRole('tab', { name: '编辑器' }))
+    await userEvent.click(await screen.findByRole('switch', { name: '预览应用作品主题' }))
+    await userEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(styleTexts().join('')).not.toContain('--kiny-page-bg:#fff'))
+  })
 })
 
 describe('App 布局快照（保存 / 恢复布局）', () => {

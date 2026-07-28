@@ -56,6 +56,48 @@ describe('loadDemo', () => {
     expect(fetched).toEqual(expect.arrayContaining(['files.json', '小样.kiw', 'main.kin', 'two.kin']))
   })
 
+  it('索引里的 .css 取文本编译进 projectCss，字体注册 @font-face（相对 URL 带 base 前缀）', async () => {
+    stubFetch({
+      '小样.kiw': MANIFEST,
+      'files.json': '["小样.kiw","main.kin","theme/skin.css","fonts/楷体.woff2","assets/bg.jpg"]',
+      'main.kin': MAIN,
+      'theme/skin.css': '.player{--kiny-page-bg:#fff}.kin-letter{background:url(paper.png)}',
+    })
+    const out = await loadDemo()
+    expect(out.ok).toBe(true)
+    if (!out.ok) return
+    expect(out.value.projectCss).toContain('--kiny-page-bg:#fff')
+    expect(out.value.projectCss).toContain('font-family: "楷体"')
+    expect(out.value.projectCss).toContain('url("demo/fonts/楷体.woff2")')
+    // css 内相对 url() 以该 css 所在目录为基准解析。
+    expect(out.value.projectCss).toContain('url("demo/theme/paper.png")')
+    // 图片 / 字体不作文本 fetch（只 css 与 .kin 取文本）。
+    const fetched = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0] as string)
+    expect(fetched).not.toContain('demo/assets/bg.jpg')
+    expect(fetched).not.toContain('demo/fonts/楷体.woff2')
+  })
+
+  it('某个 css 取不到（404）→ 故事照常加载，只是少那一段样式', async () => {
+    stubFetch({
+      '小样.kiw': MANIFEST,
+      'files.json': '["小样.kiw","main.kin","gone.css","ok.css"]',
+      'main.kin': MAIN,
+      'ok.css': '.player{color:red}',
+      // gone.css 不在表里 → fetch 返回 !ok → text() 抛错
+    })
+    const out = await loadDemo()
+    expect(out.ok).toBe(true)
+    if (!out.ok) return
+    expect(out.value.story.canContinue).toBe(true)
+    expect(out.value.projectCss).toContain('color:red')
+  })
+
+  it('无 css / 字体的项目 → projectCss 为空串（不注入 style）', async () => {
+    stubFetch({ '小样.kiw': MANIFEST, 'files.json': '["小样.kiw","main.kin"]', 'main.kin': MAIN })
+    const out = await loadDemo()
+    expect(out.ok && out.value.projectCss).toBe('')
+  })
+
   it('manifest 非法 → 返回 ok:false 带消息', async () => {
     stubFetch({ 'kiny.json': 'not json', 'files.json': '["kiny.json"]' })
     const out = await loadDemo()

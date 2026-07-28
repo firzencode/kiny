@@ -6,6 +6,7 @@ import { setDiagnostics } from '@codemirror/lint'
 import type { ValidatedProgram, Diagnostic as KinDiagnostic } from '@kiny/engine'
 import type { ShortcutOverrides } from '../state/settings'
 import { kinSetup, External, highlightCompartment, highlightExtensionFor, shortcutsCompartment, editorKeymapFor, readonlyCompartment, readonlyExtensionFor } from '../cm/setup'
+import { languageCompartment, languageFor } from '../cm/langs'
 import { setKinContext } from '../cm/context'
 import { toCmDiagnostics } from '../cm/lint'
 import { readClipboardText } from '../clipboard'
@@ -72,6 +73,7 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(function Edi
           highlight,
           shortcuts ?? {},
           readOnly,
+          activeFile ?? null,
         ),
       }),
     })
@@ -112,6 +114,13 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(function Edi
     if (!view) return
     view.dispatch({ effects: setKinContext.of({ program: program ?? null, activeFile: activeFile ?? null }) })
   }, [program, activeFile])
+
+  // 切档换语言：.kin ↔ css / js / json / html / md 按扩展名热切换（不重建 view）。
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view) return
+    view.dispatch({ effects: languageCompartment.reconfigure(languageFor(activeFile ?? null)) })
+  }, [activeFile])
 
   // 语义着色开关：热切换 highlight compartment。
   useEffect(() => {

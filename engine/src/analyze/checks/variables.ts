@@ -1,9 +1,16 @@
 import type { Diagnostic, SymbolTable, Scope } from '../types'
-import { BUILTINS, JS_GLOBALS } from '../constants'
+import { BUILTINS, JS_GLOBALS, RESERVED_NAMES } from '../constants'
 
 /** 未声明变量 + 跨文件全局重复声明 + JS 片段语法错误。 */
 export function checkVariables(table: SymbolTable): Diagnostic[] {
   const out: Diagnostic[] = []
+
+  // 保留名（$nodes）：声明即报——它是引擎注入的只读节点表，覆盖声明会遮蔽内置。
+  for (const d of table.declarations) {
+    if (RESERVED_NAMES.has(d.name)) {
+      out.push({ severity: 'error', code: 'reserved-name', message: `「${d.name}」是引擎保留名，不能声明或赋值`, file: d.file, line: d.line })
+    }
+  }
 
   // duplicate-global：global 作用域声明名出现多次
   const seenGlobal = new Set<string>()
@@ -17,7 +24,7 @@ export function checkVariables(table: SymbolTable): Diagnostic[] {
   }
 
   const allowedFor = (scope: Scope): Set<string> => {
-    const set = new Set<string>([...table.globals, ...BUILTINS, ...table.labelSet, ...JS_GLOBALS])
+    const set = new Set<string>([...table.globals, ...BUILTINS, ...RESERVED_NAMES, ...table.labelSet, ...JS_GLOBALS])
     if (scope.kind === 'knot') for (const n of table.locals.get(scope.name) ?? []) set.add(n)
     return set
   }
@@ -38,6 +45,9 @@ export function checkVariables(table: SymbolTable): Diagnostic[] {
     for (const name of frag.assigns) {
       if (BUILTINS.has(name)) {
         out.push({ severity: 'error', code: 'assign-builtin', message: `不能给内置函数赋值：「${name}」`, file: frag.file, line: frag.line })
+      }
+      if (RESERVED_NAMES.has(name)) {
+        out.push({ severity: 'error', code: 'reserved-name', message: `「${name}」是引擎保留名，不能声明或赋值`, file: frag.file, line: frag.line })
       }
     }
   }

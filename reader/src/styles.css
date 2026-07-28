@@ -5,6 +5,10 @@
   --text:#e4e7ee; --dim:#9aa1b2; --faint:#5b6273;
   --accent:#d2a24c; --accent-soft:rgba(210,162,76,.16); --accent-line:rgba(210,162,76,.42);
   --shadow:0 18px 50px rgba(0,0,0,.5);
+  /* 作品主题 token（player 公开契约）在 reader 皮肤下的取值：阅读页与书架同一套暗色皮肤。
+     作品 css 覆盖同名 token 即换肤（作品样式注入在本文件之后，同特异性后来者胜）。 */
+  --kiny-page-bg:var(--bg1); --kiny-text:var(--text);
+  --kiny-prose-font:'PingFang SC','Noto Sans SC','Hiragino Sans GB',system-ui,sans-serif;
 }
 * { box-sizing: border-box; }
 html, body, #root { margin:0; height:100%; }
@@ -60,7 +64,18 @@ body { overflow:hidden; background:var(--bg1); color:var(--text);
 .reading-bar .back { pointer-events:auto; font:inherit; font-size:13px; cursor:pointer; color:#d8dbe2; background:rgba(8,11,16,.5);
   border:1px solid rgba(255,255,255,.14); border-radius:9px; padding:7px 13px; }
 .reading-bar .back:hover { background:rgba(20,24,32,.8); }
-.reading-bar .title-chip { font-size:12.5px; color:#9aa1b2; letter-spacing:.06em; }
+/* 退路守卫：作品 css 与本文件同在一个文档里，可能（无意或有意）盖掉宿主控件。
+   「← 书架」的可见与可点**不容作品覆盖**——读者任何时候都退得出去。作品仍可改其配色。 */
+.reading > .reading-bar { display:flex !important; visibility:visible !important; opacity:1 !important; z-index:2147483000 !important; }
+/* 宿主自己的模态 / 提示同样抬到守卫之上，否则存档面板会被顶栏压住、按钮可穿透点击。 */
+.saves-overlay { z-index:2147483001; }
+.reading-toast { z-index:2147483002; }
+.reading > .reading-bar .back { display:inline-block !important; visibility:visible !important; opacity:1 !important; pointer-events:auto !important; }
+/* @panel 左 / 右侧栏从顶部阅读条（返回 / 存档，高 52px）下方开始，不与其重叠。 */
+.panel-left, .panel-right { top: calc(52px + env(safe-area-inset-top)); }
+/* flex:1 + min-width:0 + 省略号：长书名收缩截断，不把「存档 / 读档」挤出窄屏（flex 项默认 min-width:auto 不收缩）。 */
+.reading-bar .title-chip { font-size:12.5px; color:#9aa1b2; letter-spacing:.06em;
+  flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 /* margin-right 给 player 的右上角静音键（.audio-toggle: right 16px + 宽 ~42px）让位，避免两个右上控件重叠。 */
 .reading-bar .saves-btn { pointer-events:auto; margin-left:auto; margin-right:52px; font:inherit; font-size:13px; cursor:pointer; color:#d8dbe2;
   background:rgba(8,11,16,.5); border:1px solid rgba(255,255,255,.14); border-radius:9px; padding:7px 13px; }

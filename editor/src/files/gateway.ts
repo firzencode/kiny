@@ -14,7 +14,18 @@ export interface Manifest {
 export interface ProjectFileEntry {
   path: string
   isKin: boolean
-  source?: string // 仅 .kin 载入文本
+  source?: string // 文本文件（.kin 与作品前端资源，见 isTextFile）载入文本；二进制无
+}
+
+/**
+ * editor 可直接编辑的文本文件（与 `.kin` 同等待遇：点开即编辑保存、带对应语言高亮）。
+ * 二进制（图片 / 音频 / 字体）不在此列，Explorer 只列名。
+ */
+const TEXT_EXTS = ['.kin', '.css', '.js', '.json', '.txt', '.md', '.html']
+
+export function isTextFile(path: string): boolean {
+  const base = path.slice(path.lastIndexOf('/') + 1).toLowerCase()
+  return TEXT_EXTS.some((e) => base.endsWith(e))
 }
 
 /** 一次读盘的项目快照（携带全部文件 + 空目录）。 */
@@ -53,12 +64,19 @@ export interface FileGateway {
   createFile(dir: string, relPath: string): Promise<ProjectFileEntry>
   /** 写回项目内某文件（relPath 相对项目根）。 */
   writeFile(dir: string, relPath: string, text: string): Promise<void>
+  /** 读项目内某文本文件（relPath 相对项目根）；读不到 / 非文本抛错。 */
+  readTextFile(dir: string, relPath: string): Promise<string>
   /** 弹系统文件选择器选媒体资源（图片 + 音频，可多选）；返回绝对路径数组，取消返 null。 */
   pickImportFiles(): Promise<string[] | null>
   /** 把外部文件 sourceAbsPath 拷入项目为 destRel（相对项目根）；父目录不存在时自动建。 */
   importAsset(dir: string, destRel: string, sourceAbsPath: string): Promise<void>
   /** 资源解析器：项目根相对路径 → 可渲染 URL。 */
   makeResolveAsset(dir: string): ResolveAsset
+  /**
+   * 读项目内二进制资源为 `data:` URI（导出独立网页内联字体用——`file://` 下 Chrome 按 opaque
+   * origin 拒载外链字体，只能内联）。读不到时抛错，由调用方降级。
+   */
+  readAssetDataUri(dir: string, relPath: string): Promise<string>
   /** 建空文件夹（relDir 相对项目根）。 */
   createFolder(dir: string, relDir: string): Promise<void>
   /** 改名 / 移动：from、to 为相对项目根路径（文件或目录）。目标已存在抛错。 */
@@ -199,14 +217,19 @@ export function defaultWebpageDirName(storyName: string): string {
 
 /**
  * 组装导出独立网页的内联数据（写入 `window.__KINY_PROJECT__`，对应 viewer 的 InlineProject）：
- * manifest 文本 + 各 .kin 路径→源码。资源走 `assets/` 相对引用（资源名自带 assets/ 前缀），故 assetBase 空。
+ * manifest 文本 + 各 .kin 路径→源码 + 作品主题 css。资源走相对引用（项目文件原样拷到导出目录），
+ * 故 assetBase 空。**只收 `.kin`**——css 等前端资源经 projectCss 内联，不进故事文件表。
  *
  * 数据被原样拼进导出 index.html 的内联 `<script>`，故须转义 `< > &`——否则 .kin 文本里的
  * `</script>` 会提前闭合脚本、损坏页面。`\uXXXX` 是合法 JSON 转义，浏览器解析回原字符，往返无损。
  */
-export function buildProjectData(manifest: Manifest, files: { path: string; source: string }[]): string {
+export function buildProjectData(
+  manifest: Manifest,
+  files: { path: string; source: string }[],
+  projectCss = '',
+): string {
   const fileMap: Record<string, string> = {}
-  for (const f of files) fileMap[f.path] = f.source
-  const json = JSON.stringify({ manifest: JSON.stringify(manifest), files: fileMap, assetBase: '' })
+  for (const f of files) if (f.path.endsWith('.kin')) fileMap[f.path] = f.source
+  const json = JSON.stringify({ manifest: JSON.stringify(manifest), files: fileMap, assetBase: '', css: projectCss })
   return json.replace(/[<>&]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`)
 }

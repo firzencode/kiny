@@ -32,7 +32,7 @@ export type ParkSnapshot =
 
 /** 运行时状态快照：纯 JSON-able 数据，可落盘往返。 */
 export interface StorySnapshot {
-  version: 3
+  version: 4
   fingerprint: string
   entry: string // 原始入口起点 knot 名（= 建 Story 时的 start）：restore 据此复刻正常播放的 buildGlobals 顺序
   turns: number
@@ -45,6 +45,11 @@ export interface StorySnapshot {
   taken: number[]
   stack: { path: BlockPath; index: number }[] // index 存真实游标值（park 于选项时亦不回退）
   park?: ParkSnapshot // 新增；ended 时缺省
+  /**
+   * `@panel` 已登记的活模板**本体**（槽位 → 模板源串）；无面板时缺省。
+   * 只存模板不存求值结果——restore 后重登记、首次重估必发事件，读档即渲染出当前值。
+   */
+  panels?: Record<string, string>
 }
 
 /** park 态解码结果（choice 序号已解回 AST 引用），交 Story 直接重建 pendingChoices / pendingInput。 */
@@ -68,6 +73,7 @@ export interface RestoreData {
   locals?: Record<string, unknown>
   frames: Frame[]
   park?: ParkData // park 态已求值结果；ended 时缺省
+  panels?: Record<string, string> // `@panel` 活模板本体（槽位 → 模板源串）
 }
 
 /** 一个栈帧 block 的定位：根（knot.body 或 stitch.body）+ 逐层下钻步骤。 */

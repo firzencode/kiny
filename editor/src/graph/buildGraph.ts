@@ -139,6 +139,7 @@ export function buildGraph(program: ValidatedProgram | null, entryPath?: string 
   }
 
   const addEdge = (d: Divert, from: string, hostName: string, kind: EdgeKind) => {
+    if (d.targetExpr !== undefined) return // 动态跳转（-> {表达式}）：目标运行时才定，不产静态边
     const { to, resolved } = resolveTarget(d.target, hostName)
     if (resolved && to === END_ID) hasEnd = true
     edges.push({ id: 'e' + seq++, from, to, kind, line: d.line, resolved, target: d.target })

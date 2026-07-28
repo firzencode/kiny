@@ -190,6 +190,176 @@ describe('scanInline —— 富文本标签', () => {
   })
 })
 
+describe('scanInline —— <font=名>', () => {
+  it('落字体名；内层覆盖外层（与 size 同语义）', () => {
+    expect(scan('<font=楷体>信<font=宋体>札</font></font>').segments).toEqual([
+      { kind: 'literal', value: '信', style: { font: '楷体' } },
+      { kind: 'literal', value: '札', style: { font: '宋体' } },
+    ])
+  })
+
+  it('名字两侧空白 trim 后落', () => {
+    expect(scan('<font= 楷体 >x</font>').segments).toEqual([
+      { kind: 'literal', value: 'x', style: { font: '楷体' } },
+    ])
+  })
+
+  it('允许 Unicode 字母数字与空格、点、下划线、连字符', () => {
+    expect(scan('<font=Noto Sans SC>x</font>').segments).toEqual([
+      { kind: 'literal', value: 'x', style: { font: 'Noto Sans SC' } },
+    ])
+  })
+
+  it('非法字体名（含分号 / 括号等注入字符）：不应用 + 记 rich-bad-font', () => {
+    const r = scan('<font=a;color:red>x</font>')
+    expect(r.segments).toEqual([{ kind: 'literal', value: 'x' }])
+    expect(r.issues).toEqual([{ code: 'rich-bad-font', message: '非法字体名：「a;color:red」', line: 1 }])
+  })
+
+  it('空字体名非法', () => {
+    expect(scan('<font=>x</font>').issues).toEqual([
+      { code: 'rich-bad-font', message: '非法字体名：「」', line: 1 },
+    ])
+  })
+
+  it('与其它样式共存', () => {
+    expect(scan('<b><font=楷体>x</font></b>').segments).toEqual([
+      { kind: 'literal', value: 'x', style: { bold: true, font: '楷体' } },
+    ])
+  })
+})
+
+describe('scanInline —— <class=名>', () => {
+  it('落类名数组', () => {
+    expect(scan('<class=whisper>低语</class>').segments).toEqual([
+      { kind: 'literal', value: '低语', style: { classes: ['whisper'] } },
+    ])
+  })
+
+  it('嵌套累积（与 font 的内层覆盖不同）', () => {
+    expect(scan('<class=letter>信<class=old>旧</class></class>').segments).toEqual([
+      { kind: 'literal', value: '信', style: { classes: ['letter'] } },
+      { kind: 'literal', value: '旧', style: { classes: ['letter', 'old'] } },
+    ])
+  })
+
+  it('同名嵌套去重', () => {
+    expect(scan('<class=a><class=a>x</class></class>').segments).toEqual([
+      { kind: 'literal', value: 'x', style: { classes: ['a'] } },
+    ])
+  })
+
+  it('允许中文 / 数字 / 下划线 / 连字符', () => {
+    expect(scan('<class=旁白_2-b>x</class>').segments).toEqual([
+      { kind: 'literal', value: 'x', style: { classes: ['旁白_2-b'] } },
+    ])
+  })
+
+  it('含空格的类名非法：不应用 + 记 rich-bad-class', () => {
+    const r = scan('<class=a b>x</class>')
+    expect(r.segments).toEqual([{ kind: 'literal', value: 'x' }])
+    expect(r.issues).toEqual([{ code: 'rich-bad-class', message: '非法类名：「a b」', line: 1 }])
+  })
+
+  it('含点的类名非法（css 选择器边界字符）', () => {
+    expect(scan('<class=a.b>x</class>').issues).toEqual([
+      { code: 'rich-bad-class', message: '非法类名：「a.b」', line: 1 },
+    ])
+  })
+
+  it('与 font / 其它样式共存', () => {
+    expect(scan('<class=letter><font=楷体>x</font></class>').segments).toEqual([
+      { kind: 'literal', value: 'x', style: { font: '楷体', classes: ['letter'] } },
+    ])
+  })
+
+  it('未闭合记 rich-unclosed（样式照应用到段末）', () => {
+    const r = scan('<class=a>x')
+    expect(r.segments).toEqual([{ kind: 'literal', value: 'x', style: { classes: ['a'] } }])
+    expect(r.issues).toEqual([{ code: 'rich-unclosed', message: '未闭合的标签：「<class>」', line: 1 }])
+  })
+
+  it('同样式相邻段归并（class 数组相等即同样式）', () => {
+    expect(scan('<class=a>甲</class><class=a>乙</class>').segments).toEqual([
+      { kind: 'literal', value: '甲乙', style: { classes: ['a'] } },
+    ])
+  })
+})
+
+describe('scanInline —— <pause> 句中停顿标记', () => {
+  it('句中标记：后半段带 pauseBefore，强制断开', () => {
+    expect(scan('凶手就是…<pause>你自己！').segments).toEqual([
+      { kind: 'literal', value: '凶手就是…' },
+      { kind: 'literal', value: '你自己！', pauseBefore: true },
+    ])
+  })
+
+  it('行首标记：第一段即带 pauseBefore（先等一次点击再出文字）', () => {
+    expect(scan('<pause>迟来的一句。').segments).toEqual([
+      { kind: 'literal', value: '迟来的一句。', pauseBefore: true },
+    ])
+  })
+
+  it('行尾标记忽略（行尾本就是行边界）', () => {
+    expect(scan('说完了。<pause>').segments).toEqual([{ kind: 'literal', value: '说完了。' }])
+  })
+
+  it('连续标记合并为一次停顿', () => {
+    expect(scan('前<pause><pause>后').segments).toEqual([
+      { kind: 'literal', value: '前' },
+      { kind: 'literal', value: '后', pauseBefore: true },
+    ])
+  })
+
+  it('同样式跨标记不归并（否则标记位置丢失）', () => {
+    expect(scan('<b>前<pause>后</b>').segments).toEqual([
+      { kind: 'literal', value: '前', style: { bold: true } },
+      { kind: 'literal', value: '后', style: { bold: true }, pauseBefore: true },
+    ])
+  })
+
+  it('标记可位于样式范围内，不影响样式作用域', () => {
+    expect(scan('普通<color=red>红<pause>还红</color>普通').segments).toEqual([
+      { kind: 'literal', value: '普通' },
+      { kind: 'literal', value: '红', style: { color: 'red' } },
+      { kind: 'literal', value: '还红', style: { color: 'red' }, pauseBefore: true },
+      { kind: 'literal', value: '普通' },
+    ])
+  })
+
+  it('插值段也能承载标记', () => {
+    expect(scan('前<pause>{x}').segments).toEqual([
+      { kind: 'literal', value: '前' },
+      { kind: 'interp', code: 'x', id: 0, pauseBefore: true },
+    ])
+  })
+
+  it('<br> 也能承载标记', () => {
+    expect(scan('上<pause><br>下').segments).toEqual([
+      { kind: 'literal', value: '上' },
+      { kind: 'break', pauseBefore: true },
+      { kind: 'literal', value: '下' },
+    ])
+  })
+
+  it('<pause/> 自闭合写法等价（与 <br/> 一致）', () => {
+    expect(scan('前<pause/>后').segments).toEqual([
+      { kind: 'literal', value: '前' },
+      { kind: 'literal', value: '后', pauseBefore: true },
+    ])
+  })
+
+  it('\\<pause> 转义后按字面输出', () => {
+    expect(scan('a\\<pause>b').segments).toEqual([{ kind: 'literal', value: 'a<pause>b' }])
+  })
+
+  it('<pause=毫秒> 报 rich-bad-pause（保留语法位，本期不支持）', () => {
+    const r = scan('前<pause=500>后')
+    expect(r.issues).toEqual([{ code: 'rich-bad-pause', message: '<pause> 不接受取值：「500」', line: 1 }])
+    expect(r.segments).toEqual([{ kind: 'literal', value: '前后' }]) // 非法标记不产生边界
+  })
+})
+
 describe('scanInline —— 错误', () => {
   it('未闭合的 { 抛 ParseError，带行号与路径', () => {
     try {

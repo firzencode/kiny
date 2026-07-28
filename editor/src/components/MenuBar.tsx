@@ -32,6 +32,8 @@ export interface MenuBarProps {
   onSetTheme: (t: PresetId) => void
   onToggleView: (key: ViewKey) => void
   onSyntaxRef: () => void
+  /** 打开「作品主题参考」（css token / class 契约 / 字体用法）。 */
+  onThemeRef: () => void
   onAbout: () => void
   onReportIssue: () => void
   onOpenSettings: () => void
@@ -143,6 +145,7 @@ export function MenuBar(p: MenuBarProps) {
       label: '帮助',
       items: [
         { label: 'Kiny 语法参考', sc: scFor('help'), act: p.onSyntaxRef },
+        { label: '作品主题参考', act: p.onThemeRef },
         { sep: true },
         { label: '问题反馈...', act: p.onReportIssue },
         { sep: true },

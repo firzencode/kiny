@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { resolveStart } from '@kiny/engine'
 import type { ValidatedProgram } from '@kiny/engine'
-import type { PlayState, ResolveAsset, InteractionStep } from '@kiny/player'
+import { discoverAssets, buildProjectCss } from '@kiny/player'
+import type { PlayState, ResolveAsset, InteractionStep, AssetIssue } from '@kiny/player'
 import type { FileGateway, Manifest } from './files/gateway'
-import { defaultKipName, defaultWebpageDirName, buildProjectData, projectFileName } from './files/gateway'
+import { defaultKipName, defaultWebpageDirName, buildProjectData, projectFileName, isTextFile } from './files/gateway'
 import { editorReducer, initialEditorState, anyDirty, activeBuffer } from './state/editorReducer'
 import { useDebouncedValidation, type ValidationOutcome } from './hooks/useDebouncedValidation'
 import { createIncrementalValidator } from './validate/validate'
@@ -56,6 +57,16 @@ const SESSION_SEED = 0x5eed
 // 32 位无符号随机种子；与 engine makeRng 的 `n >>> 0` 吻合。
 const randomSeed = () => Math.floor(Math.random() * 0x1_0000_0000) >>> 0
 const idResolve: ResolveAsset = (n: string) => n
+
+/** 作品资源问题 → 作者能懂的一句话（预览栏提示用）。 */
+function describeAssetIssue(i: AssetIssue): string {
+  switch (i.kind) {
+    case 'bad-font-name': return `字体「${i.path}」的族名「${i.family}」含非法字符，未注册（族名只能用字母数字、空格与 . _ -）`
+    case 'font-conflict': return `字体族名「${i.family}」重复，按路径序生效的是「${i.path}」`
+    case 'font-unresolved': return `字体「${i.path}」无法解析为可用地址，未注册`
+    case 'css-unreadable': return `样式「${i.path}」读不到内容，已跳过`
+  }
+}
 
 // 主题 / 布局偏好（面板显隐·尺寸·「我的布局」）的状态与持久化见 ./hooks/useViewPrefs。
 // 记忆用户手动调整过的 workbench 窗口尺寸：读写 + 退化尺寸守卫见 ./state/windowSize。
@@ -220,7 +231,28 @@ export function App({ gateway }: { gateway: FileGateway }) {
   const draftBuffers = useMemo(() => Object.values(state.files), [state.files])
   // 待办面板数据（T075）：扫全项目 .kin 的 TODO/FIXME。draftBuffers 已含当前编辑文件的最新 buffer，
   // 故未保存的 // TODO 也即时出现；正则扫描成本极低，随 buffer 变化 useMemo 重算无压力。
-  const todos = useMemo(() => scanTodos(draftBuffers.map((f) => ({ path: f.path, text: f.source }))), [draftBuffers])
+  const todos = useMemo(
+    () => scanTodos(draftBuffers.filter((f) => f.path.endsWith('.kin')).map((f) => ({ path: f.path, text: f.source }))),
+    [draftBuffers],
+  )
+  /**
+   * 预览用的作品主题 css（T077）：项目内全部 `.css` + 字体经 player 加载器编译成一段文本。
+   * css 缓冲一变即重算 → 保存 / 编辑 css 时预览即时换肤。设置里关掉「应用作品主题」则为空串
+   * （作者 css 越界污染编辑器 UI 时的逃生阀）。
+   */
+  const previewTheme = useMemo(() => {
+    if (!state.projectDir) return { css: '', issues: [] as AssetIssue[] }
+    const assets = discoverAssets(state.entries.map((e) => e.path))
+    return buildProjectCss(assets, {
+      readCss: (p) => state.files[p]?.source ?? null,
+      resolveAsset: resolveRef.current,
+    })
+    // resolveRef 随项目切换更新（projectDir 一并变），故不必入依赖。
+  }, [state.projectDir, state.entries, state.files])
+  // 只有「是否注入」受开关控制；资源问题与开关无关，关掉主题也照样提示（否则作者查不出族名为何不生效）。
+  const previewCss = settings.previewProjectTheme ? previewTheme.css : ''
+  /** 资源问题（非法族名 / 同名冲突 / 读不到）汇成一行提示——播放端静默跳过，作者这里要看得见。 */
+  const assetWarnings = useMemo(() => previewTheme.issues.map(describeAssetIssue), [previewTheme])
   const draftSignature = useMemo(
     () => JSON.stringify(draftBuffers.filter((f) => f.dirty).map((f) => [f.path, f.source])),
     [draftBuffers],
@@ -237,7 +269,10 @@ export function App({ gateway }: { gateway: FileGateway }) {
 
   // 防抖校验：跑全部缓冲
   const run = useCallback((rid: number): ValidationOutcome => {
-    const files = Object.values(filesRef.current).map((f) => ({ path: f.path, source: f.source }))
+    // 只把 `.kin` 送进校验：缓冲里还有作品前端资源（css 等），它们不是 Kin 源码。
+    const files = Object.values(filesRef.current)
+      .filter((f) => f.path.endsWith('.kin'))
+      .map((f) => ({ path: f.path, source: f.source }))
     const { diagnostics, program } = validatorRef.current.validate(files)
     return { runId: rid, diagnostics, program }
   }, [])
@@ -281,8 +316,10 @@ export function App({ gateway }: { gateway: FileGateway }) {
       // 崩溃恢复：会话恢复后检测残留草稿（草稿 ≠ 磁盘）→ 弹恢复提示。
       if (settings.autosaveRecovery) {
         const store = await gateway.readDraftStore()
-        const diskKin = proj.files.filter((f) => f.isKin).map((f) => ({ path: f.path, source: f.source ?? '' }))
-        const items = detectRecoverable(store, dir, diskKin)
+        // 口径须与「哪些文件有可编辑缓冲」一致（gateway 载入了文本的都算，含 css 等前端资源）——
+        // 只取 .kin 会把资源草稿判成 missing 并在恢复时静默丢弃。
+        const diskText = proj.files.filter((f) => f.source !== undefined).map((f) => ({ path: f.path, source: f.source ?? '' }))
+        const items = detectRecoverable(store, dir, diskText)
         setRecovery(items.length ? { projectDir: dir, items } : null)
       }
       return true
@@ -381,7 +418,19 @@ export function App({ gateway }: { gateway: FileGateway }) {
     }
     const parent = await gateway.pickExportWebpageDir()
     if (parent == null) return
-    const projectData = buildProjectData(state.manifest, Object.values(state.files))
+    // 作品主题随页内联：`file://` 下既不能 fetch 旁挂 css，Chrome 也按 opaque origin 拒载外链字体，
+    // 故 css 文本内联、项目内字体 `url()` 重写为 data-URI；图片 / 音频保持相对路径（媒体加载不受限）。
+    const assets = discoverAssets(state.entries.map((e) => e.path))
+    const fontUris = new Map<string, string>()
+    for (const f of assets.fonts) {
+      try { fontUris.set(f, await gateway.readAssetDataUri(state.projectDir, f)) }
+      catch { /* 读不到就跳过该字体：导出照常，缺的字体在页面上回退默认 */ }
+    }
+    const exportCss = buildProjectCss(assets, {
+      readCss: (p) => state.files[p]?.source ?? null,
+      resolveAsset: (p) => fontUris.get(p) ?? p,
+    }).css
+    const projectData = buildProjectData(state.manifest, Object.values(state.files), exportCss)
     try {
       const dest = await gateway.exportWebpage(state.projectDir, parent, defaultWebpageDirName(state.manifest.name), projectData)
       setNotice(`已导出到 ${dest}`, 'success')
@@ -591,7 +640,18 @@ export function App({ gateway }: { gateway: FileGateway }) {
         await gateway.importAsset(state.projectDir, destRel, src)
         const isNew = !existing.has(destRel)
         taken.add(destRel)
-        if (isNew) { dispatch({ type: 'file_created', file: { path: destRel, isKin: false } }); existing.add(destRel) }
+        // 文本资源（css 等）导入后应即刻可编辑、且立即计入预览主题：回读一次文本。
+        // 读失败不阻断导入（文件已落盘），退化成「只列名」，重开项目即恢复。
+        const source = isTextFile(destRel)
+          ? await gateway.readTextFile(state.projectDir, destRel).catch(() => undefined)
+          : undefined
+        if (isNew) {
+          dispatch({ type: 'file_created', file: { path: destRel, isKin: false, source } })
+          existing.add(destRel)
+        } else if (source !== undefined) {
+          // 覆盖式导入：磁盘已换新内容，缓冲若还留着旧文本，之后一次保存就会把导入的内容写没。
+          dispatch({ type: 'buffer_reloaded', path: destRel, source })
+        }
         imported++
       }
       if (imported > 0) setNotice(`已导入 ${imported} 个资源`, 'success')
@@ -599,6 +659,7 @@ export function App({ gateway }: { gateway: FileGateway }) {
   }
   const onAbout = () => setHelp('about')
   const onSyntaxRef = () => setHelp('syntax')
+  const onThemeRef = () => setHelp('theme')
   const onReportIssue = () => setShowErrorDetails(true)
   const onOpenSettings = () => setSettingsOpen(true)
   const onSaveSettings = (next: Settings, nextTheme: ThemeState, nextAi: AiConfig) => {
@@ -768,6 +829,7 @@ export function App({ gateway }: { gateway: FileGateway }) {
         onSetTheme={setPresetTheme}
         onToggleView={(key) => setView((v) => ({ ...v, [key]: !v[key] }))}
         onSyntaxRef={onSyntaxRef}
+        onThemeRef={onThemeRef}
         onAbout={onAbout}
         onReportIssue={onReportIssue}
         onOpenSettings={onOpenSettings}
@@ -952,7 +1014,8 @@ export function App({ gateway }: { gateway: FileGateway }) {
               ) : (
                 <PreviewPane play={play} stale={stale} sfx={sfxQueue} seed={previewSeed} onChoose={onChoosePreview} onSubmitInput={onSubmitInputPreview} onRestart={onRestart}
                   onBack={onBack} canGoBack={interactionSeqRef.current.length > 0}
-                  reveal={preview.reveal} onContentClick={preview.onContentClick} />
+                  reveal={preview.reveal} onContentClick={preview.onContentClick}
+                  projectCss={previewCss} assetWarnings={assetWarnings} />
               )}
             </div>
           </div>

@@ -120,3 +120,35 @@ describe('analyzeJs —— A7 赋值目标', () => {
     expect(ok(analyzeJs('obj.random = 5', 'stmt')).assigns).not.toContain('random')
   })
 })
+
+describe('analyzeJs —— $nodes 字面访问收集', () => {
+  const nn = (code: string, mode: 'expr' | 'stmt' = 'stmt') => ok(analyzeJs(code, mode)).nodesAccess
+
+  it('字面属性访问', () => {
+    expect(nn('let a = $nodes.商店')).toEqual([{ path: '商店', argc: null }])
+  })
+  it('字符串字面量下标（含带点全路径）', () => {
+    expect(nn('let a = $nodes["商店"]')).toEqual([{ path: '商店', argc: null }])
+    expect(nn('let a = $nodes["商店.内室"]')).toEqual([{ path: '商店.内室', argc: null }])
+  })
+  it('两级属性链只记全路径（不重复记一级）', () => {
+    expect(nn('let a = $nodes.商店.内室')).toEqual([{ path: '商店.内室', argc: null }])
+  })
+  it('字面调用记 argc', () => {
+    expect(nn('let a = $nodes.店("酒", 1)')).toEqual([{ path: '店', argc: 2 }])
+    expect(nn('let a = $nodes.商店.内室()')).toEqual([{ path: '商店.内室', argc: 0 }])
+  })
+  it('计算下标不记（留给运行时）', () => {
+    expect(nn('let a = $nodes[k]')).toEqual([])
+    expect(nn('let a = $nodes[k].x')).toEqual([])
+  })
+  it('三级链记两级前缀', () => {
+    expect(nn('let a = $nodes.a.b.c')).toEqual([{ path: 'a.b', argc: null }])
+  })
+  it('局部遮蔽的 $nodes 不记', () => {
+    expect(nn('let f = ($nodes) => $nodes.商店')).toEqual([])
+  })
+  it('表达式模式同样收集', () => {
+    expect(nn('$nodes.商店', 'expr')).toEqual([{ path: '商店', argc: null }])
+  })
+})

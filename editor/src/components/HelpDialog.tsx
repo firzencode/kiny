@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import { tokenizeLine } from '../syntax/kin'
 import bannerUrl from '../assets/banner.png'
 
-export type HelpScreen = 'about' | 'syntax'
+export type HelpScreen = 'about' | 'syntax' | 'theme'
 
 export interface HelpDialogProps {
   screen: HelpScreen | null
@@ -64,6 +64,9 @@ const SECTIONS: Section[] = [
   { cat: '流程', id: 'divert', gl: '->', zh: '跳转', en: 'Divert',
     desc: '<code>-> 目标</code> 立即跳到另一节点，可独立成行或贴在文本末尾（控制流等价）。跳转后本节点剩余内容不再执行。<code>-> END</code> 结束故事，<code>-> DONE</code> 结束当前线程（暂等同 END）。',
     code: '你走出了房间。\n-> 走廊\n\n你走出了房间。-> 走廊\n\n-> 商店("灯笼", 0.8)   // 带参跳转\n-> END' },
+  { cat: '流程', id: 'dyndivert', gl: '->{}', zh: '动态跳转', en: 'Dynamic Divert',
+    desc: '<code>-> {表达式}</code>：跳转目标由表达式在运行时算出，所有跳转位置都能用。目标写法有两种 —— <b>节点引用</b>：内置表 <code>$nodes</code> 取节点（<code>$nodes.名字</code>，子节点 <code>$nodes.父.子</code>；名字写错当场报错）；<b>字符串</b>：直接写节点名（<code>"大厅"</code> / <code>"父.子"</code> / <code>"END"</code>）。带参节点要先绑实参：<code>$nodes.名(实参)</code>。<code>"名字" in $nodes</code> 判断节点是否存在。',
+    code: '~ let back = $nodes.码头       // 把节点存进变量\n-> {back}                     // 跳到变量里的节点\n\n~ let map = { 北: $nodes.走廊 }  // 节点可放进对象 / 数组\n* [往北走] -> {map.北}          // 选项也能动态跳\n\n~ let quest = $nodes.商店("灯笼", 0.8) // 带参节点：先绑实参\n-> {quest}\n\n~ let t = "大厅"               // 字符串：按节点名跳\n-> {t}\n\n@if {"密室" in $nodes}         // 判断节点是否存在\n> -> {"密室"}' },
   { cat: '流程', id: 'choice', gl: '*', zh: '选项', en: 'Choice',
     desc: '<code>*</code> 一次性（选过即消失）/ <code>+</code> 粘性（可重复）。<code>[文本]</code> 内只在列表显示、<code>]</code> 之后只在点击后正文显示；省略 <code>[]</code> 则两处同文。<code>{条件}</code> 紧跟 <code>*</code> 之后，假则不显示。',
     code: '* [走向客栈] -> inn\n+ [再看一眼码头] -> docks\n* [我累了。] 「辛苦你了，」他回答。 -> 休息\n* {gold >= 5} [买下灯笼] -> buy_lantern' },
@@ -102,8 +105,11 @@ const SECTIONS: Section[] = [
     desc: '「活文本」—— 同一处文字随访问次数变化，由四个内置函数实现，按<b>源码位置</b>自动计数：<code>seq</code> 依次推进、停在最后；<code>cycle</code> 循环；<code>once</code> 用完返回空串；<code>shuffle</code> 随机（受 <code>seed_random</code> 控制）。',
     code: '钟声{ seq("响了", "又响了", "这回很远了") }。\n今天是{ cycle("周一","周二","周三","周日") }。\n他笑了。{ once("这是我第一次见他笑。") }\n风吹过。{ shuffle("你打了个寒颤。", "你拉紧了衣领。") }' },
   { cat: '文本', id: 'richtext', gl: '<b>', zh: '内联富文本', en: 'Rich Text',
-    desc: '文本行内可加样式的标签，明确闭合、可嵌套（叙述与选项文本同样适用）：<code>&lt;b&gt;</code> 粗、<code>&lt;i&gt;</code> 斜、<code>&lt;u&gt;</code> 下划线、<code>&lt;s&gt;</code> 删除线、<code>&lt;br&gt;</code> 换行（自闭合）。<code>&lt;color=值&gt;</code> 取 <code>#rgb</code> / <code>#rrggbb</code> / CSS 具名色，<code>&lt;size=倍数&gt;</code> 取正数倍数（相对正文字号，渲染为 <code>em</code>）；<b>不接受任意 CSS</b>。仅当 <code>&lt;</code> 后构成合法标签才识别，否则按字面输出（强制字面用 <code>\\&lt;</code>）。未闭合 / 错配 / 非法取值在校验期报 error，运行期优雅降级。',
-    code: '她说：<b>别回头</b>，然后<color=#c00>消失在<i>雾</i>里</color>。\n这个词<size=1.5>很大</size>。\n第一行<br>第二行' },
+    desc: '文本行内可加样式的标签，明确闭合、可嵌套（叙述与选项文本同样适用）：<code>&lt;b&gt;</code> 粗、<code>&lt;i&gt;</code> 斜、<code>&lt;u&gt;</code> 下划线、<code>&lt;s&gt;</code> 删除线、<code>&lt;br&gt;</code> 换行（自闭合）。<code>&lt;color=值&gt;</code> 取 <code>#rgb</code> / <code>#rrggbb</code> / CSS 具名色，<code>&lt;size=倍数&gt;</code> 取正数倍数（相对正文字号，渲染为 <code>em</code>）；<b>不接受任意 CSS</b>。<code>&lt;font=名&gt;</code> 换字体（项目内字体文件自动注册，族名 = 文件名去扩展名；系统字体名直接可用），<code>&lt;class=名&gt;</code> 挂语义类名交给作品 css（渲染为 <code>.kin-名</code>，嵌套累积；覆盖整行时样式落在整段上）——两者详见「作品主题」页。仅当 <code>&lt;</code> 后构成合法标签才识别，否则按字面输出（强制字面用 <code>\\&lt;</code>）。未闭合 / 错配 / 非法取值在校验期报 error，运行期优雅降级。',
+    code: '她说：<b>别回头</b>，然后<color=#c00>消失在<i>雾</i>里</color>。\n这个词<size=1.5>很大</size>。\n信纸上写着：<font=楷体>见字如晤。</font>\n<class=whisper>他凑到你耳边，说了三个字。</class>\n第一行<br>第二行' },
+  { cat: '文本', id: 'pause', gl: '<p>', zh: '句中点击续显', en: 'Mid-line Pause',
+    desc: '<code>&lt;pause&gt;</code>（自闭合、无值）在句中标一个停顿点：前半句显示后打字停住、推进提示三角亮起，读者点击才续显后半句——悬念的节奏由你钦定。它是<b>纯呈现层</b>的分段揭示：整行仍是一条记录，不是暂停点，不影响存档，读档与重放整行直显。行内任意位置、可多个，可位于 <code>&lt;b&gt;</code> 等样式范围内；行首标记 = 先等一次点击再出文字，连续标记合并为一次，行尾标记忽略。停顿<b>不可被打字跳过穿透</b>：打字中点击只让当前段立显、仍停在标记处，再点一次才续下一段；<code>flow</code> 模式的自动续行也只发生在整行揭示完之后。强制字面用 <code>\\&lt;pause&gt;</code>；<code>&lt;pause=毫秒&gt;</code> 是保留语法位，当前报错。停顿由读者点击解除；<b>定时</b>的停顿属于行与行之间的演出编排，用 <code>@sleep</code>（见「正文推进节奏」）。',
+    code: '凶手就是…<pause>你自己！\n\n他缓缓抬起头。<pause>那张脸，<pause>你认得。' },
   { cat: '文本', id: 'glue', gl: '<>', zh: '粘连', en: 'Glue',
     desc: '默认每段文本后换行。<code>&lt;&gt;</code> 紧贴文本<b>末尾</b>，取消其后的换行让下一段贴上来 —— 即便中间隔着一次 <code>-></code> 跳转。<code>-></code> 不产出文本，<code>&lt;&gt;</code> 永远贴在文本一侧，没有行首 <code>&lt;&gt;</code>。',
     code: '我转身离开<>\n-> next_room\n\n=== next_room ===\n，头也不回。\n\n我转身离开<> -> next_room   // 内联等价写法' },
@@ -119,8 +125,11 @@ const SECTIONS: Section[] = [
     desc: '<code>@命令(参数)</code> 独占一行、行首顶格，向宿主（编辑器 / 阅读器）下达副作用指令，<b>不产出叙事文本</b>。参数是 JS 表达式（可动态），资源用项目根相对路径。引擎只认内置命令集，未知命令报错。',
     code: '@bg_show("assets/tavern_interior.jpg")  // 显示背景图\n@bg_hide()                              // 隐藏背景图\n@bgm_play("assets/tavern_loop.mp3")     // 播放背景音乐\n@bgm_pause()  @bgm_stop()               // 暂停 / 停止' },
   { cat: '宿主', id: 'pacing', gl: '@⏱', zh: '正文推进节奏', en: 'Pacing',
-    desc: '<code>@clear()</code> 清除已显示正文（背景 / BGM 不受影响）。<code>@step_mode(mode)</code> 切换正文推进方式：<code>"line"</code> 逐段点击才出下一行（打字中点击立即整段显示，等待点击时正文下方有推进提示三角），<code>"flow"</code> 恢复默认连续流动。<code>@text_speed(cps)</code> 调打字机出字速度（字/秒，默认 <code>80</code>，<code>0</code>=整行瞬显）；<code>@text_fade(ms)</code> 调每字淡入时长（毫秒，默认 <code>300</code>，<code>0</code>=无淡入）。三者都是有状态设定，持续生效到下次改写或故事重开；读者开启「减弱动态效果」时整行瞬显，覆盖以上设定。',
-    code: '@step_mode("line")     // 像视觉小说一样点一下出一段\n@text_speed(20)        // 出字放慢营造凝重感（默认 80 字/秒）\n@text_fade(600)        // 淡入更绵长（默认 300ms）\n@clear()               // 清屏，背景与 BGM 不受影响' },
+    desc: '<code>@clear()</code> 清除已显示正文（背景 / BGM 不受影响）。<code>@step_mode(mode)</code> 切换正文推进方式：<code>"line"</code> 逐段点击才出下一行（打字中点击立即整段显示，等待点击时正文下方有推进提示三角），<code>"flow"</code> 恢复默认连续流动。<code>@text_speed(cps)</code> 调打字机出字速度（字/秒，默认 <code>80</code>，<code>0</code>=整行瞬显）；<code>@text_fade(ms)</code> 调每字淡入时长（毫秒，默认 <code>300</code>，<code>0</code>=无淡入）。三者都是有状态设定，持续生效到下次改写或故事重开；读者开启「减弱动态效果」时整行瞬显，覆盖以上设定。<code>@sleep(ms)</code> 在<b>行与行、命令与命令之间</b>插入定时停顿，用于演出编排（场景切换、音画之间的空拍），<b>不可跳过</b>（读者点击无效）——停顿位置就是它在脚本里的位置，选项 / 输入框前的停顿等满后它们才浮现；读档与重放零等待（预览里编辑重算同样瞬时，只有人工交互才真等）。它是命令、也是硬边界：之前的文字先成行、之后的文字另起一行，<code>&lt;&gt;</code> 粘连也跨不过去，<b>做不到句中停顿</b>——句中停住、后半句续显在同一行请用 <code>&lt;pause&gt;</code>（见「句中点击续显」）。',
+    code: '@step_mode("line")     // 像视觉小说一样点一下出一段\n@text_speed(20)        // 出字放慢营造凝重感（默认 80 字/秒）\n@text_fade(600)        // 淡入更绵长（默认 300ms）\n@clear()               // 清屏，背景与 BGM 不受影响\n\n门，缓缓开了。\n@sleep(1500)           // 行间停顿 1.5 秒，读者点击也跳不过\n里面什么都没有。\n\n@bg_show("assets/night.jpg")\n@sleep(800)            // 场景切换之间的空拍\n@bgm_play("assets/theme.mp3")' },
+  { cat: '宿主', id: 'panel', gl: '@▤', zh: '固定区域', en: 'Panel',
+    desc: '<code>@panel(槽位, 模板)</code> 给阅读页添加独立于正文流的固定区域，适合 RPG 状态栏、章节指示等。槽位四选一：<code>"left"</code> / <code>"right"</code>（左 / 右侧边栏，宽屏贴对应一侧 / 窄屏折叠为横条）、<code>"bottom"</code>（底部固定条）、<code>"after"</code>（正文后固定栏，随正文滚动、在选项前），<b>须字符串字面量</b>。模板是字符串，支持 <code>{表达式}</code> 插值与全部富文本标签；<b>登记时不求值</b>，引擎在每次推进 / 暂停点重估，结果变了才刷新——<b>改一处变量，区域随下一步自动更新</b>（故模板须纯读取，副作用会反复执行）。再次对同一槽 <code>@panel</code> = 整体替换；空模板 <code>""</code> 清空并隐藏该槽。面板是显示 buffer，无打字机揭示、无交互元素；<b>默认无装饰</b>（文字如正文、无背景无边框），要加外观就覆盖作品 css 的 <code>--kiny-panel-bg/-text/-border</code> 变量或以 <code>.panel-left/.panel-right/.panel-bottom/.panel-after</code> 为选择器自定义。',
+    code: '~ let hp = 20\n~ let gold = 5\n@panel("left", "<b>状态</b><br>HP: {hp}<br>金币: {gold}")\n@panel("bottom", "第 {chapter} 章")\n\n~ hp -= 5   // 左栏 HP 下一步自动变 15\n\n@panel("left", "")   // 空模板 = 清空该槽' },
   { cat: '宿主', id: 'input', gl: '@⌨', zh: '读者输入', en: 'Input',
     desc: '<code>@input(变量, 提示?)</code> 是唯一的<b>交互命令</b>——暂停故事、请读者输入一段文本，写回变量供后续插值 <code>{变量}</code> 或 <code>@if</code> 条件使用。第一个参数是<b>变量名本身</b>（写入目标，须先声明），第二个提示可省、作输入框 placeholder。读者留空提交则保留变量原值（充当默认）。',
     code: '~ let player_name = "旅人"\n@input(player_name, "请输入你的名字")\n你好，{player_name}。   // 读者填「阿光」→「你好，阿光。」；留空→「你好，旅人。」' },
@@ -198,6 +207,131 @@ function SyntaxScreen() {
   )
 }
 
+/** 作品主题 token 契约（与 player `styles.css` 的 `:root` 一一对应）。 */
+const THEME_TOKENS: { name: string; use: string }[] = [
+  { name: '--kiny-page-bg', use: '页面底色' },
+  { name: '--kiny-text', use: '正文文字色' },
+  { name: '--kiny-prose-font', use: '正文字体族（改这一行即换全文默认字体）' },
+  { name: '--kiny-prose-size', use: '正文字号' },
+  { name: '--kiny-prose-line-height', use: '正文行高' },
+  { name: '--kiny-content-max-width', use: '阅读栏宽（默认 680px）' },
+  { name: '--kiny-bg-overlay', use: '氛围底图上的压暗遮罩色' },
+  { name: '--kiny-control-bg', use: '选项按钮 / 输入框底色' },
+  { name: '--kiny-control-bg-hover', use: '选项按钮悬停底色' },
+  { name: '--kiny-control-text', use: '选项按钮 / 输入框文字色' },
+  { name: '--kiny-control-border', use: '选项按钮 / 输入框描边' },
+  { name: '--kiny-accent', use: '推进提示三角等强调色' },
+  { name: '--kiny-error', use: '运行期错误文字色' },
+  { name: '--kiny-panel-bg / -text / -border', use: '固定区域（@panel）的底色 / 文字 / 描边（默认无装饰，覆盖即现）' },
+]
+
+/** 作者可依赖的稳定 DOM class（播放层结构锚点）。 */
+const THEME_CLASSES: { name: string; use: string }[] = [
+  { name: '.player', use: '播放层根（自定义选择器建议都以它为根，避免越界影响编辑器界面）' },
+  { name: '.player-content', use: '居中阅读栏容器' },
+  { name: '.story-log', use: '叙事流容器' },
+  { name: '.narration', use: '一行正文（整行 <class=…> 的类名挂在这里）' },
+  { name: '.choices / .choice', use: '选项列表 / 单个选项按钮' },
+  { name: '.input-box / .input-box-field / .input-box-submit', use: '@input 输入框区 / 输入框 / 提交按钮' },
+  { name: '.bg-layer', use: '氛围底图层' },
+  { name: '.advance-indicator', use: 'line 模式等待点击的推进提示' },
+  { name: '.panel-left / .panel-right / .panel-bottom / .panel-after', use: '固定区域（@panel）四槽容器' },
+]
+
+const THEME_SNIPPET = `/* 项目内任意位置放 .css 即自动加载（按路径字典序；用 10- / 20- 前缀控序）。
+   停用某个文件：改扩展名，如 skin.css.bak */
+
+/* ① 换 token —— 最省事的换肤方式 */
+:root {
+  --kiny-page-bg: #f7f3e9;
+  --kiny-text: #2b2622;
+  --kiny-prose-font: "楷体";      /* 项目里放 楷体.woff2 即自动注册 */
+  --kiny-prose-size: 1.1rem;
+  --kiny-content-max-width: 720px;
+  --kiny-control-bg: rgba(0,0,0,.05);
+  --kiny-control-text: #2b2622;
+  --kiny-control-border: rgba(0,0,0,.25);
+}
+
+/* ② 深改选择器 —— 一律以 .player 为根 */
+.player .choice { border-radius: 2px; letter-spacing: .05em; }
+
+/* ③ 语义类 —— 对应正文里的 <class=名> */
+.kin-whisper { opacity: .6; font-style: italic; }
+.kin-letter  { background: rgba(0,0,0,.05); padding: 12px; border-radius: 6px; }`
+
+function ThemeScreen() {
+  return (
+    <div className="help-syntax">
+      <div className="help-syn-head">
+        <div className="help-syn-title"><b>作品主题</b> —— css 与字体</div>
+        <span className="help-syn-ver">项目前端资源</span>
+      </div>
+      <div className="help-syn-body">
+        <div className="help-syn-content">
+          <div className="help-syn-cat">资源</div>
+          <div className="help-syn-sec">
+            <div className="help-syn-sec-h"><h3>放进项目即生效</h3><span className="en">Zero config</span></div>
+            <p className="help-syn-desc">
+              项目内<b>任何位置</b>的 <code>.css</code> 都会自动加载（按路径字典序注入，用 <code>10-</code> / <code>20-</code> 文件名前缀控制先后）；
+              字体文件（<code>.woff2</code> / <code>.woff</code> / <code>.ttf</code> / <code>.otf</code>）自动注册，
+              <b>族名 = 文件名去扩展名</b>（<code>楷体.woff2</code> → 族名「楷体」）。不想让某个 css 生效就改扩展名（如 <code>skin.css.bak</code>）。
+              这些资源随 <code>.kip</code> 打包、随导出网页内联，在编辑器预览 / 阅读器 / 书库 / 导出网页里表现一致。
+              js 本期<b>只可存放与编辑，不自动执行</b>。
+            </p>
+          </div>
+          <div className="help-syn-sec">
+            <div className="help-syn-sec-h"><h3>行内字体与语义类</h3><span className="en">font / class</span></div>
+            <p className="help-syn-desc">
+              <code>&lt;font=名&gt;</code> 在句中切字体（族名未注册时自动回退正文字体）；
+              <code>&lt;class=名&gt;</code> 给这段文字挂语义类名，渲染时加 <code>kin-</code> 前缀，外观全由 css 定义。
+              类名<b>覆盖整行</b>时挂到行容器 <code>.narration</code> 上（背景 / 边框 / 内边距等块级样式完整可用），只包片段时挂在该片段上。
+            </p>
+            <KinCode src={'信纸上写着：<font=楷体>见字如晤。</font>\n<class=whisper>他凑到你耳边，说了三个字。</class>\n<class=letter>见字如晤。展信之时，我已在千里之外。</class>'} />
+          </div>
+
+          <div className="help-syn-cat">契约</div>
+          <div className="help-syn-sec">
+            <div className="help-syn-sec-h"><h3>CSS 变量</h3><span className="en">Tokens</span></div>
+            <p className="help-syn-desc">覆盖这些变量即换肤，无需改写任何选择器。</p>
+            <table className="help-theme-table">
+              <tbody>
+                {THEME_TOKENS.map((t) => (
+                  <tr key={t.name}><td><code>{t.name}</code></td><td>{t.use}</td></tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="help-syn-sec">
+            <div className="help-syn-sec-h"><h3>稳定 class 名</h3><span className="en">Selectors</span></div>
+            <p className="help-syn-desc">播放层的结构锚点，可长期依赖。</p>
+            <table className="help-theme-table">
+              <tbody>
+                {THEME_CLASSES.map((t) => (
+                  <tr key={t.name}><td><code>{t.name}</code></td><td>{t.use}</td></tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="help-syn-cat">上手</div>
+          <div className="help-syn-sec">
+            <div className="help-syn-sec-h"><h3>可抄的换肤片段</h3><span className="en">Starter</span></div>
+            <p className="help-syn-desc">新建一个 <code>theme.css</code>，粘贴下面内容按需改。</p>
+            <pre className="help-kin">{THEME_SNIPPET}</pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const SCREEN_LABEL: Record<HelpScreen, string> = {
+  about: '关于 Kiny Editor',
+  syntax: 'Kiny 语法参考',
+  theme: '作品主题参考',
+}
+
 export function HelpDialog({ screen, onClose }: HelpDialogProps) {
   useEffect(() => {
     if (!screen) return
@@ -215,13 +349,13 @@ export function HelpDialog({ screen, onClose }: HelpDialogProps) {
         className={'help-dlg help-dlg-' + screen}
         role="dialog"
         aria-modal="true"
-        aria-label={screen === 'about' ? '关于 Kiny Editor' : 'Kiny 语法参考'}
+        aria-label={SCREEN_LABEL[screen]}
         onClick={(e) => e.stopPropagation()}
       >
         <button className="help-dlg-close" aria-label="关闭" onClick={onClose}>
           ×
         </button>
-        {screen === 'about' ? <AboutScreen /> : <SyntaxScreen />}
+        {screen === 'about' ? <AboutScreen /> : screen === 'theme' ? <ThemeScreen /> : <SyntaxScreen />}
       </div>
     </div>
   )

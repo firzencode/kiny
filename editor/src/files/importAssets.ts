@@ -7,8 +7,12 @@ export { basename }
 export const IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg', 'bmp']
 /** 音频扩展名（小写，不含点）。bgm / se 只是指令引用路径的语义区别，与文件夹无关。 */
 export const AUDIO_EXTS = ['mp3', 'ogg', 'wav', 'm4a', 'aac', 'flac']
-/** 合并的媒体资源过滤器扩展名。 */
-export const MEDIA_EXTS = [...IMAGE_EXTS, ...AUDIO_EXTS]
+/** 字体扩展名（小写，不含点）：放进项目即自动注册 `@font-face`，族名 = 文件名去扩展名。 */
+export const FONT_EXTS = ['woff2', 'woff', 'ttf', 'otf']
+/** 作品前端资源里可导入的文本类扩展名（css 主题等；js 本期只存放不执行）。 */
+export const WEB_EXTS = ['css', 'js']
+/** 合并的资源导入过滤器扩展名（图 / 音 / 字体 / css·js）。 */
+export const MEDIA_EXTS = [...IMAGE_EXTS, ...AUDIO_EXTS, ...FONT_EXTS, ...WEB_EXTS]
 
 /** 右键位置 → 导入目标目录（项目根相对；根 / 空白 = ''）。 */
 export function resolveImportDir(kind: 'file' | 'dir' | 'root', path: string): string {

@@ -1,5 +1,7 @@
 // parser
 export { parse, ParseError } from './parser'
+export { validFont, validClass } from './parser/inline'
+export { sortByPath } from './order'
 export type {
   ProjectFile, Knot, Stitch, ContentBlock, ContentElement, TextLine, Divert,
   ChoiceGroup, Choice, Conditional, ConditionalBranch, LogicLine, LogicBlock,
@@ -10,7 +12,7 @@ export { analyze, resolveStart, openingKnotName } from './analyze'
 export type { Diagnostic, AnalyzeResult, ValidatedProgram } from './analyze'
 // runtime
 export { createStory, restoreStory, Story, RuntimeError, plainText } from './runtime'
-export type { OutputEvent, ChoiceView, StoryOptions, StorySnapshot, RichSpan } from './runtime'
+export type { OutputEvent, ChoiceView, StoryOptions, StorySnapshot, RichSpan, PanelSlot } from './runtime'
 // project（点名纯子模块，loadProject 已移出 engine）
 export { validateManifest } from './project/manifest'
 export { assembleProject } from './project/assemble'

@@ -18,7 +18,11 @@ describe('runtime 开场 knot 集成 —— §14 经入口解析贯通', () => {
     const trace: string[] = []
     while (s.canContinue) {
       const e = s.continue()
-      trace.push(e.kind === 'text' ? `T ${plainText(e.spans)}` : `C ${e.name}(${e.args.map(String).join(',')})`)
+      trace.push(
+        e.kind === 'text' ? `T ${plainText(e.spans)}`
+          : e.kind === 'panel' ? `P ${e.slot} ${plainText(e.spans)}`
+            : `C ${e.name}(${e.args.map(String).join(',')})`,
+      )
     }
     expect(trace).toEqual(['C bg_show(harbor_fog.jpg)', 'T 雾从港口涌上来。你有10金币。'])
     expect(s.hasEnded).toBe(true)
