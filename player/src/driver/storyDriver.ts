@@ -2,7 +2,15 @@ import { RuntimeError } from '@kiny/engine'
 import type { Story, ChoiceView, RichSpan } from '@kiny/engine'
 import { type HostState, type ResolveAsset, emptyHost, applyCommand, applyPanel } from '../host/commands'
 
-export type LogEntry = { kind: 'narration'; spans: RichSpan[] } | { kind: 'end' }
+/**
+ * 正文流里的一条内容。`image` 是 `@img` 产出的插图——与 narration 并列的一条内容行，
+ * 随正文滚动、留在阅读历史里（区别于始终垫在底下的全屏背景层 `@bg_show`）。
+ * `src` 已 resolve 为宿主 URL（归约时解析，与 sfx 同处）；`cls` 存作者写的**原始**类名，渲染时才加前缀。
+ */
+export type LogEntry =
+  | { kind: 'narration'; spans: RichSpan[] }
+  | { kind: 'image'; src: string; alt?: string; cls?: string }
+  | { kind: 'end' }
 
 /** 待填输入框的可呈现态（varName 是 engine 内部事，宿主渲染不需要，故不下放）。 */
 export interface InputView {
@@ -62,13 +70,44 @@ function asError(err: unknown): PlayState['error'] {
   throw err
 }
 
-/** 归约单个事件：文字进 log（并标记产出一行）、sfx 瞬时收集、clear 清 log、sleep 标记停顿、其余走 applyCommand。 */
+/**
+ * `@img` 的运行期兜底（analyze 只能拦字面量，表达式参留到这里，与 `@sleep` 同策略）：
+ * 路径非字符串 / 空串 → 返回 null，该条插图整个跳过（不渲染半截）；
+ * 替代文字非字符串 → 按缺省（装饰性图片，`alt=""`）；类名非法 → 忽略类名、图照常渲染。
+ * 诊断经 `warnings` 回传而非就地打印——`advance`（重放 / editor 每次编辑重算）会吞掉它们，
+ * 否则一条写错的动态路径会随每次重算刷屏（同 `@sleep` 的立场）。
+ */
+export function imageEntry(
+  args: unknown[],
+  resolve: ResolveAsset,
+  warnings: string[],
+): Extract<LogEntry, { kind: 'image' }> | null {
+  const rawSrc = args[0]
+  if (typeof rawSrc !== 'string' || rawSrc.trim() === '') {
+    warnings.push(`player: @img 的路径非法（${String(rawSrc)}），跳过该插图`)
+    return null
+  }
+  // 与 cls 同样先 trim 再用：判空看的是 trim 后的串，resolve 却拿原串的话，
+  // `@img(" a.png ")` 会解析出带首尾空格的 URL 而 404——两处必须看同一个值。
+  const entry: Extract<LogEntry, { kind: 'image' }> = { kind: 'image', src: resolve(rawSrc.trim()) }
+  if (typeof args[1] === 'string' && args[1] !== '') entry.alt = args[1]
+  const cls = args[2]
+  if (typeof cls === 'string' && VALID_IMG_CLASS.test(cls.trim())) entry.cls = cls.trim()
+  else if (cls !== undefined) warnings.push(`player: @img 的类名非法（${String(cls)}），已忽略`)
+  return entry
+}
+
+/** 类名合法性（与行内 `<class=名>` 同规则）：Unicode 字母数字与 `_ -`，不含空格与点。 */
+const VALID_IMG_CLASS = /^[\p{L}\p{N}_-]+$/u
+
+/** 归约单个事件：文字 / 插图进 log（并标记产出一行）、sfx 瞬时收集、clear 清 log、sleep 标记停顿、其余走 applyCommand。 */
 function reduceEvent(
   e: ReturnType<Story['continue']>,
   log: LogEntry[],
   host: HostState,
   sfx: string[],
   resolve: ResolveAsset,
+  warnings: string[],
 ): { log: LogEntry[]; host: HostState; producedLine: boolean; sleep?: { raw: unknown } } {
   if (e.kind === 'text') return { log: [...log, { kind: 'narration', spans: e.spans }], host, producedLine: true }
   // 固定区域更新：改 host.panels（持续状态），不产出行、不算一次揭示。
@@ -76,6 +115,12 @@ function reduceEvent(
   if (e.name === 'sfx') {
     sfx.push(resolve(String(e.args[0]))) // 一次性音效：瞬时收集，不进 host
     return { log, host, producedLine: false }
+  }
+  if (e.name === 'img') {
+    // 插图是正文流里的一条**内容行**：producedLine 让 step 在此返回，line 模式停下等点击、
+    // flow 模式照常自动流过——与 narration 同等待遇。路径非法则整条跳过、不算产出行。
+    const entry = imageEntry(e.args, resolve, warnings)
+    return entry === null ? { log, host, producedLine: false } : { log: [...log, entry], host, producedLine: true }
   }
   if (e.name === 'clear') return { log: [], host, producedLine: false } // 清屏：清空已显示正文；bg/bgm 不动
   // 演出停顿：不改任何状态，只把**原始**参数交给调用方（step 据此中断并归一，advance 直接吞——
@@ -107,9 +152,10 @@ export function advance(story: Story, prev: PlayState, resolve: ResolveAsset): A
   let log = prev.log
   let host = prev.host
   const sfx: string[] = []
+  const warnings: string[] = [] // 重放路径吞掉：editor 每次编辑重算都走这里，不该为同一处笔误反复刷屏
   try {
     while (story.canContinue) {
-      const r = reduceEvent(story.continue(), log, host, sfx, resolve)
+      const r = reduceEvent(story.continue(), log, host, sfx, resolve, warnings)
       log = r.log
       host = r.host
     }
@@ -130,11 +176,13 @@ export function step(story: Story, prev: PlayState, resolve: ResolveAsset): Adva
   let log = prev.log
   let host = prev.host
   const sfx: string[] = []
+  const warnings: string[] = [] // 现场播放路径：作者此刻就该看到（下面逐条打印）
   try {
     while (story.canContinue) {
-      const r = reduceEvent(story.continue(), log, host, sfx, resolve)
+      const r = reduceEvent(story.continue(), log, host, sfx, resolve, warnings)
       log = r.log
       host = r.host
+      for (const w of warnings.splice(0)) console.warn(w)
       if (r.sleep !== undefined) {
         // 撞上 @sleep：在此中断排空，把时长交给宿主（等满后再 step 续）。状态与产出一行时同形：
         // 尚未抵暂停点，故 choices=[]、未结束——选项 / 结束都要等停顿满了才浮现。

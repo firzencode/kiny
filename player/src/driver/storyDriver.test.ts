@@ -285,6 +285,107 @@ describe('@sleep 演出停顿', () => {
   })
 })
 
+describe('@img 正文插图', () => {
+  const KIN_IMG = `她推开门。
+@img("assets/tavern.jpg", "昏暗的酒馆内景", "wide")
+炉火还没灭。
+-> END
+`
+  /** 取第 n 条 image log 项。 */
+  const images = (s: PlayState) => s.log.filter((e) => e.kind === 'image')
+
+  it('产出 image log 项，src 已 resolve、cls 存原始类名（前缀留给渲染层）', () => {
+    const r = advance(makeStory(KIN_IMG), initialState, RESOLVE)
+    expect(images(r.state)).toEqual([
+      { kind: 'image', src: 'demo/assets/assets/tavern.jpg', alt: '昏暗的酒馆内景', cls: 'wide' },
+    ])
+  })
+
+  it('单参：无 alt、无 cls（装饰性图片，渲染层给 alt=""）', () => {
+    const r = advance(makeStory('@img("a.png")\n-> END\n'), initialState, RESOLVE)
+    expect(images(r.state)).toEqual([{ kind: 'image', src: 'demo/assets/a.png' }])
+  })
+
+  it('插图是一条内容行：step 在此返回（line 模式据此停下等点击）', () => {
+    const story = makeStory(KIN_IMG)
+    const s1 = step(story, initialState, RESOLVE)
+    expect(plainText(logSpans(s1.state, 0))).toBe('她推开门。')
+    expect(images(s1.state)).toHaveLength(0) // 尚未到插图
+
+    const s2 = step(story, s1.state, RESOLVE) // 插图独占一步
+    expect(images(s2.state)).toHaveLength(1)
+    expect(s2.state.log.filter((e) => e.kind === 'narration')).toHaveLength(1) // 没顺带把下一行也出了
+
+    const s3 = step(story, s2.state, RESOLVE)
+    expect(plainText(logSpans(s3.state, 1))).toBe('炉火还没灭。')
+  })
+
+  it('不变量：连续 step 累积态 == 一次 advance 排空', () => {
+    const stepped = (() => {
+      const story = makeStory(KIN_IMG)
+      let s = initialState
+      for (let i = 0; i < 10 && !s.ended; i++) s = step(story, s, RESOLVE).state
+      return s
+    })()
+    const drained = advance(makeStory(KIN_IMG), initialState, RESOLVE).state
+    expect(stepped.log).toEqual(drained.log)
+  })
+
+  it('@clear 把插图连同正文一并清除（无特判）', () => {
+    const r = advance(makeStory('@img("a.png")\n一行。\n@clear()\n之后。\n-> END\n'), initialState, RESOLVE)
+    expect(images(r.state)).toHaveLength(0)
+  })
+
+  it('路径首尾空白被裁掉再 resolve（否则解析出带空格的 URL 而 404）', () => {
+    const r = advance(makeStory('~ let pic = "  a.png  "\n@img(pic)\n-> END\n'), initialState, RESOLVE)
+    expect(images(r.state)).toEqual([{ kind: 'image', src: 'demo/assets/a.png' }])
+  })
+
+  it('动态路径参数：变量求值后照常产出', () => {
+    const src = '~ let pic = "assets/dyn.png"\n@img(pic)\n-> END\n'
+    const r = advance(makeStory(src), initialState, RESOLVE)
+    expect(images(r.state)).toEqual([{ kind: 'image', src: 'demo/assets/assets/dyn.png' }])
+  })
+
+  it('运行期路径非字符串 / 空串 → 整条跳过（不渲染半截）', () => {
+    const r1 = advance(makeStory('~ let pic = 42\n@img(pic)\n一行。\n-> END\n'), initialState, RESOLVE)
+    expect(images(r1.state)).toHaveLength(0)
+    const r2 = advance(makeStory('~ let pic = ""\n@img(pic)\n一行。\n-> END\n'), initialState, RESOLVE)
+    expect(images(r2.state)).toHaveLength(0)
+  })
+
+  it('运行期跳过的插图不算产出行：step 直接往下出正文，并 warn 给作者', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const story = makeStory('~ let pic = 42\n@img(pic)\n一行。\n-> END\n')
+    const s1 = step(story, initialState, RESOLVE)
+    expect(plainText(logSpans(s1.state, 0))).toBe('一行。') // 没卡在废插图上
+    expect(warn).toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
+  it('advance（重放 / editor 编辑重算）吞掉 warn：同一处笔误不随每次重算刷屏', () => {
+    // 与 @sleep 同立场——重放路径不该为作者已经看过的诊断反复刷控制台。
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    advance(makeStory('~ let pic = 42\n@img(pic)\n一行。\n-> END\n'), initialState, RESOLVE)
+    expect(warn).not.toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
+  it('运行期类名非法 → 忽略类名，图照常渲染（step 路径 warn）', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const story = makeStory('~ let c = "two words"\n@img("a.png", "alt", c)\n-> END\n')
+    const s1 = step(story, initialState, RESOLVE)
+    expect(images(s1.state)).toEqual([{ kind: 'image', src: 'demo/assets/a.png', alt: 'alt' }])
+    expect(warn).toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
+  it('运行期替代文字非字符串 / 空串 → 按缺省（不落 alt 键）', () => {
+    const r = advance(makeStory('~ let a = 42\n@img("a.png", a)\n-> END\n'), initialState, RESOLVE)
+    expect(images(r.state)).toEqual([{ kind: 'image', src: 'demo/assets/a.png' }])
+  })
+})
+
 describe('choose', () => {
   it('选第一个分支后推进到结束、追加 end 标记', () => {
     const story = makeStory(KIN)

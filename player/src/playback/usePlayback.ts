@@ -3,6 +3,7 @@ import type { Story } from '@kiny/engine'
 import { initialState, step, chooseStep, submitInputStep, type PlayState } from '../driver/storyDriver'
 import type { ResolveAsset } from '../host/commands'
 import type { RevealBinding } from '../components/StoryLog'
+import type { AwaitKind } from '../components/RevealingLine'
 
 export interface Playback {
   state: PlayState
@@ -40,9 +41,9 @@ export function usePlayback(story: Story, resolve: ResolveAsset, initial: PlaySt
   const storyRef = useRef<Story>(story)
   const stateRef = useRef<PlayState>(initial)
   const revealingRef = useRef(false)
-  // 最新一行正停在句中 `<pause>` 标记处（RevealingLine 上报）。点击门控必须看它——
+  // 最新一行正停在句中 `<pause>` 标记处的档位（RevealingLine 上报）。点击门控必须看它——
   // 读档续读时 step 直接落回存档的暂停点，`revealingRef` 为 false，但那一行仍在分段揭示。
-  const awaitingPauseRef = useRef(false)
+  const awaitingPauseRef = useRef<AwaitKind>(null)
   const lastStoryRef = useRef<Story | null>(null)
   // @sleep 演出停顿：未决定时器 + 「正在等」标记（等待期间点击一律忽略——停顿是作者钦定的，不可跳过）
   // + 到点时刻（StrictMode 模拟卸载后按剩余时长重挂，见下方 reset effect）。
@@ -176,7 +177,10 @@ export function usePlayback(story: Story, resolve: ResolveAsset, initial: PlaySt
     // @sleep 是作者钦定的演出停顿：等待期间点击**完全无效**——既不提前续行，
     // 也不能落到下面 line 模式的 doStep 分支（那会把停顿一键跳过）。
     if (waitingSleepRef.current) return
-    // 打字中 → 当前段立显；停在句中 `<pause>` → 续下一段。两者都由 skipToken 递增驱动，
+    // 毫秒档 `<pause=毫秒>` 等待中：与 @sleep 同理，点击完全无效——**必须在此拦下**，
+    // 否则会掉进下面 line 模式的 doStep 分支，把整行连同停顿一键跳过。
+    if (awaitingPauseRef.current === 'timed') return
+    // 打字中 → 当前段立显；停在句中点击档 `<pause>` → 续下一段。两者都由 skipToken 递增驱动，
     // 由 RevealingLine 分档处置。`awaitingPauseRef` 不能省：读档续读时该行仍在分段揭示，
     // 但 `revealingRef` 已因「已抵暂停点」为 false，只看它会让后半句永远出不来。
     if (revealingRef.current || awaitingPauseRef.current) {
@@ -187,11 +191,12 @@ export function usePlayback(story: Story, resolve: ResolveAsset, initial: PlaySt
     if (!atPause(cur) && cur.host.stepMode === 'line') doStep() // 已显示完、逐行模式 → 下一行
   }, [doStep])
 
-  // 句中 `<pause>` 停在标记处 = 另一种「等你点击」——与 line 模式整行完等点击共用推进提示三角。
+  // 句中点击档 `<pause>` 停在标记处 = 另一种「等你点击」——与 line 模式整行完等点击共用推进提示三角。
+  // 毫秒档只参与点击门控、**不亮三角**（没在等读者，与 @sleep 等待期间一致）。
   // 段间等待是 RevealingLine 的内部态，这里只把它并进 awaitingClick 做呈现 + 参与点击门控。
-  const onAwaitingPause = useCallback((waiting: boolean) => {
+  const onAwaitingPause = useCallback((waiting: AwaitKind) => {
     awaitingPauseRef.current = waiting
-    setAwaitingClick(waiting)
+    setAwaitingClick(waiting === 'click')
   }, [])
 
   const reveal: RevealBinding = {

@@ -14,7 +14,7 @@ import { getKinContext } from './context'
 
 /** §11.1 内置命令名（engine COMMAND_NAMES 的 UI 副本；校验仍以 engine 为准）。 */
 export const COMMAND_NAMES = [
-  'bg_show', 'bg_hide', 'bgm_play', 'bgm_pause', 'bgm_stop', 'sfx',
+  'bg_show', 'bg_hide', 'bgm_play', 'bgm_pause', 'bgm_stop', 'sfx', 'img',
   'clear', 'step_mode', 'text_speed', 'text_fade', 'sleep', 'panel', 'input',
 ]
 

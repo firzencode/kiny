@@ -1,4 +1,4 @@
-import type { InlineSegment, InlineStyle, RichTextIssue } from './ast'
+import type { InlineSegment, InlineStyle, PauseKind, RichTextIssue } from './ast'
 import { findInterpEnd } from './interp'
 import { sameStyle } from './style'
 import { ParseError } from './errors'
@@ -65,6 +65,22 @@ function parseSize(v: string): number | null {
   return Number.isFinite(n) && n > 0 ? n : null
 }
 
+/**
+ * `<pause=毫秒>` 取值上限：`setTimeout` 的延时被钳成有符号 32 位整数，超出会溢出成「立刻触发」。
+ * 与其让超大值静默变成「根本不停顿」，不如在校验期就报错——作者在 editor 里看得见红线。
+ */
+const MAX_PAUSE_MS = 2_147_483_647
+
+/**
+ * `<pause=毫秒>` 取值合法性：**正整数**毫秒，上限 `MAX_PAUSE_MS`（约 24.8 天，够任何演出用）。
+ * 拒绝 0 / 负数 / 小数 / 非数字 / 空值——正则先卡住形态，避免 `Number(' 5 ')`、`Number('1e3')` 之类的宽松解析。
+ */
+function parsePauseMs(v: string): number | null {
+  if (!/^\d+$/.test(v)) return null
+  const n = Number(v)
+  return Number.isSafeInteger(n) && n > 0 && n <= MAX_PAUSE_MS ? n : null
+}
+
 /** 由当前标签栈算出活动样式快照；无任何样式时返回 undefined（段不带 style 字段）。 */
 function activeStyle(stack: TagFrame[]): InlineStyle | undefined {
   const style: InlineStyle = {}
@@ -104,7 +120,7 @@ function matchTag(
   | { len: number; kind: 'open'; tag: string; rawValue?: string }
   | { len: number; kind: 'close'; tag: string }
   | { len: number; kind: 'break' }
-  | { len: number; kind: 'pause' }
+  | { len: number; kind: 'pause'; value: PauseKind }
   | { len: number; kind: 'bad-pause'; rawValue: string }
   | null {
   const close = text.indexOf('>', i + 1)
@@ -113,9 +129,14 @@ function matchTag(
   const len = close - i + 1
   if (inner === '') return null // `<>` 交给 glue 逻辑，不是标签
   if (inner === 'br' || inner === 'br/') return { len, kind: 'break' }
-  if (inner === 'pause' || inner === 'pause/') return { len, kind: 'pause' } // 自闭合写法与 <br/> 一致
-  // `<pause=毫秒>`（定时自动续显）是留给将来的语法位：本期明确报错，而不是当字面文本静默输出。
-  if (inner.startsWith('pause=')) return { len, kind: 'bad-pause', rawValue: inner.slice('pause='.length) }
+  if (inner === 'pause' || inner === 'pause/') return { len, kind: 'pause', value: true } // 点击档；自闭合写法与 <br/> 一致
+  if (inner.startsWith('pause=')) {
+    // 毫秒档 `<pause=毫秒>`；尾随斜杠 `<pause=500/>` 等价（与 `<pause/>` / `<br/>` 对称）。
+    const raw = inner.slice('pause='.length)
+    const ms = parsePauseMs(raw.endsWith('/') ? raw.slice(0, -1) : raw)
+    // 报错时回显**作者原样写的**取值（含尾随斜杠），否则消息与源码对不上。
+    return ms === null ? { len, kind: 'bad-pause', rawValue: raw } : { len, kind: 'pause', value: ms }
+  }
   if (inner[0] === '/') {
     const name = inner.slice(1)
     if (VALUE_TAGS.has(name) || name in FLAG_TAGS) return { len, kind: 'close', tag: name }
@@ -148,13 +169,14 @@ export function scanInline(text: string, startId: number, line: number, path: st
   const n = text.length
 
   // `<pause>` 停顿标记：作用于其**后首个非空段**（空插值 / 空字面段不消费它，自动顺延）。
-  // 扫完仍挂着 = 行尾标记，直接忽略（行尾本就是行边界）。连续多个标记天然合并为一次。
-  let pausePending = false
+  // 扫完仍挂着 = 行尾标记，直接忽略（行尾本就是行边界）。连续多个标记合并为一次停顿，
+  // 档位取**最后一个**（后写的覆盖先写的，与「一处停顿」的直觉一致）。
+  let pausePending: PauseKind | null = null
   /** 把待挂的停顿标记打到刚产出的段上（并清标志）。 */
   const takePause = <T extends InlineSegment>(seg: T): T => {
-    if (pausePending) {
-      seg.pauseBefore = true
-      pausePending = false
+    if (pausePending !== null) {
+      seg.pauseBefore = pausePending
+      pausePending = null
     }
     return seg
   }
@@ -165,7 +187,7 @@ export function scanInline(text: string, startId: number, line: number, path: st
     // 标签边界处样式未变时（错配 / 非法值忽略），与前一同样式 literal 归并，保持纯文本恒为单段。
     // 但**不得跨停顿标记归并**——标记强制在此断开段。
     const prev = segments[segments.length - 1]
-    if (!pausePending && prev && prev.kind === 'literal' && sameStyle(prev.style, style)) {
+    if (pausePending === null && prev && prev.kind === 'literal' && sameStyle(prev.style, style)) {
       prev.value += literal
     } else {
       segments.push(takePause(style ? { kind: 'literal', value: literal, style } : { kind: 'literal', value: literal }))
@@ -220,9 +242,16 @@ export function scanInline(text: string, startId: number, line: number, path: st
       if (m.kind === 'break') {
         segments.push(takePause({ kind: 'break' }))
       } else if (m.kind === 'pause') {
-        pausePending = true // 作用于后续首个非空段；行尾则自然作废
+        pausePending = m.value // 作用于后续首个非空段；行尾则自然作废。相邻标记后者覆盖前者
       } else if (m.kind === 'bad-pause') {
-        issues.push({ code: 'rich-bad-pause', message: `<pause> 不接受取值：「${m.rawValue}」`, line })
+        // 非法标记不产生边界，且**作废前一个待挂标记**——`<pause><pause=abc>` 与
+        // 「档位取最后一个」一致地以最后一个为准，只不过最后一个是废的。
+        pausePending = null
+        issues.push({
+          code: 'rich-bad-pause',
+          message: `非法停顿时长：「${m.rawValue}」（<pause=毫秒> 只接受正整数毫秒）`,
+          line,
+        })
       } else if (m.kind === 'open') {
         if (m.tag === 'color') {
           const ok = validColor(m.rawValue!)

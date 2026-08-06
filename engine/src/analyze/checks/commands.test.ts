@@ -122,6 +122,48 @@ describe('checkCommands', () => {
     })
   })
 
+  describe('@img 形态特判', () => {
+    it('一 / 二 / 三参：零诊断', () => {
+      expect(run('=== A ===\n@img("assets/t.jpg")\n-> END')).toEqual([])
+      expect(run('=== A ===\n@img("assets/t.jpg", "昏暗的酒馆内景")\n-> END')).toEqual([])
+      expect(run('=== A ===\n@img("assets/t.jpg", "酒馆", "wide")\n-> END')).toEqual([])
+    })
+    it('参数可为表达式（运行期求值，不静态拦截）', () => {
+      expect(run('=== A ===\n@img(currentIllustration)\n-> END')).toEqual([])
+      expect(run('=== A ===\n@img("assets/" + name, altText, clsName)\n-> END')).toEqual([])
+    })
+    it('arity 0 或 4 → img-arity', () => {
+      expect(run('=== A ===\n@img()\n-> END').map((d) => d.code)).toContain('img-arity')
+      expect(run('=== A ===\n@img("a", "b", "c", "d")\n-> END').map((d) => d.code)).toContain('img-arity')
+    })
+    it('路径为空串 / 空白串 → img-src', () => {
+      expect(run('=== A ===\n@img("")\n-> END').map((d) => d.code)).toContain('img-src')
+      expect(run('=== A ===\n@img("   ")\n-> END').map((d) => d.code)).toContain('img-src')
+    })
+    it('路径写成数字 / 布尔字面量 → img-src', () => {
+      expect(run('=== A ===\n@img(42)\n-> END').map((d) => d.code)).toContain('img-src')
+      expect(run('=== A ===\n@img(true)\n-> END').map((d) => d.code)).toContain('img-src')
+    })
+    it('替代文字写成数字 / 布尔字面量 → img-alt', () => {
+      expect(run('=== A ===\n@img("a.png", 42)\n-> END').map((d) => d.code)).toContain('img-alt')
+      expect(run('=== A ===\n@img("a.png", null)\n-> END').map((d) => d.code)).toContain('img-alt')
+    })
+    it('类名不合法（含空格 / 点 / 空串）→ img-class', () => {
+      expect(run('=== A ===\n@img("a.png", "alt", "two words")\n-> END').map((d) => d.code)).toContain('img-class')
+      expect(run('=== A ===\n@img("a.png", "alt", "has.dot")\n-> END').map((d) => d.code)).toContain('img-class')
+      expect(run('=== A ===\n@img("a.png", "alt", "")\n-> END').map((d) => d.code)).toContain('img-class')
+    })
+    it('类名写成数字字面量 → img-class', () => {
+      expect(run('=== A ===\n@img("a.png", "alt", 42)\n-> END').map((d) => d.code)).toContain('img-class')
+    })
+    it('中文 / 连字符类名合法（与行内 <class=名> 同规则）', () => {
+      expect(run('=== A ===\n@img("a.png", "alt", "插图-大")\n-> END')).toEqual([])
+    })
+    it('@img 不报 unknown-command', () => {
+      expect(run('=== A ===\n@img("a.png")\n-> END').some((d) => d.code === 'unknown-command')).toBe(false)
+    })
+  })
+
   describe('@input 集成（经 analyze：变量存在性由 checkVariables 覆盖）', () => {
     const diags = (src: string) => analyze([parse(src, 'f.kin')]).diagnostics
     it('已声明变量 → 无 error', () => {

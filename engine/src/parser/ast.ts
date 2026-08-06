@@ -22,13 +22,16 @@ export interface InlineStyle {
  * 无标签的纯文本不带 `style` 字段——向后兼容既有故事。
  */
 /**
- * `pauseBefore` = 该段前有一处 `<pause>` 停顿标记（句中点击续显）：呈现层揭示到此处停住、等读者点击。
+ * `pauseBefore` = 该段前有一处 `<pause>` 停顿标记，两档：`true` = 点击档（等读者点击续显），
+ * 正整数 = 毫秒档（`<pause=毫秒>`，停满时长自动续显）。
  * 纯呈现层的段边界——不是引擎暂停点，整行仍是一个 text 事件、一条 log。
  */
+export type PauseKind = true | number
+
 export type InlineSegment =
-  | { kind: 'literal'; value: string; style?: InlineStyle; pauseBefore?: true }
-  | { kind: 'interp'; code: string; id: number; style?: InlineStyle; pauseBefore?: true }
-  | { kind: 'break'; pauseBefore?: true }
+  | { kind: 'literal'; value: string; style?: InlineStyle; pauseBefore?: PauseKind }
+  | { kind: 'interp'; code: string; id: number; style?: InlineStyle; pauseBefore?: PauseKind }
+  | { kind: 'break'; pauseBefore?: PauseKind }
 
 /** 一处内联富文本问题：未闭合 / 错配标签、非法颜色 / 字号 / 字体 / 类名值。由 scanInline 收集、analyze 转诊断。 */
 export interface RichTextIssue {

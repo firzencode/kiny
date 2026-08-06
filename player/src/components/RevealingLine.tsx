@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState, useCallback, type CSSProperties } from 'react'
-import type { RichSpan } from '@kiny/engine'
+import type { PauseKind, RichSpan } from '@kiny/engine'
 import { RichText } from './RichText'
 import { spanStyle } from './spanStyle'
 import { spanClassName } from './spanClasses'
@@ -10,13 +10,19 @@ import { spanClassName } from './spanClasses'
  * 全字出完后还有**淡入拖尾期**（末字淡完才算整行完成）：期间保持逐字 span 让动画播完，
  * 之后才切换连贯 RichText 并触发 `onComplete`——否则尾部仍在淡入的字会瞬间跳到全不透明。
  * 无障碍：`prefers-reduced-motion` 或 speed<=0 → 整行瞬显（覆盖作者设置）；但**分段停顿保留**
- * （每段瞬显、标记处仍等点击）——停顿是叙事节奏，不是动效。
- * 句中 `<pause>` 标记把一行切成多段：揭示到边界即停、等读者点击续下一段（`skipToken` 递增）。
- * 点击三档：段中打字 → 当前段立显并停在标记（**不穿透**停顿点）；停在标记 → 揭示下一段；
+ * （每段瞬显、标记处仍等待）——停顿是叙事节奏，不是动效。
+ * 句中 `<pause>` 标记把一行切成多段，两档：
+ * - **点击档**（`<pause>`）：揭示到边界即停、等读者点击续下一段（`skipToken` 递增）。
+ * - **毫秒档**（`<pause=毫秒>`）：起定时器，停满时长自动续下一段；等待期间点击**完全无效**
+ *   （既不提前续段也不整行立显），与 `@sleep` 同一哲学。
+ * 点击三档（仅点击档参与）：段中打字 → 当前段立显并停在标记（**不穿透**停顿点）；停在标记 → 揭示下一段；
  * 整行揭示完 → 由 `onComplete` 交回宿主走 line / flow 原逻辑。
- * `onComplete` 只在**整行**揭示完成时触发一次（段间停顿不触发），供 usePlayback 决定自动续 / 等点击。
- * `onAwaitingPause` 上报「是否正停在句中标记处」，宿主据此亮推进提示三角。
+ * `onComplete` 只在**整行**揭示完成时触发一次（段间停顿两档皆不触发），供 usePlayback 决定自动续 / 等点击。
+ * `onAwaitingPause` 上报当前等待档位（`'click'` / `'timed'` / `null`）：宿主据此亮推进提示三角
+ * （只有 `'click'` 亮）并做点击门控（两档都拦下点击，`'timed'` 拦下后丢弃）。
  */
+export type AwaitKind = 'click' | 'timed' | null
+
 export function RevealingLine({
   spans,
   speed,
@@ -30,7 +36,7 @@ export function RevealingLine({
   fade: number
   skipToken?: number
   onComplete?: () => void
-  onAwaitingPause?: (waiting: boolean) => void
+  onAwaitingPause?: (waiting: AwaitKind) => void
 }) {
   const cells = useMemo(() => toCells(spans), [spans])
   const total = cells.length
@@ -44,8 +50,8 @@ export function RevealingLine({
   const [count, setCount] = useState(fastWhole ? total : 0)
   // 已定格：全字出完**且**淡入拖尾播完（或被 skip/瞬显截断）→ 切连贯 RichText。
   const [settled, setSettled] = useState(fastWhole)
-  // 正停在句中 `<pause>` 边界，等读者点击续下一段。
-  const [awaiting, setAwaiting] = useState(false)
+  // 正停在句中 `<pause>` 边界：'click' 等读者点击，'timed' 等定时器满，null 未在等待。
+  const [awaiting, setAwaiting] = useState<AwaitKind>(null)
 
   const onCompleteRef = useRef(onComplete)
   onCompleteRef.current = onComplete
@@ -60,7 +66,7 @@ export function RevealingLine({
   boundsRef.current = bounds
   const countRef = useRef(fastWhole ? total : 0)
   const settledRef = useRef(fastWhole)
-  const awaitingRef = useRef(false)
+  const awaitingRef = useRef<AwaitKind>(null)
   const instantRef = useRef(instant)
   instantRef.current = instant
   const speedRef = useRef(speed)
@@ -69,10 +75,13 @@ export function RevealingLine({
   fadeRef.current = fade
   /** 当前段的终点（下一处段边界，或整行末）。 */
   const limitRef = useRef(total)
+  /** 当前段终点处那个停顿标记的档位（`limitRef` 已是整行末则为 null）。 */
+  const limitPauseRef = useRef<PauseKind | null>(null)
   // onComplete 按「当前 cells 身份」只触发一次——StrictMode 双跑 effect / 重复 finish 都不会重复触发。
   const firedRef = useRef<Cell[] | null>(null)
   const timerRef = useRef<number | null>(null) // 逐字 interval
   const tailRef = useRef<number | null>(null) // 淡入拖尾 timeout
+  const pauseTimerRef = useRef<number | null>(null) // 毫秒档停顿 timeout
   const clearTimers = () => {
     if (timerRef.current != null) {
       clearInterval(timerRef.current)
@@ -82,6 +91,10 @@ export function RevealingLine({
       clearTimeout(tailRef.current)
       tailRef.current = null
     }
+    if (pauseTimerRef.current != null) {
+      clearTimeout(pauseTimerRef.current)
+      pauseTimerRef.current = null
+    }
   }
   const fireComplete = useCallback(() => {
     if (firedRef.current !== cellsRef.current) {
@@ -89,29 +102,67 @@ export function RevealingLine({
       onCompleteRef.current?.()
     }
   }, [])
-  const setAwaitingBoth = useCallback((v: boolean) => {
+  const setAwaitingBoth = useCallback((v: AwaitKind) => {
     awaitingRef.current = v
     setAwaiting(v)
+  }, [])
+  // 上报去重：`'unset'` = 尚未上报过（null 已是合法上报值，不能兼作哨兵）。
+  // ⚠ 上报既开关三角、又是三个宿主的点击门控真相源，清空的**时机与顺序**是不变量：
+  // 不报 → 宿主的门控 ref 永久残留、点击被吞；迟报 → 覆盖掉 onComplete 刚设上的等待态。
+  // 故 `finish()` 内必须先同步报 null 再 fireComplete（另见那里的说明）。
+  const lastReportedRef = useRef<AwaitKind | 'unset'>('unset')
+  const reportAwait = useCallback((v: AwaitKind) => {
+    if (lastReportedRef.current === v) return
+    lastReportedRef.current = v
+    onAwaitingPauseRef.current?.(v)
   }, [])
   const setCountBoth = useCallback((n: number) => {
     countRef.current = n
     setCount(n)
   }, [])
-  /** 从 `from` 之后的第一处段边界；没有则整行末。 */
-  const nextLimit = useCallback((from: number) => {
-    for (const b of boundsRef.current) if (b > from) return b
-    return totalRef.current
+  /** 从 `from` 之后的第一处段边界（含其档位）；没有则整行末（档位 null）。 */
+  const nextLimit = useCallback((from: number): { at: number; pause: PauseKind | null } => {
+    for (const b of boundsRef.current) if (b.at > from) return { at: b.at, pause: b.pause }
+    return { at: totalRef.current, pause: null }
   }, [])
+  /** 把段终点推进到 `from` 之后的下一处边界（同时记下该边界档位）。 */
+  const advanceLimit = useCallback((from: number) => {
+    const r = nextLimit(from)
+    limitRef.current = r.at
+    limitPauseRef.current = r.pause
+  }, [nextLimit])
   // 整行定格：跳过打字 / 瞬显——不等拖尾。
   const finish = useCallback(() => {
     clearTimers()
     setCountBoth(cellsRef.current.length)
-    setAwaitingBoth(false)
+    setAwaitingBoth(null)
+    // **先同步清等待态、再 fireComplete**：等待态是宿主的点击门控真相源，留着 'click' / 'timed'
+    // 会让整行完成后的点击被永久吞掉（line 模式再也出不来下一行）。而顺序反过来（事后由
+    // effect 补报）又会把 onComplete 刚设上的「整行完等点击」覆盖掉——故此处同步、且在前。
+    reportAwait(null)
     settledRef.current = true
     setSettled(true)
     fireComplete()
-  }, [fireComplete, setAwaitingBoth, setCountBoth])
-  /** 当前段揭示完：整行末 → 定格（可带淡入拖尾）；句中边界 → 停下等点击。 */
+  }, [fireComplete, reportAwait, setAwaitingBoth, setCountBoth])
+  // 续段与「进入等待」互相引用（等满 → 续段 → 揭示完 → 再进入等待），用 ref 断开 useCallback 循环依赖。
+  const continueRef = useRef<() => void>(() => {})
+  /**
+   * 抵达句中段边界：点击档置等待态（宿主亮三角）；毫秒档起定时器自动续段、**不置**点击等待
+   * ——这不是「等你点击」态，三角不亮（与 `@sleep` 等待期间一致）。
+   */
+  const enterPauseWait = useCallback(() => {
+    const kind = limitPauseRef.current
+    if (typeof kind === 'number') {
+      setAwaitingBoth('timed')
+      pauseTimerRef.current = window.setTimeout(() => {
+        pauseTimerRef.current = null
+        continueRef.current()
+      }, kind)
+      return
+    }
+    setAwaitingBoth('click')
+  }, [setAwaitingBoth])
+  /** 当前段揭示完：整行末 → 定格（可带淡入拖尾）；句中边界 → 按档位等待。 */
   const finishSegment = useCallback((withTail: boolean) => {
     clearTimers()
     if (limitRef.current >= totalRef.current) {
@@ -119,8 +170,8 @@ export function RevealingLine({
       else finish()
       return
     }
-    setAwaitingBoth(true)
-  }, [finish, setAwaitingBoth])
+    enterPauseWait()
+  }, [finish, enterPauseWait])
   /** 揭示当前段：瞬显模式直接跳到段末，否则起逐字 interval。 */
   const revealSegment = useCallback(() => {
     if (instantRef.current) {
@@ -134,6 +185,13 @@ export function RevealingLine({
       if (n >= limitRef.current) finishSegment(true)
     }, 1000 / speedRef.current)
   }, [finishSegment, setCountBoth])
+  /** 离开等待态、推进到下一段并揭示（点击档由点击驱动，毫秒档由定时器驱动）。 */
+  const continueSegment = useCallback(() => {
+    setAwaitingBoth(null)
+    advanceLimit(countRef.current)
+    revealSegment()
+  }, [advanceLimit, revealSegment, setAwaitingBoth])
+  continueRef.current = continueSegment
 
   // skip 判定基线（声明须先于重置 effect，见下）。
   const lastSkip = useRef(skipToken)
@@ -148,12 +206,12 @@ export function RevealingLine({
     settledRef.current = false
     setSettled(false)
     setCountBoth(0)
-    setAwaitingBoth(false)
-    limitRef.current = nextLimit(-1) // 行首标记 → limit 0 → 先等一次点击再出文字
+    setAwaitingBoth(null)
+    advanceLimit(-1) // 行首标记 → limit 0 → 先等（点击 / 满时长）再出文字
     // `total > 0` 是必要条件：空 spans 的行（glue 拼接出的空 text 事件）limit 也是 0，
     // 但它没有行首标记、也没有内容——落进等待分支会让 onComplete 永不触发，flow 模式就此停住。
     if (total > 0 && limitRef.current <= 0) {
-      setAwaitingBoth(true)
+      enterPauseWait()
       return clearTimers
     }
     revealSegment()
@@ -161,29 +219,21 @@ export function RevealingLine({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cells, speed, instant, total, fade])
 
-  // 上报「停在句中标记」给宿主（亮 / 灭推进提示三角）。
-  // 只在**值变化**时上报，且挂载时的初始 false 不报——否则会覆盖宿主刚因「整行揭示完」
-  // 设上的等待态（瞬显模式下整行在重置 effect 里同步完成，本 effect 紧随其后跑）。
-  const lastReportedRef = useRef<boolean | null>(null)
+  // 上报「停在句中标记」给宿主（据此亮 / 灭推进提示三角 + 做点击门控）。
+  // 只在**值变化**时上报，且挂载时的初始 null 不报——否则会覆盖宿主刚因「整行揭示完」设上的等待态。
+  // 「整行定格」这一路的清空由 `finish()` 同步先报（见上），本 effect 只负责「进入等待」方向。
   useEffect(() => {
-    if (lastReportedRef.current === awaiting) return
-    if (lastReportedRef.current === null && !awaiting) {
-      lastReportedRef.current = false
+    if (lastReportedRef.current === 'unset' && awaiting === null) {
+      lastReportedRef.current = null
       return
     }
-    // 整行已定格 → 等待与否交回 `onComplete`（宿主的 line / flow 逻辑）处置。
-    // 瞬显模式下「续段」与「整行完成」同批发生：onComplete 先把 line 模式的等待态设上，
-    // 本 effect 随后才看到 awaiting 由 true 变 false——补报会把那个等待态覆盖掉、三角该亮不亮。
-    if (settledRef.current && !awaiting) {
-      lastReportedRef.current = false
-      return
-    }
-    lastReportedRef.current = awaiting
-    onAwaitingPauseRef.current?.(awaiting)
+    reportAwait(awaiting)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [awaiting])
-  // 卸载时若还停在标记上，补报一次 false，免三角残留到下一行。
+  // 卸载时若还停在标记上，补报一次 null，免三角 / 点击门控残留到下一行。
   useEffect(() => () => {
-    if (lastReportedRef.current === true) onAwaitingPauseRef.current?.(false)
+    const last = lastReportedRef.current
+    if (last !== 'unset' && last !== null) onAwaitingPauseRef.current?.(null)
   }, [])
 
   // 点击三档。按「token 值变化」判定而非「effect 首跑」——StrictMode 开发态双跑 effect 时
@@ -192,11 +242,10 @@ export function RevealingLine({
     if (skipToken === lastSkip.current) return
     lastSkip.current = skipToken
     if (settledRef.current) return // ③ 整行已完：交回宿主（line 出下一行 / flow 已自动续）
-    if (awaitingRef.current) {
-      // ② 停在标记 → 揭示下一段
-      setAwaitingBoth(false)
-      limitRef.current = nextLimit(countRef.current)
-      revealSegment()
+    // 毫秒档等待中：点击**完全无效**——既不提前续段，也不整行立显（停顿是作者钦定的演出拍点）。
+    if (awaitingRef.current === 'timed') return
+    if (awaitingRef.current === 'click') {
+      continueSegment() // ② 停在点击档标记 → 揭示下一段
       return
     }
     // ① 段中打字 → 当前段立显，**停在标记不穿透**（停顿是作者钦定的演出拍点）
@@ -237,8 +286,8 @@ export function RevealingLine({
 }
 
 type Cell =
-  | { ch: string; style: CSSProperties; cls?: string; pause?: true; br?: false }
-  | { br: true; pause?: true }
+  | { ch: string; style: CSSProperties; cls?: string; pause?: PauseKind; br?: false }
+  | { br: true; pause?: PauseKind }
 
 /** 把逐字单元按「连续同作品 class」分组（换行单独成组，class 为 undefined）。 */
 function groupByClass(cells: Cell[]): { cls?: string; items: { cell: Cell; i: number }[] }[] {
@@ -254,13 +303,13 @@ function groupByClass(cells: Cell[]): { cls?: string; items: { cell: Cell; i: nu
 
 /**
  * 把富文本 spans 拆成逐字单元（含换行标记），每字携带其 span 的样式快照 + 作品 class。
- * `<pause>` 停顿标记落到该 span **首个**单元的 `pause` 上，成为分段揭示的段边界。
+ * `<pause>` 停顿标记（连同档位）落到该 span **首个**单元的 `pause` 上，成为分段揭示的段边界。
  */
 function toCells(spans: RichSpan[]): Cell[] {
   const cells: Cell[] = []
   for (const s of spans) {
     if (!('text' in s)) {
-      cells.push(s.pauseBefore ? { br: true, pause: true } : { br: true }) // { kind: 'break' }
+      cells.push(s.pauseBefore ? { br: true, pause: s.pauseBefore } : { br: true }) // { kind: 'break' }
       continue
     }
     const style = spanStyle(s)
@@ -268,7 +317,7 @@ function toCells(spans: RichSpan[]): Cell[] {
     let first = true
     for (const ch of Array.from(s.text)) {
       const cell: Cell = cls === undefined ? { ch, style } : { ch, style, cls }
-      if (first && s.pauseBefore) cell.pause = true
+      if (first && s.pauseBefore) cell.pause = s.pauseBefore
       first = false
       cells.push(cell)
     }
@@ -276,10 +325,10 @@ function toCells(spans: RichSpan[]): Cell[] {
   return cells
 }
 
-/** 段边界下标（升序）：`cells[i]` 前有 `<pause>`。 */
-function pauseBounds(cells: Cell[]): number[] {
-  const out: number[] = []
-  cells.forEach((c, i) => { if (c.pause) out.push(i) })
+/** 段边界（升序）：`cells[at]` 前有 `<pause>`，`pause` 是该边界的档位（true 点击 / 数字毫秒）。 */
+function pauseBounds(cells: Cell[]): { at: number; pause: PauseKind }[] {
+  const out: { at: number; pause: PauseKind }[] = []
+  cells.forEach((c, i) => { if (c.pause) out.push({ at: i, pause: c.pause }) })
   return out
 }
 

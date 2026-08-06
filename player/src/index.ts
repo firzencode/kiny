@@ -10,6 +10,7 @@ export type { HostState, ResolveAsset, StepMode } from './host/commands'
 export { Player } from './components/Player'
 export { InputBox } from './components/InputBox'
 export type { RevealBinding } from './components/StoryLog'
+export type { AwaitKind } from './components/RevealingLine'
 // 作品前端资源（css 主题 + 字体）：发现 → 编译成一段 css → 注入
 export { discoverAssets, familyOf } from './assets/discover'
 export type { DiscoveredAssets } from './assets/discover'

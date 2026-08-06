@@ -1,8 +1,8 @@
 /**
  * engine 诊断 → CM6 `@codemirror/lint` 诊断的映射。
  *
- * engine 的 `Diagnostic` 只有 `line`（1 起）、无 column（见 docs/memory/cm6-spike-findings.md），
- * 故一条诊断画成**整行** span `[line.from, line.to]`，用 `doc.line(n)` 直取。
+ * engine 的 `Diagnostic` 只有 `line`（1 起）、**无 column**，故一条诊断画成**整行** span
+ * `[line.from, line.to]`，用 `doc.line(n)` 直取——没有列信息就画不出更窄的区间。
  * 越界行号（文件刚被改短等竞态）跳过，不抛。
  */
 import type { Text } from '@codemirror/state'

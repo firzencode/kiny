@@ -12,7 +12,7 @@ export { analyze, resolveStart, openingKnotName } from './analyze'
 export type { Diagnostic, AnalyzeResult, ValidatedProgram } from './analyze'
 // runtime
 export { createStory, restoreStory, Story, RuntimeError, plainText } from './runtime'
-export type { OutputEvent, ChoiceView, StoryOptions, StorySnapshot, RichSpan, PanelSlot } from './runtime'
+export type { OutputEvent, ChoiceView, StoryOptions, StorySnapshot, RichSpan, PauseKind, PanelSlot } from './runtime'
 // project（点名纯子模块，loadProject 已移出 engine）
 export { validateManifest } from './project/manifest'
 export { assembleProject } from './project/assemble'

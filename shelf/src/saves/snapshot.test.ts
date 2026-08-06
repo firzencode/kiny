@@ -47,7 +47,7 @@ describe('captureSave / restoreSave 往返', () => {
 
     const src = assemble()
     const first = advance(src.story, initialState, resolve).state
-    const save = captureSave(src.story, first, 'auto', AUTO_SAVE_ID, 1000)
+    const save = captureSave(src.story, first, 'auto', AUTO_SAVE_ID, 1000, 'book')
 
     const fresh = assemble()
     const restored = restoreSave(fresh.program, save)
@@ -62,9 +62,10 @@ describe('captureSave / restoreSave 往返', () => {
   it('捕获写入 snapshot + play + meta（label/timestamp）', () => {
     const r = assemble()
     const play = advance(r.story, initialState, resolve).state
-    const save = captureSave(r.story, play, 'manual', 'deadbeef', 1234)
+    const save = captureSave(r.story, play, 'manual', 'deadbeef', 1234, 'book')
     expect(save.kind).toBe('manual')
     expect(save.id).toBe('deadbeef')
+    expect(save.storyId).toBe('book') // 复合主键的第一段，须落在记录里
     expect(save.meta.timestamp).toBe(1234)
     expect(save.meta.label).toContain('开场文本')
     expect(save.play).toEqual(play)
@@ -76,7 +77,7 @@ describe('restoreSave 降级', () => {
   it('故事改过（fingerprint 失配）→ 不载入、报 fingerprint-mismatch', () => {
     const r = assemble()
     const play = advance(r.story, initialState, resolve).state
-    const save = captureSave(r.story, play, 'auto', AUTO_SAVE_ID, 0)
+    const save = captureSave(r.story, play, 'auto', AUTO_SAVE_ID, 0, 'book')
     const changed = assemble(KIN + '\n=== 新增 ===\n额外。\n-> END\n')
     const res = restoreSave(changed.program, save)
     expect(res.ok).toBe(false)

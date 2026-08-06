@@ -353,10 +353,102 @@ describe('scanInline —— <pause> 句中停顿标记', () => {
     expect(scan('a\\<pause>b').segments).toEqual([{ kind: 'literal', value: 'a<pause>b' }])
   })
 
-  it('<pause=毫秒> 报 rich-bad-pause（保留语法位，本期不支持）', () => {
-    const r = scan('前<pause=500>后')
-    expect(r.issues).toEqual([{ code: 'rich-bad-pause', message: '<pause> 不接受取值：「500」', line: 1 }])
-    expect(r.segments).toEqual([{ kind: 'literal', value: '前后' }]) // 非法标记不产生边界
+})
+
+describe('scanInline —— <pause=毫秒> 定时续显（毫秒档）', () => {
+  it('句中毫秒档：后半段 pauseBefore 携毫秒数', () => {
+    const r = scan('门开了一条缝<pause=2000>，什么都没有。')
+    expect(r.issues).toEqual([])
+    expect(r.segments).toEqual([
+      { kind: 'literal', value: '门开了一条缝' },
+      { kind: 'literal', value: '，什么都没有。', pauseBefore: 2000 },
+    ])
+  })
+
+  it('<pause=500/> 尾随斜杠等价（与 <pause/> / <br/> 对称）', () => {
+    expect(scan('前<pause=500/>后').segments).toEqual([
+      { kind: 'literal', value: '前' },
+      { kind: 'literal', value: '后', pauseBefore: 500 },
+    ])
+  })
+
+  it.each(['0', '-1', '1.5', 'abc', '', ' 500 ', '1e3', '+5', '2147483648', '9007199254740993'])(
+    '非法取值「%s」报 rich-bad-pause、不产生边界',
+    (v) => {
+      const r = scan(`前<pause=${v}>后`)
+      expect(r.issues).toEqual([
+        { code: 'rich-bad-pause', message: `非法停顿时长：「${v}」（<pause=毫秒> 只接受正整数毫秒）`, line: 1 },
+      ])
+      expect(r.segments).toEqual([{ kind: 'literal', value: '前后' }]) // 非法标记不产生边界
+    },
+  )
+
+  it('上限 2147483647（setTimeout 32 位钳制边界）内合法、超出报错', () => {
+    // 超上限若放行，setTimeout 溢出成「立刻触发」= 静默不停顿；宁可校验期报错让作者看见。
+    expect(scan('前<pause=2147483647>后').issues).toEqual([])
+    expect(scan('前<pause=2147483648>后').issues).toHaveLength(1)
+  })
+
+  it('非法标记作废前一个待挂标记（「取最后一个」一致，只不过最后一个是废的）', () => {
+    const r = scan('前<pause><pause=abc>后')
+    expect(r.issues).toHaveLength(1)
+    expect(r.segments).toEqual([{ kind: 'literal', value: '前后' }]) // 不残留点击档边界
+  })
+
+  it('报错回显作者原样写的取值（含尾随斜杠）', () => {
+    expect(scan('前<pause=abc/>后').issues).toEqual([
+      { code: 'rich-bad-pause', message: '非法停顿时长：「abc/」（<pause=毫秒> 只接受正整数毫秒）', line: 1 },
+    ])
+  })
+
+  it('\\<pause=500> 转义后按字面输出', () => {
+    expect(scan('a\\<pause=500>b').segments).toEqual([{ kind: 'literal', value: 'a<pause=500>b' }])
+  })
+
+  it('样式范围内携档位', () => {
+    expect(scan('<b>前<pause=300>后</b>').segments).toEqual([
+      { kind: 'literal', value: '前', style: { bold: true } },
+      { kind: 'literal', value: '后', style: { bold: true }, pauseBefore: 300 },
+    ])
+  })
+
+  it('行首毫秒档允许（先等满时长再出文字）', () => {
+    expect(scan('<pause=800>迟来的一句。').segments).toEqual([
+      { kind: 'literal', value: '迟来的一句。', pauseBefore: 800 },
+    ])
+  })
+
+  it('行尾毫秒档忽略（行尾停顿归 @sleep）', () => {
+    expect(scan('说完了。<pause=800>').segments).toEqual([{ kind: 'literal', value: '说完了。' }])
+  })
+
+  it('相邻标记取最后一个：<pause><pause=500> 是 500 毫秒档', () => {
+    expect(scan('前<pause><pause=500>后').segments).toEqual([
+      { kind: 'literal', value: '前' },
+      { kind: 'literal', value: '后', pauseBefore: 500 },
+    ])
+  })
+
+  it('相邻标记取最后一个：<pause=500><pause> 是点击档', () => {
+    expect(scan('前<pause=500><pause>后').segments).toEqual([
+      { kind: 'literal', value: '前' },
+      { kind: 'literal', value: '后', pauseBefore: true },
+    ])
+  })
+
+  it('空插值不消费标记，档值顺延给下一个非空段', () => {
+    expect(scan('前<pause=1200>{x}').segments).toEqual([
+      { kind: 'literal', value: '前' },
+      { kind: 'interp', code: 'x', id: 0, pauseBefore: 1200 },
+    ])
+  })
+
+  it('<br> 承接毫秒档', () => {
+    expect(scan('上<pause=400><br>下').segments).toEqual([
+      { kind: 'literal', value: '上' },
+      { kind: 'break', pauseBefore: 400 },
+      { kind: 'literal', value: '下' },
+    ])
   })
 })
 

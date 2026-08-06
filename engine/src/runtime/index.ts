@@ -11,7 +11,7 @@ export { Story } from './story'
 export type { OutputEvent, ChoiceView, StoryOptions, PanelSlot } from './types'
 export { RuntimeError } from './types'
 export type { StorySnapshot } from './snapshot'
-export type { RichSpan } from './spans'
+export type { RichSpan, PauseKind } from './spans'
 export { plainText } from './spans'
 
 export function createStory(program: ValidatedProgram, options: StoryOptions): Story {

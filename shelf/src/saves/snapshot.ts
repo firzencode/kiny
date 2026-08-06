@@ -26,8 +26,10 @@ export function captureSave(
   kind: SaveRecord['kind'],
   id: string,
   timestamp: number,
+  storyId: string,
 ): SaveRecord {
   return {
+    storyId,
     id,
     kind,
     snapshot: story.serialize(),

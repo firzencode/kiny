@@ -4,13 +4,13 @@ import type { ValidatedProgram, Story } from '@kiny/engine'
 import {
   initialState, step, chooseStep, submitInputStep, replayToStory,
   type PlayState, type ResolveAsset, type RevealBinding, type InteractionStep, type AdvanceResult,
+  type AwaitKind,
 } from '@kiny/player'
 
 /**
  * editor 预览面板专属的打字机播放层：只在人工点选项 / 提交输入 / 点重开预览时启动一次动画。
- * 编辑重算（App 的 onValidated/recompute）与 AI 的 PreviewPort 都不经过这里
- * （spec docs/superpowers/specs/2026-07-08-prose-step-advance-typewriter-design.md
- * 「editor 预览接线的精确规则」）。每一步的中间 PlayState 都经 onCommit 写回调用方
+ * 编辑重算（App 的 onValidated/recompute）与 AI 的 PreviewPort 都**不经过这里**——它们只应
+ * 重建静态预览，一旦借道本 hook 就会在每次敲键时重放打字机动画。每一步的中间 PlayState 都经 onCommit 写回调用方
  * 状态，本 hook 自身不持有 play / 交互序列。
  */
 export interface PreviewPlayback {
@@ -43,8 +43,8 @@ export function usePreviewPlayback(onCommit: (state: PlayState, sfx: string[]) =
   const resolveRef = useRef<ResolveAsset>((n) => n)
   const lastStateRef = useRef<PlayState>(initialState)
   const revealingRef = useRef(false)
-  /** 最新一行正停在句中 `<pause>` 标记处（RevealingLine 上报），参与点击门控。 */
-  const awaitingPauseRef = useRef(false)
+  /** 最新一行正停在句中 `<pause>` 标记处的档位（RevealingLine 上报），参与点击门控。 */
+  const awaitingPauseRef = useRef<AwaitKind>(null)
   // 代龄计数：当前所有 commit 都同步发起，故下面 commit 里的 gen 校验实际不会命中——
   // cancel 的真正生效靠 storyRef=null（令在飞 timer 回调的 doStep 早退）+ setActive(false)。
   // genRef 是为「将来若改成异步调度 commit」留的防线；届时 storyRef=null 不再足够，代龄校验才兜底。
@@ -149,17 +149,18 @@ export function usePreviewPlayback(onCommit: (state: PlayState, sfx: string[]) =
 
   const onContentClick = useCallback(() => {
     if (waitingSleepRef.current) return // @sleep 停顿不可跳过（与 usePlayback 同语义）
-    // 打字中 → 当前段立显；停在句中 `<pause>` → 续下一段（两者都递增 skipToken，由 RevealingLine 分档）。
+    if (awaitingPauseRef.current === 'timed') return // 毫秒档 <pause=毫秒> 等待中点击完全无效（同 @sleep）
+    // 打字中 → 当前段立显；停在句中点击档 `<pause>` → 续下一段（两者都递增 skipToken，由 RevealingLine 分档）。
     if (revealingRef.current || awaitingPauseRef.current) { setSkipToken((t) => t + 1); return }
     const cur = lastStateRef.current
     const atPause = cur.ended || cur.choices.length > 0 || cur.input !== null || cur.error != null
     if (!atPause && cur.host.stepMode === 'line') doStep() // 已显示完、逐行模式 → 下一行
   }, [doStep])
 
-  // 句中 `<pause>` 停在标记处 = 另一种「等你点击」（与 usePlayback 同语义）。
-  const onAwaitingPause = useCallback((waiting: boolean) => {
+  // 句中点击档 `<pause>` 停在标记处 = 另一种「等你点击」；毫秒档只参与门控、不亮三角（与 usePlayback 同语义）。
+  const onAwaitingPause = useCallback((waiting: AwaitKind) => {
     awaitingPauseRef.current = waiting
-    setAwaitingClick(waiting)
+    setAwaitingClick(waiting === 'click')
   }, [])
 
   const reveal: RevealBinding | undefined = active

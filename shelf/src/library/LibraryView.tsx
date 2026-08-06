@@ -30,12 +30,33 @@ function EmptyShelf() {
 }
 
 /**
+ * 临时模式的导入引导页：书库存不住（隐私模式 / 老浏览器无 IndexedDB），但仍能导入一本当场读完。
+ * 与 EmptyShelf 分开写而非加条件文案——两者的承诺不同（一个是「还空着，导入后留在这」，
+ * 一个是「存不住，导入只这一次」），混在一起容易写出误导读者的措辞。
+ */
+function EphemeralGuide() {
+  return (
+    <div className="empty">
+      <div className="icon">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M12 3v12" /><path d="m7 10 5 5 5-5" /><path d="M5 21h14" />
+        </svg>
+      </div>
+      <h2>导入一本，当场阅读</h2>
+      <p>把 <span className="kip">.kip</span> 故事包拖进窗口，或点「导入故事」选择文件，即可直接开始阅读。</p>
+      <Disclaimer />
+    </div>
+  )
+}
+
+/**
  * 书架：列出已导入的书（封面/书名/作者/简介）。行点击打开（有 auto 续读档 → 继续，否则开始）；
  * 行内「继续 / 重新开始 / 开始」按钮，删除键 hover 显现（触摸设备常显）+ 行内两步确认
  * （web 无系统对话框，对应 reader 桌面版的 Tauri ask）。拖放导入由 App 在 window 级处理。
+ * `ephemeral` = 临时模式（IndexedDB 不可用）：列表换成一次性导入引导页 + 常驻信息条。
  */
 export function LibraryView({
-  items, resumable, busy, onOpen, onDelete, onImport,
+  items, resumable, busy, onOpen, onDelete, onImport, ephemeral = false,
 }: {
   items: LibraryItem[]
   resumable: Set<string>
@@ -43,8 +64,27 @@ export function LibraryView({
   onOpen: (id: string, mode: OpenMode) => void
   onDelete: (id: string) => void
   onImport: () => void
+  /** 临时模式：书库存不住，导入的作品仅本次可读。缺省 false（正常模式零回归）。 */
+  ephemeral?: boolean
 }) {
   const [confirmDelId, setConfirmDelId] = useState<string | null>(null)
+
+  if (ephemeral) {
+    return (
+      <div className="app">
+        <header className="shelfbar">
+          <h1>我的书架</h1>
+          <button type="button" className="btn-import" onClick={onImport} disabled={busy}>＋ 导入故事</button>
+        </header>
+        {/* 非报错样式：存不住是这台浏览器的既定事实，不是出了问题 */}
+        <div className="info-bar" role="status">
+          当前浏览器 / 隐私模式不支持持久书库，导入的作品仅本次可读，刷新后需重新导入。
+        </div>
+        <EphemeralGuide />
+        <Credit />
+      </div>
+    )
+  }
 
   return (
     <div className="app">

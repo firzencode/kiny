@@ -72,4 +72,37 @@ describe('runtime —— <pause> 句中停顿标记', () => {
       { text: '你自己！', pauseBefore: true },
     ])
   })
+
+  it('毫秒档：档值随 span 流出，不被压成点击档', () => {
+    const spans = firstSpans(story('=== A ===\n门开了一条缝<pause=2000>，什么都没有。\n-> END'))
+    expect(spans).toEqual([
+      { text: '门开了一条缝' },
+      { text: '，什么都没有。', pauseBefore: 2000 },
+    ])
+  })
+
+  it('毫秒档 glue 跨行拼接：拼接处档值原样保留', () => {
+    const src = ['=== A ===', '我转身离开<>', '-> B', '=== B ===', '<pause=1500>，头也不回。', '-> END'].join('\n')
+    expect(firstSpans(story(src))).toEqual([
+      { text: '我转身离开' },
+      { text: '，头也不回。', pauseBefore: 1500 },
+    ])
+  })
+
+  it('毫秒档后紧跟空插值：档值随标记一起顺延', () => {
+    const src = ['~ let empty = ""', '=== A ===', '前<pause=600>{empty}后', '-> END'].join('\n')
+    expect(firstSpans(story(src))).toEqual([
+      { text: '前' },
+      { text: '后', pauseBefore: 600 },
+    ])
+  })
+
+  it('同一行混用两档：各段各自保留自己的档位', () => {
+    const spans = firstSpans(story('=== A ===\n前<pause>中<pause=500>后\n-> END'))
+    expect(spans).toEqual([
+      { text: '前' },
+      { text: '中', pauseBefore: true },
+      { text: '后', pauseBefore: 500 },
+    ])
+  })
 })

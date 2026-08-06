@@ -13,6 +13,11 @@ export const AUTO_SAVE_ID = 'auto'
  * 故连 play 一起存：读档时 restoreStory(snapshot) 重建 runtime、直接用 play 渲染当前屏。
  */
 export interface SaveRecord {
+  /**
+   * 所属书的 id。是 `saves` store 复合主键 `['storyId','id']` 的第一段，故必须落在记录**里**
+   * （localStorage 版把它编在键名里，那条路已经走完了）。
+   */
+  storyId: string
   /** 自动存档恒为 AUTO_SAVE_ID；手动存档为十六进制 id。 */
   id: string
   kind: 'auto' | 'manual'

@@ -11,6 +11,7 @@ export const RESERVED_NAMES = new Set(['$nodes'])
 export const COMMAND_NAMES = new Set([
   'bg_show', 'bg_hide', 'bgm_play', 'bgm_pause', 'bgm_stop',
   'sfx', // 一次性音效（区别于循环 bgm）
+  'img', // 正文插图：随正文流的一条内容（区别于始终垫底的全屏背景 bg_show），宿主落地
   'clear', // 清屏：清除已显示正文（保留背景 / BGM），宿主落地
   'step_mode', // 推进模式：line=逐行等点击 / flow=一路流到选项（默认），宿主落地
   'text_speed', // 打字机出字速度（字 / 秒；0=瞬显），宿主落地

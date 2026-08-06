@@ -7,6 +7,7 @@ import type {
   ContentElement,
   InlineSegment,
   Knot,
+  PauseKind,
   ProjectFile,
   Stitch,
 } from '../parser/ast'
@@ -841,13 +842,13 @@ export class Story {
   private renderSpans(segments: InlineSegment[], line = 0): RichSpan[] {
     const raw: RichSpan[] = []
     // `<pause>` 标记落在「其后首个**有内容**的 span」上：空插值（`{undefined}`）不消费它，
-    // 否则 `前半…<pause>{空}后半` 的停顿会凭空消失。
-    let pausePending = false
+    // 否则 `前半…<pause>{空}后半` 的停顿会凭空消失。顺延时**档位一并携带**。
+    let pausePending: PauseKind | null = null
     for (const seg of segments) {
-      if (seg.pauseBefore) pausePending = true
+      if (seg.pauseBefore) pausePending = seg.pauseBefore
       if (seg.kind === 'break') {
-        raw.push(pausePending ? { kind: 'break', pauseBefore: true } : { kind: 'break' })
-        pausePending = false
+        raw.push(pausePending !== null ? { kind: 'break', pauseBefore: pausePending } : { kind: 'break' })
+        pausePending = null
         continue
       }
       let text: string
@@ -862,8 +863,8 @@ export class Story {
         text = v === undefined || v === null ? '' : String(v)
       }
       if (text === '') continue // 空段：pausePending 保留，顺延给下一个有内容的段
-      raw.push(makeTextSpan(text, seg.style, pausePending))
-      pausePending = false
+      raw.push(makeTextSpan(text, seg.style, pausePending ?? undefined))
+      pausePending = null
     }
     return mergeSpans([], raw) // 经 coalesce 归并相邻同样式段
   }

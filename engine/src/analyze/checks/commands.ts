@@ -1,6 +1,7 @@
 import type { ProjectFile, ContentBlock } from '../../parser/ast'
 import type { Diagnostic } from '../types'
 import { COMMAND_NAMES, ASCII_IDENT, BUILTINS } from '../constants'
+import { validClass } from '../../parser/inline'
 import { PANEL_SLOTS } from '../../runtime/types'
 import { visitBlockTree } from '../../parser/visit'
 
@@ -16,8 +17,8 @@ function stringLiteral(raw: string): string | null {
 const NUMBER_LITERAL = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/
 /** 非数字的其它字面量（字符串 / 布尔 / null）——这些写在期待数字的位置就是笔误，可静态拦。 */
 const NON_NUMBER_LITERAL = /^(?:'[^']*'|"[^"]*"|`[^`]*`|true|false|null)$/
-/** 非字符串的字面量（数字 / 布尔 / null）——写在期待字符串的位置就是笔误。 */
-const NON_STRING_LITERAL = /^(?:[+-]?(?:\d+(?:\.\d*)?|\.\d+)|true|false|null)$/
+/** 非字符串的字面量（数字 / 布尔 / null / undefined）——写在期待字符串的位置就是笔误。 */
+const NON_STRING_LITERAL = /^(?:[+-]?(?:\d+(?:\.\d*)?|\.\d+)|true|false|null|undefined)$/
 
 /**
  * 期待「非负毫秒数」的参数是否可静态判负。
@@ -30,7 +31,10 @@ function checkMillis(raw: string): 'ok' | 'bad' | 'dynamic' {
   return 'dynamic'
 }
 
-/** 未知 @命令 + `@input` / `@sleep` 形态特判（元数：变量存在性由 checkVariables 经片段引用检查覆盖）。 */
+/**
+ * 未知 @命令 + `@input` / `@sleep` / `@panel` / `@img` 形态特判
+ * （元数：变量存在性由 checkVariables 经片段引用检查覆盖）。
+ */
 export function checkCommands(files: ProjectFile[]): Diagnostic[] {
   const out: Diagnostic[] = []
   const walk = (block: ContentBlock, file: string) =>
@@ -74,6 +78,31 @@ export function checkCommands(files: ProjectFile[]): Diagnostic[] {
             const tpl = el.args[1]!.trim()
             if (stringLiteral(el.args[1]!) === null && NON_STRING_LITERAL.test(tpl)) {
               out.push({ severity: 'error', code: 'panel-template', message: `@panel 的模板必须是字符串：「${tpl}」`, file, line: el.line })
+            }
+          }
+        } else if (el.name === 'img') {
+          // @img(路径 [, 替代文字] [, 类名])：1–3 参。三个参数都是右值表达式，
+          // **只对字面量做形态校验**，表达式参不拦（运行期由 player 兜底，与 @sleep 同策略）。
+          if (el.args.length < 1 || el.args.length > 3) {
+            out.push({ severity: 'error', code: 'img-arity', message: `@img 需要 1 到 3 个参数（路径 [, 替代文字] [, 类名]）`, file, line: el.line })
+          } else {
+            const rawSrc = el.args[0]!.trim()
+            const src = stringLiteral(el.args[0]!)
+            if (src !== null ? src.trim() === '' : NON_STRING_LITERAL.test(rawSrc)) {
+              out.push({ severity: 'error', code: 'img-src', message: `@img 的路径必须是非空字符串：「${rawSrc}」`, file, line: el.line })
+            }
+            if (el.args.length >= 2) {
+              const rawAlt = el.args[1]!.trim()
+              if (stringLiteral(el.args[1]!) === null && NON_STRING_LITERAL.test(rawAlt)) {
+                out.push({ severity: 'error', code: 'img-alt', message: `@img 的替代文字必须是字符串：「${rawAlt}」`, file, line: el.line })
+              }
+            }
+            if (el.args.length === 3) {
+              const rawCls = el.args[2]!.trim()
+              const cls = stringLiteral(el.args[2]!)
+              if (cls !== null ? !validClass(cls) : NON_STRING_LITERAL.test(rawCls)) {
+                out.push({ severity: 'error', code: 'img-class', message: `@img 的类名不合法：「${rawCls}」（只含 Unicode 字母数字与 _ -）`, file, line: el.line })
+              }
             }
           }
         }

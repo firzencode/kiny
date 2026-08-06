@@ -841,7 +841,7 @@ button {
 
 /* ---------- 资源管理器 ---------- */
 /* flex:0 1 auto + 低 min-height：窗口矮时资源管理器先让位（树自身滚动），把底部空间留给「节点」面板，
-   保证 .outline 的 min-height 始终被尊重、节点栏恒可见（见 docs/memory/editor-layout-overflow-invariant）。 */
+   保证 .outline 的 min-height 始终被尊重、节点栏恒可见——改这里的 flex/min-height 前先确认矮窗口下节点栏没被挤没。 */
 .explorer { flex: 0 1 auto; max-height: 52%; min-height: 72px; display: flex; flex-direction: column; overflow: hidden; border-bottom: 1px solid var(--border); }
 .explorer.collapsed { max-height: none; min-height: 0; }
 .explorer.collapsed .explorer-proj,
@@ -1344,8 +1344,7 @@ button {
 .confirm-btn.primary:hover { background: color-mix(in srgb, var(--accent) 88%, #fff); }
 
 /* =========================================================================
-   T011d · AI 面板 + 设置 AI 节 样式
-   参考真相源：design/2026-06-24-editor-ai-integration-design/ai-panel-settings-mockup.html
+   AI 面板 + 设置 AI 节 样式
    全部颜色取自现有 CSS token；双主题随 data-theme 变量自适配，无任何新颜色字面量。
    ========================================================================= */
 

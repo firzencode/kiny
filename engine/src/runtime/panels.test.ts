@@ -91,6 +91,17 @@ describe('@panel —— 登记与重估', () => {
     expect(spans).toEqual([{ text: '前后' }]) // 无 pauseBefore、且照常归并
   })
 
+  it('模板里的 <pause=毫秒> 同样被忽略（两档通吃）', () => {
+    const src = ['=== A ===', '@panel("left", "前<pause=800>后")', '正文。', '-> END'].join('\n')
+    const s = story(src)
+    let spans: unknown = null
+    while (s.canContinue) {
+      const e = s.continue()
+      if (e.kind === 'panel') spans = e.spans
+    }
+    expect(spans).toEqual([{ text: '前后' }])
+  })
+
   // 运行期未知槽位无法从合法脚本抵达——槽位必须是字符串字面量、由 analyze 前置拦下
   //（见 checks/commands.test.ts 的 panel-slot 用例）。registerPanel 里的槽名校验是纯防御，
   // 只在「跨版本存档带来陌生槽位」这类场景兜底。

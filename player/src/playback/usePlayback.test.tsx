@@ -223,6 +223,120 @@ describe('usePlayback', () => {
       const line = r.state.log.find((e) => e.kind === 'narration')
       expect(line && line.kind === 'narration' && plainText(line.spans)).toBe('凶手就是…你自己！')
     })
+
+    it('line 模式：续段揭示完整行后，三角仍亮且点击能出下一行（回归：等待态残留吞掉点击）', () => {
+      const kin = '@text_speed(0)\n@step_mode("line")\n凶手就是…<pause>你自己！\n下一行。\n-> END\n'
+      const { container } = render(<Harness story={makeStory(kin)} />)
+      pump(300, 50)
+      act(() => { fireEvent.click(content(container)) }) // 续段 → 整行完成
+      expect(container.textContent).toContain('你自己！')
+      expect(container.querySelector('.advance-indicator')).not.toBeNull() // 整行完等点击，三角亮
+      act(() => { fireEvent.click(content(container)) })
+      pump(300, 50)
+      expect(container.textContent).toContain('下一行。')
+    })
+  })
+
+  describe('<pause=毫秒> 定时续显', () => {
+    const KIN = '@text_speed(0)\n门开了一条缝<pause=2000>，什么都没有。\n下一行。\n-> END\n'
+
+    it('毫秒档等满自动续段，flow 随后自动续行', () => {
+      const { container } = render(<Harness story={makeStory(KIN)} />)
+      pump(500, 50)
+      expect(container.textContent).toContain('门开了一条缝')
+      expect(container.textContent).not.toContain('什么都没有') // 时长未满
+      pump(2000, 50)
+      expect(container.textContent).toContain('什么都没有')
+      expect(container.textContent).toContain('下一行。')
+    })
+
+    it('等待期间点击完全无效：不续段、也不越到下一行（同 @sleep）', () => {
+      const { container } = render(<Harness story={makeStory(KIN)} />)
+      pump(300, 50)
+      act(() => { fireEvent.click(content(container)) })
+      act(() => { fireEvent.click(content(container)) })
+      expect(container.textContent).not.toContain('什么都没有')
+      expect(container.textContent).not.toContain('下一行。') // 没掉进 line/flow 的 doStep
+      pump(2500, 50)
+      expect(container.textContent).toContain('什么都没有') // 等满照常续
+    })
+
+    it('毫秒档等待期间推进提示三角不亮（不是「等你点击」态）', () => {
+      const { container } = render(<Harness story={makeStory(KIN)} />)
+      pump(300, 50)
+      expect(container.textContent).toContain('门开了一条缝')
+      expect(container.querySelector('.advance-indicator')).toBeNull()
+    })
+
+    it('line 模式：毫秒档等待中点击不跳行，等满续段后才由点击出下一行', () => {
+      const kin = '@text_speed(0)\n@step_mode("line")\n门开了一条缝<pause=2000>，什么都没有。\n下一行。\n-> END\n'
+      const { container } = render(<Harness story={makeStory(kin)} />)
+      pump(300, 50)
+      act(() => { fireEvent.click(content(container)) })
+      expect(container.textContent).not.toContain('下一行。') // 点击被拦下、没跳行
+      pump(2500, 50)
+      expect(container.textContent).toContain('什么都没有')
+      expect(container.textContent).not.toContain('下一行。') // line 模式：整行完等点击
+      act(() => { fireEvent.click(content(container)) })
+      pump(300, 50)
+      expect(container.textContent).toContain('下一行。')
+    })
+
+    it('读档 / 重放（advance 无动画路径）整行直显、零等待', () => {
+      const story = makeStory(KIN)
+      const r = advance(story, initialState, RESOLVE)
+      const line = r.state.log.find((e) => e.kind === 'narration')
+      expect(line && line.kind === 'narration' && plainText(line.spans)).toBe('门开了一条缝，什么都没有。')
+    })
+  })
+
+  describe('@img 正文插图', () => {
+    const KIN = '@text_speed(0)\n她推开门。\n@img("assets/tavern.jpg", "酒馆")\n炉火还没灭。\n* [继续] -> END\n'
+
+    it('flow 模式：插图后自动续到下一行（回归：不上报揭示完成会永久卡死）', () => {
+      const { container } = render(<Harness story={makeStory(KIN)} />)
+      pump()
+      expect(container.querySelector('img')).not.toBeNull()
+      expect(container.textContent).toContain('炉火还没灭。') // 越过插图继续流到选项
+      expect(screen.getByRole('button', { name: '继续' })).toBeInTheDocument()
+    })
+
+    it('line 模式：插图后停住、三角亮，点击才出下一条', () => {
+      const kin = '@text_speed(0)\n@step_mode("line")\n她推开门。\n@img("assets/tavern.jpg")\n炉火还没灭。\n* [继续] -> END\n'
+      const { container } = render(<Harness story={makeStory(kin)} />)
+      pump(500, 50)
+      act(() => { fireEvent.click(content(container)) }) // 出插图
+      pump(300, 50)
+      expect(container.querySelector('img')).not.toBeNull()
+      expect(container.textContent).not.toContain('炉火还没灭。') // 停在插图这条内容上
+      expect(container.querySelector('.advance-indicator')).not.toBeNull()
+      act(() => { fireEvent.click(content(container)) })
+      pump(300, 50)
+      expect(container.textContent).toContain('炉火还没灭。')
+    })
+
+    it('插图 src 经 resolve 落到 DOM（宿主 URL，不是脚本里的裸路径）', () => {
+      const { container } = render(<Harness story={makeStory(KIN)} />)
+      pump()
+      expect(container.querySelector('img')!.getAttribute('src')).toBe('demo/assets/assets/tavern.jpg')
+    })
+
+    it('@clear 后紧跟插图不卡死（回归：两张图落同一下标、按下标判重会漏报揭示完成）', () => {
+      // 章节插页 / CG 回廊这类写法：清屏 → 换一张图 → 继续。@clear 与其后的 @img 在**同一次
+      // step 内**归约，渲染上看到的是 [imgA] → [imgB]、下标都是 0。
+      const kin = '@text_speed(0)\n@img("a.png")\n@clear()\n@img("b.png")\n后一行。\n* [继续] -> END\n'
+      const { container } = render(<Harness story={makeStory(kin)} />)
+      pump()
+      expect(container.querySelector('img')!.getAttribute('src')).toBe('demo/assets/b.png')
+      expect(container.textContent).toContain('后一行。') // flow 没在第二张图上停住
+      expect(screen.getByRole('button', { name: '继续' })).toBeInTheDocument()
+    })
+
+    it('读档 / 重放（advance 排空路径）插图确定性重现在正文历史里', () => {
+      const story = makeStory(KIN)
+      const r = advance(story, initialState, RESOLVE)
+      expect(r.state.log.filter((e) => e.kind === 'image')).toHaveLength(1)
+    })
   })
 
   it('选项推进后继续逐行揭示', () => {

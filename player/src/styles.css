@@ -71,6 +71,10 @@
 .narration { margin: 0; line-height: var(--kiny-prose-line-height); font-size: var(--kiny-prose-size); }
 .story-end { margin: 12px 0; text-align: center; opacity: .6; letter-spacing: .2em; }
 
+/* 正文插图（@img）：只给安全底线——不溢出阅读列、块级、水平居中。尺寸 / 边框 / 间距等外观
+   归作品 css（覆盖 .kin-illustration 或作者自己的类名），与 @panel「默认无装饰」同哲学。 */
+.kin-illustration { display: block; max-width: 100%; height: auto; margin-inline: auto; }
+
 /* 打字机逐字淡入（T033）：每字挂 char-fade 动画，时长 = @text_fade。 */
 .narration-reveal { white-space: pre-wrap; }
 .rchar { display: inline; animation-name: char-fade; animation-timing-function: ease; animation-fill-mode: both; }

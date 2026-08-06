@@ -72,4 +72,58 @@ describe('LibraryView', () => {
     await userEvent.click(screen.getAllByRole('button', { name: /删除/ })[0])
     expect(onOpen).not.toHaveBeenCalled()
   })
+
+  describe('临时模式（IndexedDB 不可用）', () => {
+    const renderEphemeral = (props: Partial<Parameters<typeof LibraryView>[0]> = {}) =>
+      render(
+        <LibraryView
+          items={[]} resumable={new Set()} busy={false} ephemeral
+          onOpen={() => {}} onDelete={() => {}} onImport={() => {}}
+          {...props}
+        />,
+      )
+
+    it('信息条常驻，说明「仅本次可读、刷新后需重新导入」', () => {
+      renderEphemeral()
+      const bar = screen.getByRole('status')
+      expect(bar).toHaveTextContent(/不支持持久书库/)
+      expect(bar).toHaveTextContent(/仅本次可读/)
+      expect(bar).toHaveTextContent(/刷新后需重新导入/)
+    })
+
+    it('渲染一次性导入引导页，不是「书架还空着」（两者承诺不同，不能混用文案）', () => {
+      renderEphemeral()
+      expect(screen.getByText(/导入一本，当场阅读/)).toBeInTheDocument()
+      expect(screen.queryByText(/书架还空着/)).not.toBeInTheDocument()
+    })
+
+    it('导入按钮照常可点', async () => {
+      const onImport = vi.fn()
+      renderEphemeral({ onImport })
+      await userEvent.click(screen.getByRole('button', { name: /导入/ }))
+      expect(onImport).toHaveBeenCalledTimes(1)
+    })
+
+    it('不显示书目计数（临时模式没有「库里有几本」这回事）', () => {
+      renderEphemeral()
+      expect(screen.queryByText(/个故事/)).not.toBeInTheDocument()
+    })
+
+    it('即使传入 items 也不渲染列表（存不住的东西不该显示在架上）', () => {
+      renderEphemeral({ items })
+      expect(screen.queryByText('甲故事')).not.toBeInTheDocument()
+    })
+
+    it('免责声明与署名照常各出现一次', () => {
+      renderEphemeral()
+      expect(screen.getAllByText(/本站不上传、不存储任何内容/)).toHaveLength(1)
+      expect(screen.getByRole('link', { name: /Made with Kiny/ })).toBeInTheDocument()
+    })
+
+    it('正常模式（ephemeral 缺省）不出信息条：零回归', () => {
+      render(<LibraryView items={[]} resumable={new Set()} busy={false} onOpen={() => {}} onDelete={() => {}} onImport={() => {}} />)
+      expect(screen.queryByRole('status')).not.toBeInTheDocument()
+      expect(screen.getByText(/书架还空着/)).toBeInTheDocument()
+    })
+  })
 })

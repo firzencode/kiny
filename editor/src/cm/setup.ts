@@ -2,7 +2,7 @@
  * 组装 Kin 编辑器的 CM6 扩展集 + 受控接线。host（EditorPane）只管挂 view、回灌 value。
  *
  * - 受控接线：外部回灌的事务打 `External` annotation，updateListener 见标记不回调 onChange，
- *   斩断「回灌→onChange→setState→回灌」回环（spike 验过，见 docs/memory/cm6-spike-findings.md）。
+ *   斩断「回灌→onChange→setState→回灌」回环——CM6 受控接线的必备一环，去掉即死循环。
  * - 语义着色走 `highlightCompartment`，view 菜单的 highlight 开关用它热切换。
  * - goto：F12 或 Ctrl/Cmd-点击 `-> 目标` → 解析定义位置，交回 React（跨文件开 tab）。
  */

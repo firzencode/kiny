@@ -1,5 +1,5 @@
 /* 自 reader/src/styles.css 整体移植拷贝（shelf 与 reader 同一套暗色皮肤）。
-   改 reader UI 样式时须同步本文件（见 BACKLOG 观察项）。文件末尾为 shelf 特有段。 */
+   改 reader UI 样式时须同步本文件，否则两端皮肤会漂移。文件末尾为 shelf 特有段。 */
 
 :root {
   color-scheme: dark;
@@ -59,6 +59,12 @@ body { overflow:hidden; background:var(--bg1); color:var(--text);
 
 .toast-error { position:fixed; top:14px; left:50%; transform:translateX(-50%); z-index:50; cursor:pointer;
   background:#3a2020; color:#ffb4ac; border:1px solid #6e3b35; border-radius:9px; padding:10px 16px; font-size:13px; max-width:80vw; }
+
+/* 临时模式信息条：常驻、非报错样式——书库存不住是这台浏览器的既定事实，不是出了问题。 */
+/* max-width 带 gutter：.app 是 column flex，auto 的交叉轴外边距会取消 stretch 退成 shrink-to-fit，
+   窄屏下若只写 max-width:720px 就会贴死两边（见记忆 player-content-cross-axis-stretch）。 */
+.info-bar { margin:12px auto 0; max-width:min(720px, calc(100% - 44px)); padding:10px 14px; border-radius:9px; font-size:13px; line-height:1.6;
+  color:var(--dim); background:var(--accent-soft); border:1px solid var(--border2); }
 
 /* 阅读屏返回条（叠在 player 之上）*/
 .reading { position:fixed; inset:0; overflow-y:auto; }
