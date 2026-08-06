@@ -37,8 +37,11 @@
   --accent-line: color-mix(in srgb, var(--accent) 42%, transparent);
   --accent-fg: #1a1407;
   /* 代码区选中背景：中性不透明 slate（非 accent 着色），与金/蓝/绿/粉/紫/橙各色系
-     token 都拉开对比，选中态文字清晰可读（T041） */
-  --sel-bg: #2f3648;
+     token 都拉开对比，选中态文字清晰可读（T041）。
+     亮度须同时压过 --bg-0（普通行）与 --bg-2（活动行底色）：暗色下二者亮度都低、又同为
+     冷 slate 无色相差可借，选中落在当前行时最易糊成一片（亮/素白两套靠暖底 vs 冷选中的
+     色相反差兜底，故无需这么亮）。 */
+  --sel-bg: #3b4660;
   /* 注释比 --text-faint 略亮一档：Windows 上中文注释（去斜体后）不再发暗看不清 */
   --s-comment: #7a8497;
   --s-node: #d2a24c;
@@ -130,7 +133,9 @@
   --accent-soft: color-mix(in srgb, var(--accent) 16%, transparent);
   --accent-line: color-mix(in srgb, var(--accent) 50%, transparent);
   --accent-fg: #fbf6ea;
-  --sel-bg: #dbe1ef;
+  /* 比 light 的选中色再深一档：素白的 chrome 是中性灰，缺了象牙稿「暖底 vs 冷选中」那道
+     色相反差，选中落在活动行（--bg-2）上仅靠亮度差撑，太浅会看不出来。 */
+  --sel-bg: #d3dbee;
   --s-comment: #8a8a92;
   --s-node: #8f611c;
   --s-command: #2f6a8c;

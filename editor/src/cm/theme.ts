@@ -23,6 +23,16 @@ export const SELECTION_SELECTOR =
   '&.cm-focused .cm-scroller .cm-selectionLayer .cm-selectionBackground, .cm-selectionLayer .cm-selectionBackground, .cm-content ::selection'
 
 /**
+ * 活动行底色垫层的 z-index。
+ *
+ * 必须比 CM 选中层更负：`drawSelection()` 的 `.cm-selectionLayer` 是 `.cm-scroller`
+ * （`position:relative; z-index:0`，层叠上下文根）里 z-index 为负的绝对定位层
+ * （`(above ? 150 : -1) - pos`，当前实测 -2）。取 -5 留出余量，将来即便再挂几个
+ * below 层（z 依次更负）也不至于反超。
+ */
+export const ACTIVE_LINE_Z = -5
+
+/**
  * 主题样式规格（`EditorView.theme` 的入参）。抽成具名对象供 theme.test.ts 断言
  * 关键不变量（如选中背景不得再用 accent 着色）。
  */
@@ -54,9 +64,29 @@ export const kinThemeSpec = {
   },
   '.cm-lineNumbers .cm-gutterElement': { padding: '0 6px 0 16px' },
   '.cm-activeLineGutter': { backgroundColor: 'transparent', color: 'var(--text)' },
+  // 活动行底色画在 ::before 垫层上、而非行元素自身的 background。
+  //
+  // 按 CSS 绘制顺序，同一层叠上下文内「负 z-index 的定位后代」先于「常规流块级元素的
+  // 背景」绘制：行元素自身若着不透明底色，这块底色就整片盖住其下的 `.cm-selectionLayer`
+  // ——当前行拖选文字将完全看不到选中高亮（非活动行无底色，故只在当前行复现）。
+  //
+  // 垫层绝对定位铺满行盒，z-index 取比选中层更负的 ACTIVE_LINE_Z，于是三层稳定叠成
+  // 「行底色 < 选中矩形 < 行内文字」。行元素设 position:relative 只为给垫层当定位参照，
+  // z-index 保持 auto——不建立层叠上下文，垫层的负 z-index 才能逃逸到 `.cm-scroller`
+  // 上下文里与选中层直接比较。左侧 accent 竖条走 inset box-shadow，属行元素自身的背景
+  // 绘制阶段，仍压在选中层之上、始终可见。
   '.cm-activeLine': {
-    backgroundColor: 'var(--bg-2)',
+    position: 'relative',
+    backgroundColor: 'transparent',
     boxShadow: 'inset 2px 0 0 var(--accent-line)',
+  },
+  '.cm-activeLine::before': {
+    content: '""',
+    position: 'absolute',
+    inset: '0',
+    zIndex: String(ACTIVE_LINE_Z),
+    backgroundColor: 'var(--bg-2)',
+    pointerEvents: 'none',
   },
   // 选中背景走中性不透明的 `--sel-bg`（非 accent 着色）：金色系语法 token（node/interp
   // 同取 --accent）在 accent 色相的选中层上会撞色、文字看不清；中性 slate 与所有色相 token
