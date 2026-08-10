@@ -8,7 +8,7 @@ export interface LibraryItem {
   coverUrl?: string
 }
 
-/** IndexedDB `stories` store 的记录：元信息 + 封面 Blob（列表读取只碰这份，不必载整包资源）。 */
+/** IndexedDB `stories` store 的记录：元信息 + 封面（列表读取只碰这份，不必载整包资源）。 */
 export interface StoredStory {
   id: string
   name: string
@@ -16,6 +16,11 @@ export interface StoredStory {
   description?: string
   version: string
   importedAt: number
+  /**
+   * 封面**缩略图**（导入时经 `makeCoverThumb` 压制；压不动的环境退回原图）。
+   * 整表随每次打开书架读出，故按尺寸与体积双预算限制；原图不在此处丢失——它随整包
+   * 存在 `packages` store 的 assets 里，阅读时照常取用。
+   */
   coverBlob?: Blob
 }
 

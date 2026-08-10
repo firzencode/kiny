@@ -399,4 +399,107 @@ describe('project_loaded 会话恢复（restore）', () => {
     expect(s.openTabs).toEqual(['main.kin'])
     expect(s.activeFile).toBe('main.kin')
   })
+
+  it('restore 里的媒体 tab 保留，不可开的（字体）被剔除', () => {
+    const s = editorReducer(initialEditorState, {
+      type: 'project_loaded', project: mediaProject,
+      restore: { openTabs: ['main.kin', '图/立绘.png', '字/楷体.woff2'], activeFile: '图/立绘.png' },
+    })
+    expect(s.openTabs).toEqual(['main.kin', '图/立绘.png'])
+    expect(s.activeFile).toBe('图/立绘.png')
+  })
+
+  it('restore 的 activeFile 不可开时降级为首个可开 tab', () => {
+    const s = editorReducer(initialEditorState, {
+      type: 'project_loaded', project: mediaProject,
+      restore: { openTabs: ['main.kin', '字/楷体.woff2'], activeFile: '字/楷体.woff2' },
+    })
+    expect(s.openTabs).toEqual(['main.kin'])
+    expect(s.activeFile).toBe('main.kin')
+  })
+})
+
+// 媒体 tab：图片 / 音频可开 tab 但**不进 files**（无文本缓冲）——
+// 由此结构上永不脏、永不被保存、activeBuffer 返回 null。
+const mediaProject: LoadedProject = {
+  dir: '/p',
+  manifest: { name: 'P', version: '1', engine: '0.1.0', entry: 'main.kin' },
+  manifestFile: 'kiny.json',
+  files: [
+    { path: 'main.kin', isKin: true, source: '=== a ===' },
+    { path: '图/立绘.png', isKin: false },
+    { path: '音/雨.mp3', isKin: false },
+    { path: '字/楷体.woff2', isKin: false },
+  ],
+  emptyDirs: [],
+}
+const withMedia = editorReducer(initialEditorState, { type: 'project_loaded', project: mediaProject })
+
+describe('媒体 tab（图片 / 音频）', () => {
+  it('open_tab 图片：进 openTabs 与 activeFile，但不进 files', () => {
+    const s = editorReducer(withMedia, { type: 'open_tab', path: '图/立绘.png' })
+    expect(s.openTabs).toEqual(['main.kin', '图/立绘.png'])
+    expect(s.activeFile).toBe('图/立绘.png')
+    expect(s.files['图/立绘.png']).toBeUndefined()
+    expect(activeBuffer(s)).toBeNull()
+    expect(anyDirty(s)).toBe(false)
+    expect(s.runId).toBe(withMedia.runId)
+  })
+
+  it('open_tab 音频同理；set_active 可切到已开的媒体 tab', () => {
+    const s = editorReducer(withMedia, { type: 'open_tab', path: '音/雨.mp3' })
+    expect(s.activeFile).toBe('音/雨.mp3')
+    const back = editorReducer(s, { type: 'set_active', path: 'main.kin' })
+    const again = editorReducer(back, { type: 'set_active', path: '音/雨.mp3' })
+    expect(again.activeFile).toBe('音/雨.mp3')
+  })
+
+  it('字体 / 不存在的路径仍是 no-op（守卫只放开图片与音频）', () => {
+    expect(editorReducer(withMedia, { type: 'open_tab', path: '字/楷体.woff2' })).toBe(withMedia)
+    expect(editorReducer(withMedia, { type: 'set_active', path: '字/楷体.woff2' })).toBe(withMedia)
+    expect(editorReducer(withMedia, { type: 'open_tab', path: '图/幽灵.png' })).toBe(withMedia)
+  })
+
+  it('重复 open_tab 不重复入列', () => {
+    const once = editorReducer(withMedia, { type: 'open_tab', path: '图/立绘.png' })
+    const twice = editorReducer(once, { type: 'open_tab', path: '图/立绘.png' })
+    expect(twice.openTabs).toEqual(['main.kin', '图/立绘.png'])
+  })
+
+  it('close_tab 媒体：摘除并选邻居', () => {
+    const opened = editorReducer(withMedia, { type: 'open_tab', path: '图/立绘.png' })
+    const closed = editorReducer(opened, { type: 'close_tab', path: '图/立绘.png' })
+    expect(closed.openTabs).toEqual(['main.kin'])
+    expect(closed.activeFile).toBe('main.kin')
+  })
+
+  it('discard_tab 媒体：无缓冲可回退，只关 tab、不动 runId', () => {
+    const opened = editorReducer(withMedia, { type: 'open_tab', path: '图/立绘.png' })
+    const s = editorReducer(opened, { type: 'discard_tab', path: '图/立绘.png' })
+    expect(s.openTabs).toEqual(['main.kin'])
+    expect(s.runId).toBe(opened.runId)
+  })
+
+  it('path_renamed：媒体 tab 与 activeFile 跟着改名', () => {
+    const opened = editorReducer(withMedia, { type: 'open_tab', path: '图/立绘.png' })
+    const s = editorReducer(opened, { type: 'path_renamed', from: '图/立绘.png', to: '图/主角.png' })
+    expect(s.openTabs).toEqual(['main.kin', '图/主角.png'])
+    expect(s.activeFile).toBe('图/主角.png')
+    expect(s.entries.map((e) => e.path)).toContain('图/主角.png')
+  })
+
+  it('path_renamed（父目录改名）：媒体 tab 路径前缀同步', () => {
+    const opened = editorReducer(withMedia, { type: 'open_tab', path: '图/立绘.png' })
+    const s = editorReducer(opened, { type: 'path_renamed', from: '图', to: '插画' })
+    expect(s.openTabs).toEqual(['main.kin', '插画/立绘.png'])
+    expect(s.activeFile).toBe('插画/立绘.png')
+  })
+
+  it('path_deleted：媒体 tab 被摘除，活动落回邻居', () => {
+    const opened = editorReducer(withMedia, { type: 'open_tab', path: '图/立绘.png' })
+    const s = editorReducer(opened, { type: 'path_deleted', path: '图/立绘.png' })
+    expect(s.openTabs).toEqual(['main.kin'])
+    expect(s.activeFile).toBe('main.kin')
+    expect(s.entries.map((e) => e.path)).not.toContain('图/立绘.png')
+  })
 })

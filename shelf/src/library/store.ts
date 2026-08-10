@@ -2,6 +2,7 @@ import { assembleFromFiles } from '@kiny/engine'
 import { unzipKip, type UnzippedKip } from '../kip/unzipKip'
 import { readDisplayMeta } from '../kip/displayMeta'
 import { openDb, txDone, reqDone, STORE_STORIES, STORE_PACKAGES } from './db'
+import { makeCoverThumb } from './thumbnail'
 import type { LibraryItem, StoredStory, StoredPackage } from './types'
 
 /**
@@ -14,7 +15,9 @@ export async function importKip(bytes: Uint8Array): Promise<LibraryItem> {
   if (!res.ok) throw new Error(res.message) // 坏包拒收
   const disp = readDisplayMeta(kip.manifestText)
   const id = crypto.randomUUID()
-  const coverBlob = disp.cover ? kip.assets.get(disp.cover) : undefined
+  // 缩略图必须在开事务前压完：IDB 事务只在微任务链上存活，中间 await 别的异步会让它自动提交/失效。
+  const coverSource = disp.cover ? kip.assets.get(disp.cover) : undefined
+  const coverBlob = coverSource ? await makeCoverThumb(coverSource) : undefined
   const story: StoredStory = {
     id, name: res.meta.name, author: disp.author, description: disp.description,
     version: res.meta.version, importedAt: Date.now(), coverBlob,

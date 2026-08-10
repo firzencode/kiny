@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { buildTree, collectDirs, moveTarget, type TreeNode } from '../files/tree'
 import { resolveImportDir } from '../files/importAssets'
 import { isTextFile, type ProjectFileEntry } from '../files/gateway'
+import { mediaKind } from '../files/media'
 
 const FileIcon = () => (
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
@@ -165,14 +166,15 @@ export function Explorer({
     }
     // File row
     const isRenaming = renaming === n.path
+    // 点得开的文件：可编辑的文本（.kin + 作品前端资源 css/js/json/txt/md/html）与
+    // 有查看器的媒体（图片 / 音频）。字体等其余二进制灰显只列名。
+    const openable = isTextFile(n.path) || mediaKind(n.path) !== null
     return (
       <li
         key={n.path}
-        // 可编辑的文本文件（.kin + 作品前端资源 css/js/json/txt/md/html）正常显示且可点开；
-        // 二进制（图片 / 音频 / 字体）灰显只列名。
-        className={'frow' + (n.path === activeFile ? ' active' : '') + (isTextFile(n.path) ? '' : ' frow-other')}
+        className={'frow' + (n.path === activeFile ? ' active' : '') + (openable ? '' : ' frow-other')}
         style={pad}
-        onClick={() => { if (!isRenaming && isTextFile(n.path)) onOpenFile(n.path) }}
+        onClick={() => { if (!isRenaming && openable) onOpenFile(n.path) }}
         onContextMenu={(e) => handleCtxMenu(e, n.path, 'file')}
       >
         <span className="frow-icon"><FileIcon /></span>

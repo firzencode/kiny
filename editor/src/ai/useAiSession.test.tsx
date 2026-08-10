@@ -13,6 +13,7 @@ const fakePreview: PreviewPort = {
   choose: () => ({ play: null, stale: false, interactionSeq: [] }),
   submitInput: () => ({ play: null, stale: false, interactionSeq: [] }),
   restart: () => ({ play: null, stale: false, interactionSeq: [] }),
+  back: () => ({ play: null, stale: false, interactionSeq: [] }),
 }
 
 function makeDeps(provider: Provider): UseAiSessionDeps {

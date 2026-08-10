@@ -869,28 +869,90 @@ describe('App 作品前端资源（T077）', () => {
       files: {
         '/proj/kiny.json': JSON.stringify({ name: '雾港', version: '1.0.0', engine: '0.1.0', entry: 'main.kin' }),
         '/proj/main.kin': MAIN,
-        '/proj/skin.css': css,
+        '/proj/theme.css': css,
         '/proj/assets/bg.png': 'PNGBYTES',
       },
     })
   }
   const styleTexts = () => Array.from(document.querySelectorAll('style[data-kiny-project-styles]')).map((s) => s.textContent ?? '')
+  /** `.css` 打开的是双模编辑器，默认停在「外观」；要文本编辑器就切「原文」。 */
+  const openRawTab = async () => userEvent.click(await screen.findByRole('tab', { name: '原文' }))
 
-  it('打开项目 → 预览注入作品主题 css；点资源管理器里的 .css 可打开编辑', async () => {
+  it('只有 theme.css 带「外观」页：别的 .css 是纯文本编辑器', async () => {
+    // 零目录约定下全部 .css 按字典序叠加。在第二个样式文件里开外观页，它会把 player 默认值
+    // 当成「这个作品现在的样子」显示（其实生效的是 theme.css 的值），随手一拖就把 token 写进
+    // 这个文件、按字典序盖死 theme.css——而单文件扫描看不见这件事，连提示都不会有。
+    const g = createMemoryGateway({
+      pickedDir: '/proj',
+      files: {
+        '/proj/kiny.json': JSON.stringify({ name: '雾港', version: '1.0.0', engine: '0.1.0', entry: 'main.kin' }),
+        '/proj/main.kin': MAIN,
+        '/proj/theme.css': '.player{--kiny-page-bg:#fff}',
+        '/proj/zz-panel.css': '.player .panel-bottom{background:#000}',
+      },
+    })
+    render(<App gateway={g} />)
+    await fileMenu('打开项目...')
+    await userEvent.click((await screen.findAllByText('zz-panel.css'))[0])
+    await waitFor(() => expect(cmView().state.doc.toString()).toContain('panel-bottom'))
+    expect(screen.queryByRole('tab', { name: '外观' })).not.toBeInTheDocument()
+
+    await userEvent.click((await screen.findAllByText('theme.css'))[0])
+    expect(await screen.findByRole('tab', { name: '外观' })).toBeInTheDocument()
+  })
+
+  it('theme.css 的判定不分大小写', async () => {
+    const g = createMemoryGateway({
+      pickedDir: '/proj',
+      files: {
+        '/proj/kiny.json': JSON.stringify({ name: '雾港', version: '1.0.0', engine: '0.1.0', entry: 'main.kin' }),
+        '/proj/main.kin': MAIN,
+        '/proj/Theme.CSS': '.player{--kiny-text:#fff}',
+      },
+    })
+    render(<App gateway={g} />)
+    await fileMenu('打开项目...')
+    await userEvent.click((await screen.findAllByText('Theme.CSS'))[0])
+    expect(await screen.findByRole('tab', { name: '外观' })).toBeInTheDocument()
+  })
+
+  it('打开项目 → 预览注入作品主题 css；点资源管理器里的 .css 得双模编辑器，原文页可编辑', async () => {
     render(<App gateway={gwTheme()} />)
     await fileMenu('打开项目...')
     await screen.findAllByText('main.kin')
     expect(styleTexts().join('')).toContain('--kiny-page-bg:#fff')
 
-    // 文本资源可点开编辑（二进制只列名）
-    await userEvent.click((await screen.findAllByText('skin.css'))[0])
+    await userEvent.click((await screen.findAllByText('theme.css'))[0])
+    expect(await screen.findByRole('tab', { name: '外观' })).toHaveAttribute('aria-selected', 'true')
+    await openRawTab()
     await waitFor(() => expect(cmView().state.doc.toString()).toBe('.player{--kiny-page-bg:#fff}'))
   })
 
-  it('编辑 css → 预览即时重注入（无需保存）', async () => {
+  it('注入预览的作品 css 被限定到预览容器：越界选择器影响不到编辑器界面（T094）', async () => {
+    render(<App gateway={gwTheme('body{background:red}\n.player p{color:blue}')} />)
+    await fileMenu('打开项目...')
+    await screen.findAllByText('main.kin')
+    const css = styleTexts().join('')
+    // 作者的 `body{}` 映射成了预览容器自身，`.player p` 加了容器前缀——两条都出不了预览区。
+    expect(css).toContain(':where(.preview-stage){background:red}')
+    expect(css).toContain(':where(.preview-stage) .player p{color:blue}')
+    // 未限定的裸 body 规则一条都不能留在文档里。
+    expect(css).not.toMatch(/(^|[};])\s*body\s*\{/)
+  })
+
+  it('外观页调 token → 定点写回、预览即时换肤（无需保存）', async () => {
     render(<App gateway={gwTheme()} />)
     await fileMenu('打开项目...')
-    await userEvent.click((await screen.findAllByText('skin.css'))[0])
+    await userEvent.click((await screen.findAllByText('theme.css'))[0])
+    fireEvent.change(await screen.findByLabelText('页面底色'), { target: { value: '#123456' } })
+    await waitFor(() => expect(styleTexts().join('')).toContain('#123456'))
+  })
+
+  it('编辑 css 原文 → 预览即时重注入（无需保存）', async () => {
+    render(<App gateway={gwTheme()} />)
+    await fileMenu('打开项目...')
+    await userEvent.click((await screen.findAllByText('theme.css'))[0])
+    await openRawTab()
     await typeInEditor('/*x*/')
     await waitFor(() => expect(styleTexts().join('')).toContain('/*x*/'))
   })
@@ -900,7 +962,7 @@ describe('App 作品前端资源（T077）', () => {
     await fileMenu('打开项目...')
     await screen.findAllByText('main.kin')
     await new Promise((r) => setTimeout(r, 400)) // 等防抖校验跑完
-    expect(screen.queryByText(/skin\.css/)).not.toBeNull() // 文件在资源管理器里
+    expect(screen.queryByText(/theme\.css/)).not.toBeNull() // 文件在资源管理器里
     expect(document.querySelector('.diag-row')).toBeNull() // 但没有诊断
   })
 
@@ -920,8 +982,38 @@ describe('App 作品前端资源（T077）', () => {
     const explorer = await screen.findByRole('navigation', { name: '资源管理器' })
     fireEvent.contextMenu(within(explorer).getByText('main.kin')) // 右键根级文件 → 导入到项目根
     fireEvent.click(screen.getByText('导入资源…'))
-    // 导入后进了缓冲：新 tab 打开且编辑区拿到文本（不是「未打开文件」的空态）
+    // 导入后进了缓冲：新 tab 打开且编辑区拿到文本（不是「未打开文件」的空态）。
+    // `.css` 开的是双模编辑器，文本在「原文」页。
+    await openRawTab()
     await waitFor(() => expect(cmView().state.doc.toString()).toContain('binary'))
+  })
+
+  it('「文件 → 作品主题…」：项目里没有 .css 时按模板新建 theme.css 并打开', async () => {
+    const g = createMemoryGateway({
+      pickedDir: '/proj',
+      files: {
+        '/proj/kiny.json': JSON.stringify({ name: '雾港', version: '1.0.0', engine: '0.1.0', entry: 'main.kin' }),
+        '/proj/main.kin': MAIN,
+      },
+    })
+    render(<App gateway={g} />)
+    await fileMenu('打开项目...')
+    await screen.findAllByText('main.kin')
+    await fileMenu('作品主题...')
+    // 新建的 theme.css 已打开为双模编辑器，且模板里的 token 已回填进控件
+    expect(await screen.findByLabelText('页面底色')).toHaveValue('#0d1117')
+    expect((await screen.findAllByText('theme.css')).length).toBeGreaterThan(0)
+  })
+
+  it('「文件 → 作品主题…」：已有 theme.css 时打开它，不重复新建', async () => {
+    const g = gwTheme()
+    render(<App gateway={g} />)
+    await fileMenu('打开项目...')
+    await screen.findAllByText('main.kin')
+    await fileMenu('作品主题...')
+    expect(await screen.findByRole('tab', { name: '外观' })).toBeInTheDocument()
+    // 打开的是原有那个文件（内容还在），没有被新建覆盖
+    expect(await g.readTextFile('/proj', 'theme.css')).toBe('.player{--kiny-page-bg:#fff}')
   })
 
   it('资源问题（非法族名）→ 预览栏出现提示角标', async () => {
@@ -1478,5 +1570,112 @@ describe('App 启动页 / 关闭项目（T034）', () => {
     expect(await screen.findByRole('dialog', { name: '关闭项目' })).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: '不保存并关闭' }))
     await waitFor(() => expect(document.querySelector('.launch')).not.toBeNull())
+  })
+})
+
+describe('App 媒体预览（T093）', () => {
+  function gwMedia() {
+    return createMemoryGateway({
+      pickedDir: '/proj',
+      files: {
+        '/proj/kiny.json': JSON.stringify({ name: '雾港', version: '1.0.0', engine: '0.1.0', entry: 'main.kin' }),
+        '/proj/main.kin': MAIN,
+        '/proj/图/立绘.png': 'PNGBYTES',
+        '/proj/音/雨.mp3': 'MP3BYTES',
+        '/proj/字/楷体.woff2': 'FONTBYTES',
+      },
+    })
+  }
+  /** 展开资源管理器里的某文件夹（默认折叠），返回资源管理器容器。 */
+  async function expandDir(name: string) {
+    const explorer = await screen.findByRole('navigation', { name: '资源管理器' })
+    await userEvent.click(within(explorer).getByText(name))
+    return explorer
+  }
+
+  it('点图片 → 编辑区出媒体查看器（img 指向资源 URL），右侧故事预览仍在', async () => {
+    render(<App gateway={gwMedia()} />)
+    await fileMenu('打开项目...')
+    await screen.findAllByText('main.kin')
+    const explorer = await expandDir('图')
+    await userEvent.click(within(explorer).getByText('立绘.png'))
+
+    const view = await screen.findByTestId('media-view')
+    const img = within(view).getByRole('img') as HTMLImageElement
+    expect(img.getAttribute('src')).toBe('mem://图/立绘.png')
+    expect(within(view).getByTestId('media-status').textContent).toContain('图/立绘.png')
+    // 媒体 tab 与 .kin tab 并存，且右侧预览未被顶掉
+    expect(screen.getByRole('tablist').textContent).toContain('图/立绘.png')
+    expect(screen.getByTestId('preview')).toBeInTheDocument()
+    // 文本编辑器让位给查看器（不是两者并存）
+    expect(document.querySelector('.cm-editor')).toBeNull()
+  })
+
+  it('点音频 → 原生 audio 试听', async () => {
+    render(<App gateway={gwMedia()} />)
+    await fileMenu('打开项目...')
+    await screen.findAllByText('main.kin')
+    const explorer = await expandDir('音')
+    await userEvent.click(within(explorer).getByText('雨.mp3'))
+    const audio = await screen.findByTestId('media-audio')
+    expect(audio.getAttribute('src')).toBe('mem://音/雨.mp3')
+  })
+
+  it('点字体 → 不开 tab（没有查看器）', async () => {
+    render(<App gateway={gwMedia()} />)
+    await fileMenu('打开项目...')
+    await screen.findAllByText('main.kin')
+    const explorer = await expandDir('字')
+    await userEvent.click(within(explorer).getByText('楷体.woff2'))
+    expect(screen.queryByTestId('media-view')).toBeNull()
+    expect(screen.getByRole('tablist').textContent).not.toContain('楷体.woff2')
+  })
+
+  it('媒体 tab 与 .kin tab 之间来回切换：文本编辑器与查看器各自回位', async () => {
+    render(<App gateway={gwMedia()} />)
+    await fileMenu('打开项目...')
+    await screen.findAllByText('main.kin')
+    const explorer = await expandDir('图')
+    await userEvent.click(within(explorer).getByText('立绘.png'))
+    await screen.findByTestId('media-view')
+
+    const tabs = screen.getByRole('tablist')
+    await userEvent.click(within(tabs).getByText('main.kin'))
+    await waitFor(() => expect(editorValue()).toContain('开场。'))
+    expect(screen.queryByTestId('media-view')).toBeNull()
+
+    await userEvent.click(within(tabs).getByText('图/立绘.png'))
+    expect(await screen.findByTestId('media-view')).toBeInTheDocument()
+  })
+
+  it('媒体 tab 永不脏：编辑过入口后关媒体 tab 不弹守卫，入口脏点不受影响', async () => {
+    render(<App gateway={gwMedia()} />)
+    await fileMenu('打开项目...')
+    await screen.findAllByText('main.kin')
+    await typeInEditor('x') // 弄脏入口（媒体不该被卷入）
+    const explorer = await expandDir('图')
+    await userEvent.click(within(explorer).getByText('立绘.png'))
+    await screen.findByTestId('media-view')
+
+    await userEvent.click(screen.getByRole('button', { name: '关闭 图/立绘.png' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    await waitFor(() => expect(screen.queryByTestId('media-view')).toBeNull())
+    // 入口的脏点仍在（媒体 tab 的开关与保存状态无关）
+    expect(document.querySelector('.tab-dirty')).not.toBeNull()
+  })
+
+  it('会话恢复：上次停在图片 tab → 重开项目仍回到该图片', async () => {
+    render(<App gateway={gwMedia()} />)
+    await fileMenu('打开项目...')
+    await screen.findAllByText('main.kin')
+    const explorer = await expandDir('图')
+    await userEvent.click(within(explorer).getByText('立绘.png'))
+    await screen.findByTestId('media-view')
+    await fileMenu('关闭项目')
+    await waitFor(() => expect(document.querySelector('.launch')).not.toBeNull())
+
+    await fileMenu('打开项目...')
+    expect(await screen.findByTestId('media-view')).toBeInTheDocument()
+    expect((screen.getByRole('img') as HTMLImageElement).getAttribute('src')).toBe('mem://图/立绘.png')
   })
 })

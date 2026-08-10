@@ -1,6 +1,6 @@
 {
   "name": "@kiny/editor",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -13,7 +13,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "build:e2e": "node ../scripts/public/build-export-template.mjs --if-missing && node ../scripts/public/stage-kin-spec.mjs && vite build --mode e2e",
+    "preview:e2e": "vite preview --outDir dist-e2e"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",

@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { buildProjectCss } from '@kiny/player'
 import {
   defaultKipName,
   defaultWebpageDirName,
@@ -8,6 +11,12 @@ import {
   projectFolderName,
   assertRenameSafe,
   isTextFile,
+  normalizeNewFileName,
+  starterContentFor,
+  isThemeFile,
+  STARTER_NEW_FILE,
+  STARTER_THEME_CSS,
+  STARTER_STYLE_CSS,
   type Manifest,
 } from './gateway'
 
@@ -100,6 +109,113 @@ describe('isTextFile', () => {
     for (const p of ['assets/x.png', 'a.mp3', 'fonts/楷体.woff2', 'b.ttf', 'noext']) {
       expect(isTextFile(p), p).toBe(false)
     }
+  })
+})
+
+describe('normalizeNewFileName（新建文件名归一：按已知文本扩展名分派）', () => {
+  it('无扩展名 → 补 .kin（多数写作场景手感不变）', () => {
+    expect(normalizeNewFileName(' 第二章 ')).toBe('第二章.kin')
+    expect(normalizeNewFileName('chapters/new')).toBe('chapters/new.kin')
+  })
+  it('已带已知文本扩展名 → 尊重之，不再吞成 .kin', () => {
+    expect(normalizeNewFileName('theme.css')).toBe('theme.css')
+    expect(normalizeNewFileName('notes.md')).toBe('notes.md')
+    expect(normalizeNewFileName('data.json')).toBe('data.json')
+    expect(normalizeNewFileName('main.kin')).toBe('main.kin')
+  })
+  it('扩展名大小写不敏感（同 isTextFile 口径），且归一为小写', () => {
+    expect(normalizeNewFileName('THEME.CSS')).toBe('THEME.css')
+  })
+  it('大写 .KIN 归一成 .kin：否则建出的是引擎永不加载的哑文件', () => {
+    expect(normalizeNewFileName('第二章.KIN')).toBe('第二章.kin')
+  })
+  it('未知扩展名仍补 .kin', () => {
+    expect(normalizeNewFileName('第一章.v2')).toBe('第一章.v2.kin')
+  })
+  it('空名抛错，非法路径抛错', () => {
+    expect(() => normalizeNewFileName('   ')).toThrow(/不能为空/)
+    expect(() => normalizeNewFileName('../escape.css')).toThrow('非法路径')
+  })
+})
+
+describe('isThemeFile（哪个文件是作品主题——「外观」GUI 与主题模板共用的单点判定）', () => {
+  it('约定名 theme.css，文件名不分大小写', () => {
+    expect(isThemeFile('theme.css')).toBe(true)
+    expect(isThemeFile('Theme.CSS')).toBe(true)
+  })
+  it('子目录里的同名文件也算', () => {
+    expect(isThemeFile('styles/theme.css')).toBe(true)
+  })
+  it('别的 .css 不算（它们只是叠加上去的样式，开 GUI 会盖死主题）', () => {
+    expect(isThemeFile('skin.css')).toBe(false)
+    expect(isThemeFile('zz-panel.css')).toBe(false)
+    expect(isThemeFile('my-theme.css')).toBe(false)
+    expect(isThemeFile('theme.css.bak')).toBe(false)
+  })
+  it('目录名叫 theme.css 也不会误判成文件（判的是末段全名）', () => {
+    expect(isThemeFile('theme.css/inner.css')).toBe(false)
+  })
+})
+
+describe('starterContentFor（新建文件起始内容按类型分派）', () => {
+  it('.kin 落故事脚手架', () => {
+    expect(starterContentFor('chapters/new.kin')).toBe(STARTER_NEW_FILE)
+  })
+  it('theme.css 落主题模板（文件名大小写不敏感）', () => {
+    expect(starterContentFor('theme.css')).toBe(STARTER_THEME_CSS)
+    expect(starterContentFor('THEME.css')).toBe(STARTER_THEME_CSS)
+  })
+  it('其它 .css 落样式空壳，不含任何 token 赋值', () => {
+    // 零目录约定下全部 .css 按字典序叠加：第二个文件若也带整份 token 默认值，
+    // 会把作者在 theme.css 里调好的主题静默打回默认。
+    expect(starterContentFor('styles/10-panel.css')).toBe(STARTER_STYLE_CSS)
+    const live = STARTER_STYLE_CSS.replace(/\/\*[\s\S]*?\*\//g, '') // 剥注释后剩下的才是真生效的声明
+    expect(live).not.toMatch(/--kiny-[\w-]+\s*:/)
+  })
+  it('其它文本类型为空', () => {
+    expect(starterContentFor('notes.md')).toBe('')
+    expect(starterContentFor('data.json')).toBe('')
+  })
+})
+
+describe('STARTER_THEME_CSS（新建项目内置主题模板）', () => {
+  /** 从一段 css 的指定规则块里抓 `--kiny-*: 值;` 声明（先剥注释，免把注释里的示范声明当真）。 */
+  function tokensOf(raw: string, selector: string): Record<string, string> {
+    const css = raw.replace(/\/\*[\s\S]*?\*\//g, '')
+    const start = css.indexOf(selector)
+    if (start === -1) throw new Error(`找不到规则块 ${selector}`)
+    const open = css.indexOf('{', start)
+    const close = css.indexOf('}', open)
+    const body = css.slice(open + 1, close)
+    const out: Record<string, string> = {}
+    for (const m of body.matchAll(/(--kiny-[\w-]+)\s*:\s*([^;]+);/g)) out[m[1]] = m[2].trim()
+    return out
+  }
+
+  it('以 .player 为根（不用 :root），免样式漏到 editor 界面', () => {
+    expect(STARTER_THEME_CSS).toContain('.player {')
+    expect(STARTER_THEME_CSS).not.toContain(':root')
+  })
+
+  it('列出的 token 名与默认值同 player 的 :root 一致（防漂移）', () => {
+    // vitest 的 cwd 恒为 editor/（package 根），故按仓库布局取同级 player 的样式真相源。
+    const playerCss = readFileSync(resolve(process.cwd(), '../player/src/styles.css'), 'utf8')
+    const defaults = tokensOf(playerCss, ':root')
+    const template = tokensOf(STARTER_THEME_CSS, '.player')
+    expect(Object.keys(template).length).toBeGreaterThan(0)
+    for (const [name, value] of Object.entries(template)) {
+      expect(defaults, `模板 token ${name} 不在 player 的 :root 契约里`).toHaveProperty(name)
+      expect(value, `模板 token ${name} 的默认值与 player 漂移`).toBe(defaults[name])
+    }
+  })
+
+  it('能被 buildProjectCss 编译且零 issue', () => {
+    const { css, issues } = buildProjectCss(
+      { css: ['theme.css'], fonts: [] },
+      { readCss: (p) => (p === 'theme.css' ? STARTER_THEME_CSS : null), resolveAsset: () => '' },
+    )
+    expect(issues).toEqual([])
+    expect(css).toContain('--kiny-page-bg')
   })
 })
 

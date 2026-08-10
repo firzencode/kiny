@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import { editorReducer, initialEditorState, type EditorState, type EditorAction } from '../state/editorReducer'
 import { createMemoryGateway } from '../files/memoryGateway'
-import { createIncrementalValidator } from '../validate/validate'
+import { createIncrementalValidator, kinSourcesOf } from '../validate/validate'
+import { STARTER_THEME_CSS } from '../files/gateway'
+import type { InteractionStep } from '@kiny/player'
 import { runCommand, type ActionContext, type PreviewPort, type PreviewSnapshot } from './actions'
 
 const DIR = '/proj'
@@ -35,6 +37,7 @@ function makeHarness(files: Record<string, string> = {}) {
     choose: (pos) => { previewCalls.push(['choose', pos]); return { play: null, stale: false, interactionSeq: [{ kind: 'choice', pos }] } },
     submitInput: (text) => { previewCalls.push(['submitInput', text]); return { play: null, stale: false, interactionSeq: [{ kind: 'input', text }] } },
     restart: () => { previewCalls.push(['restart']); return snap },
+    back: () => { previewCalls.push(['back']); return snap },
   }
   const ctx: ActionContext = { getState: () => state, dispatch, gateway, validator, preview }
   return { ctx, getState: () => state, gateway, previewCalls }
@@ -55,6 +58,34 @@ describe('动作层 · 项目 / 文件', () => {
     expect(r.manifest?.entry).toBe('main.kin')
     expect(r.entries.map((e) => e.path)).toEqual(['chapters/a.kin', 'main.kin'])
     expect(r.activeFile).toBe('main.kin')
+  })
+
+  it('listProject 的 entries 只给 path/isKin/editable，不夹带 source', async () => {
+    const h = makeHarness({
+      [`${DIR}/theme.css`]: STARTER_THEME_CSS,
+      [`${DIR}/assets/cover.jpg`]: 'binary-ish',
+    })
+    await loadProject(h)
+    const r = await runCommand(h.ctx, { name: 'listProject' })
+    // 陈旧源码是真陷阱：它是**载入时**的磁盘快照，改过之后不更新，信它就会基于旧内容工作。
+    for (const e of r.entries) expect(Object.keys(e).sort()).toEqual(['editable', 'isKin', 'path'])
+    const byPath = Object.fromEntries(r.entries.map((e) => [e.path, e]))
+    expect(byPath['main.kin']).toEqual({ path: 'main.kin', isKin: true, editable: true })
+    // 作品前端资源：不是 Kin，但可读写——agent 靠这个口径就知道自己能调外观
+    expect(byPath['theme.css']).toEqual({ path: 'theme.css', isKin: false, editable: true })
+    // 二进制：既非 Kin 也不可编辑
+    expect(byPath['assets/cover.jpg']).toEqual({ path: 'assets/cover.jpg', isKin: false, editable: false })
+  })
+
+  it('readFile 对作品前端资源同样可用（口径不是只有 .kin）', async () => {
+    const h = makeHarness({ [`${DIR}/theme.css`]: STARTER_THEME_CSS })
+    await loadProject(h)
+    const r = await runCommand(h.ctx, { name: 'readFile', path: 'theme.css' })
+    expect(r.source).toBe(STARTER_THEME_CSS)
+    // 报错文案须与实际判据（缓冲是否存在）一致，不能说「非 .kin」——那是事实错误，
+    // 会让 agent 认定 .css 不可读而放弃。
+    await expect(runCommand(h.ctx, { name: 'readFile', path: 'assets/cover.jpg' }))
+      .rejects.toThrow(/不是可编辑的文本文件/)
   })
 
   it('readFile 返回缓冲源码，缺文件抛错', async () => {
@@ -188,6 +219,26 @@ describe('动作层 · 校验 / 诊断', () => {
     expect(h.getState().diagnostics).toBe(bad.diagnostics)
   })
 
+  it('缓冲含作品前端资源（theme.css / json / md）时 validate 不产出它们的假诊断', async () => {
+    const h = makeHarness({
+      [`${DIR}/theme.css`]: STARTER_THEME_CSS,
+      [`${DIR}/data.json`]: '{ "a": 1 }',
+      [`${DIR}/README.md`]: '# 说明 { 这行有个孤立花括号',
+    })
+    await loadProject(h)
+    // 前置断言：这些资源确实进了缓冲（否则本用例测的是空气）
+    expect(Object.keys(h.getState().files).sort()).toEqual(
+      ['README.md', 'chapters/a.kin', 'data.json', 'main.kin', 'theme.css'],
+    )
+    const r = await runCommand(h.ctx, { name: 'validate' })
+    expect(r.ok).toBe(true)
+    expect(r.diagnostics.filter((d) => d.file !== undefined && !d.file.endsWith('.kin'))).toEqual([])
+    // 与 editor 自身防抖校验逐字段一致（同一 kinSourcesOf 口径 + 同一校验器）
+    const own = createIncrementalValidator().validate(kinSourcesOf(Object.values(h.getState().files)))
+    expect(r.diagnostics).toEqual(own.diagnostics)
+    expect(r.ok).toBe(own.program !== null)
+  })
+
   it('getDiagnostics 可按文件过滤', async () => {
     const h = makeHarness()
     await loadProject(h)
@@ -211,6 +262,43 @@ describe('动作层 · 预览 / 运行', () => {
     expect(c.interactionSeq).toEqual([{ kind: 'choice', pos: 1 }])
     expect(s.interactionSeq).toEqual([{ kind: 'input', text: '旅人' }])
     expect(h.previewCalls).toEqual([['snapshot'], ['choose', 1], ['submitInput', '旅人'], ['restart']])
+  })
+
+  // 动作层这一层只做**原样转发**（`case 'back': return ctx.preview.back()`），故这里只钉转发
+  // 与快照透传；真实现（含空序列不重算那条真风险）在 `preview/previewPort.test.ts` 直接单测。
+  describe('back（撤销上一次选择 / 输入）', () => {
+    /** 维护真交互序列的假端口——choose/submitInput 追加、restart 清空、back 弹出末项。 */
+    function statefulHarness() {
+      let seq: InteractionStep[] = []
+      const snap = (): PreviewSnapshot => ({ play: null, stale: false, interactionSeq: seq })
+      const preview: PreviewPort = {
+        snapshot: snap,
+        choose: (pos) => { seq = [...seq, { kind: 'choice', pos }]; return snap() },
+        submitInput: (text) => { seq = [...seq, { kind: 'input', text }]; return snap() },
+        restart: () => { seq = []; return snap() },
+        back: () => { seq = seq.slice(0, -1); return snap() },
+      }
+      const h = makeHarness()
+      return { ...h, ctx: { ...h.ctx, preview } }
+    }
+
+    it('撤销一步：序列少一项', async () => {
+      const h = statefulHarness()
+      await runCommand(h.ctx, { name: 'choose', pos: 0 })
+      const two = await runCommand(h.ctx, { name: 'choose', pos: 1 })
+      expect(two.interactionSeq).toHaveLength(2)
+      const back = await runCommand(h.ctx, { name: 'back' })
+      expect(back.interactionSeq).toEqual([{ kind: 'choice', pos: 0 }])
+    })
+
+    it('空序列时动作层不额外加 guard，原样转发端口的返回', async () => {
+      const h = statefulHarness()
+      const r = await runCommand(h.ctx, { name: 'back' })
+      expect(r.interactionSeq).toEqual([])
+      // 想知道还能不能退，看快照的 interactionSeq 长度即可，不必靠抛错告知
+      const again = await runCommand(h.ctx, { name: 'preview' })
+      expect(again.interactionSeq).toEqual([])
+    })
   })
 })
 

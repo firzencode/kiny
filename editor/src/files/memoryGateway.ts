@@ -2,7 +2,7 @@ import { findManifest } from '@kiny/engine'
 import type { ResolveAsset } from '@kiny/player'
 import {
   type FileGateway, type LoadedProject, type Manifest, type ProjectFileEntry, type WindowMode,
-  STARTER_MAIN_KIN, STARTER_NEW_FILE, normalizeKinName, starterManifest, projectFileName, projectFolderName, assertSafeRelPath, assertRenameSafe, isTextFile,
+  STARTER_MAIN_KIN, STARTER_THEME_CSS, normalizeNewFileName, starterContentFor, isKinFile, starterManifest, projectFileName, projectFolderName, assertSafeRelPath, assertRenameSafe, isTextFile,
 } from './gateway'
 import { type DraftStore, emptyDraftStore } from '../state/drafts'
 import type { ChatStore } from '../state/chatStore'
@@ -94,7 +94,7 @@ export function createMemoryGateway(init: MemoryGatewayInit): FileGateway {
     }
     const rels = listAll(dir)
     const projFiles: ProjectFileEntry[] = rels.map((rel) => {
-      const isKin = rel.endsWith('.kin')
+      const isKin = isKinFile(rel)
       // 与真实现同口径：文本文件（.kin + 作品前端资源）带 source，二进制不带。
       return isTextFile(rel)
         ? { path: rel, isKin, source: files.get(`${dir}/${rel}`)! }
@@ -116,15 +116,18 @@ export function createMemoryGateway(init: MemoryGatewayInit): FileGateway {
       }
       files.set(`${dir}/${projectFileName(name)}`, JSON.stringify(starterManifest(name), null, 2))
       files.set(`${dir}/main.kin`, STARTER_MAIN_KIN)
+      // 内置主题文件：作者打开自己的项目即看见「外观可改」，无需先去翻样例或教程。
+      files.set(`${dir}/theme.css`, STARTER_THEME_CSS)
       return dir
     },
     readProject,
     createFile: async (dir, rawPath) => {
-      const rel = normalizeKinName(rawPath)
+      const rel = normalizeNewFileName(rawPath)
       const abs = `${dir}/${rel}`
       if (files.has(abs)) throw new Error(`文件已存在: ${rel}`)
-      files.set(abs, STARTER_NEW_FILE)
-      return { path: rel, isKin: true, source: STARTER_NEW_FILE }
+      const source = starterContentFor(rel)
+      files.set(abs, source)
+      return { path: rel, isKin: isKinFile(rel), source }
     },
     writeFile: async (dir, rel, text) => { assertSafeRelPath(rel); files.set(`${dir}/${rel}`, text) },
     readTextFile: async (dir, rel) => {

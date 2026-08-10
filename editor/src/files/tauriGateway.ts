@@ -9,7 +9,7 @@ import { findManifest } from '@kiny/engine'
 import type { ResolveAsset } from '@kiny/player'
 import {
   type FileGateway, type LoadedProject, type Manifest, type ProjectFileEntry, type WindowMode,
-  STARTER_MAIN_KIN, STARTER_NEW_FILE, normalizeKinName, starterManifest, projectFileName, projectFolderName, assertSafeRelPath, assertRenameSafe, isTextFile,
+  STARTER_MAIN_KIN, STARTER_THEME_CSS, normalizeNewFileName, starterContentFor, isKinFile, starterManifest, projectFileName, projectFolderName, assertSafeRelPath, assertRenameSafe, isTextFile,
 } from './gateway'
 import { loadWorkbenchSize, computeLaunchSize, LAUNCH_WINDOW, WORKBENCH_WINDOW, WORKBENCH_MIN_SIZE } from '../state/windowSize'
 import { type DraftStore, parseDraftStore, emptyDraftStore } from '../state/drafts'
@@ -133,7 +133,7 @@ async function readProject(dir: string): Promise<LoadedProject> {
   emptyDirs.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
   const files: ProjectFileEntry[] = []
   for (const rel of rels) {
-    const isKin = rel.endsWith('.kin')
+    const isKin = isKinFile(rel)
     // 文本文件（.kin + css/js/json/txt/md/html）载入文本供编辑；二进制只列名。
     // 读不出文本（非 UTF-8 的 .txt/.json 在中文环境里很常见）时降级成「只列名」——
     // 一个编码异常的旁挂文件不该让整个项目打不开；`.kin` 例外，它读不了就是真错误。
@@ -177,18 +177,21 @@ export const tauriFileGateway: FileGateway = {
     }
     await writeTextFile(await join(dir, projectFileName(name)), JSON.stringify(starterManifest(name), null, 2))
     await writeTextFile(await join(dir, 'main.kin'), STARTER_MAIN_KIN)
+    // 内置主题文件：作者打开自己的项目即看见「外观可改」，无需先去翻样例或教程。
+    await writeTextFile(await join(dir, 'theme.css'), STARTER_THEME_CSS)
     // 不默认建 assets 目录——首次导入资源时按需创建。
     return dir
   },
   readProject,
   async createFile(dir, rawPath) {
-    const rel = normalizeKinName(rawPath)
+    const rel = normalizeNewFileName(rawPath)
     const abs = await join(dir, rel)
     if (await exists(abs)) throw new Error(`文件已存在: ${rel}`)
     const parent = rel.includes('/') ? await join(dir, rel.slice(0, rel.lastIndexOf('/'))) : dir
     if (!(await exists(parent))) await mkdir(parent, { recursive: true })
-    await writeTextFile(abs, STARTER_NEW_FILE)
-    return { path: rel, isKin: true, source: STARTER_NEW_FILE }
+    const source = starterContentFor(rel)
+    await writeTextFile(abs, source)
+    return { path: rel, isKin: isKinFile(rel), source }
   },
   writeFile: async (dir, rel, text) => {
     assertSafeRelPath(rel)

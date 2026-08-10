@@ -24,6 +24,7 @@ vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: vi.fn() }))
 vi.mock('@tauri-apps/api/path', () => ({ join: (...parts: string[]) => parts.join('/'), dirname: (...a: unknown[]) => dirname(...a) }))
 
 import { tauriFileGateway } from './tauriGateway'
+import { STARTER_NEW_FILE, STARTER_THEME_CSS } from './gateway'
 
 describe('tauriFileGateway.exportThemeFile', () => {
   beforeEach(() => {
@@ -59,14 +60,21 @@ describe('tauriFileGateway.newProject / pickDirectory', () => {
     invoke.mockResolvedValue(undefined)
   })
 
-  it('在 <parent>/<sanitize名> 建目录并铺 <名>.kiw + main.kin，不建 assets', async () => {
+  it('在 <parent>/<sanitize名> 建目录并铺 <名>.kiw + main.kin + theme.css，不建 assets', async () => {
     const dir = await tauriFileGateway.newProject('D:/loc', '雾港')
     expect(dir).toBe('D:/loc/雾港')
     expect(mkdir).toHaveBeenCalledWith('D:/loc/雾港') // 非递归：无 options
     const written = writeTextFile.mock.calls.map((c) => c[0] as string)
     expect(written).toContain('D:/loc/雾港/雾港.kiw')
     expect(written).toContain('D:/loc/雾港/main.kin')
+    expect(written).toContain('D:/loc/雾港/theme.css')
     expect(written).not.toContain('D:/loc/雾港/assets')
+  })
+
+  it('内置的 theme.css 落主题模板原文', async () => {
+    await tauriFileGateway.newProject('D:/loc', '雾港')
+    const call = writeTextFile.mock.calls.find((c) => c[0] === 'D:/loc/雾港/theme.css')
+    expect(call?.[1]).toBe(STARTER_THEME_CSS)
   })
 
   it('写盘前先放行父目录', async () => {
@@ -90,6 +98,17 @@ describe('tauriFileGateway.newProject / pickDirectory', () => {
     exists.mockResolvedValue(false)
     mkdir.mockRejectedValueOnce(new Error('EEXIST'))
     await expect(tauriFileGateway.newProject('D:/loc', '雾港')).rejects.toThrow('已存在')
+  })
+
+  it('createFile 建 .css：尊重扩展名、isKin false、落主题模板', async () => {
+    const e = await tauriFileGateway.createFile('D:/p', 'theme.css')
+    expect(e).toMatchObject({ path: 'theme.css', isKin: false, source: STARTER_THEME_CSS })
+    expect(writeTextFile).toHaveBeenCalledWith('D:/p/theme.css', STARTER_THEME_CSS)
+  })
+
+  it('createFile 无扩展名仍补 .kin、落故事脚手架', async () => {
+    const e = await tauriFileGateway.createFile('D:/p', '第二章')
+    expect(e).toMatchObject({ path: '第二章.kin', isKin: true, source: STARTER_NEW_FILE })
   })
 
   it('pickDirectory 走 open({directory:true})', async () => {

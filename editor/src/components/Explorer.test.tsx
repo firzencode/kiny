@@ -29,13 +29,28 @@ it('点击 .kin 文件触发 onOpenFile（相对路径）', () => {
   expect(onOpenFile).toHaveBeenCalledWith('main.kin')
 })
 
-it('非 .kin 文件点击不打开', () => {
+it('没有查看器的二进制（字体）点击不打开，且灰显', () => {
   const onOpenFile = vi.fn()
   render(<Explorer {...base} onOpenFile={onOpenFile}
-    entries={[{ path: 'assets/x.jpg', isKin: false }]} emptyDirs={[]} />)
+    entries={[{ path: 'fonts/楷体.woff2', isKin: false }]} emptyDirs={[]} />)
+  fireEvent.click(screen.getByText('fonts'))  // 展开（文件夹默认折叠）
+  const row = screen.getByText('楷体.woff2').closest('li')!
+  fireEvent.click(screen.getByText('楷体.woff2'))
+  expect(onOpenFile).not.toHaveBeenCalled()
+  expect(row.className).toContain('frow-other')
+})
+
+it('图片 / 音频可点开（媒体预览），且不灰显', () => {
+  const onOpenFile = vi.fn()
+  render(<Explorer {...base} onOpenFile={onOpenFile}
+    entries={[{ path: 'assets/x.jpg', isKin: false }, { path: 'assets/雨.mp3', isKin: false }]} emptyDirs={[]} />)
   fireEvent.click(screen.getByText('assets'))  // 展开（文件夹默认折叠）
   fireEvent.click(screen.getByText('x.jpg'))
-  expect(onOpenFile).not.toHaveBeenCalled()
+  expect(onOpenFile).toHaveBeenCalledWith('assets/x.jpg')
+  fireEvent.click(screen.getByText('雨.mp3'))
+  expect(onOpenFile).toHaveBeenCalledWith('assets/雨.mp3')
+  expect(screen.getByText('x.jpg').closest('li')!.className).not.toContain('frow-other')
+  expect(screen.getByText('雨.mp3').closest('li')!.className).not.toContain('frow-other')
 })
 
 it('头部不再有「添加」按钮', () => {

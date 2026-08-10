@@ -29,7 +29,7 @@ async function makeCtx() {
     },
   })
   const snap: PreviewSnapshot = { play: null, stale: false, interactionSeq: [] }
-  const preview: PreviewPort = { snapshot: () => snap, choose: () => snap, submitInput: () => snap, restart: () => snap }
+  const preview: PreviewPort = { snapshot: () => snap, choose: () => snap, submitInput: () => snap, restart: () => snap, back: () => snap }
   const ctx: ActionContext = { getState: () => state, dispatch, gateway, validator: createIncrementalValidator(), preview }
   // 打开项目：走真实前置（gateway 读盘 + project_loaded），listProject/health 才能看到已打开项目。
   const proj = await gateway.readProject(DIR)

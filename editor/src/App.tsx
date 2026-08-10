@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
-import { resolveStart } from '@kiny/engine'
+import { resolveStart, validFont } from '@kiny/engine'
 import type { ValidatedProgram } from '@kiny/engine'
-import { discoverAssets, buildProjectCss } from '@kiny/player'
+import { discoverAssets, buildProjectCss, scopeCss, familyOf } from '@kiny/player'
 import type { PlayState, ResolveAsset, InteractionStep, AssetIssue } from '@kiny/player'
 import type { FileGateway, Manifest } from './files/gateway'
-import { defaultKipName, defaultWebpageDirName, buildProjectData, projectFileName, isTextFile } from './files/gateway'
+import { defaultKipName, defaultWebpageDirName, buildProjectData, projectFileName, isTextFile, isThemeFile, isKinFile } from './files/gateway'
 import { editorReducer, initialEditorState, anyDirty, activeBuffer } from './state/editorReducer'
 import { useDebouncedValidation, type ValidationOutcome } from './hooks/useDebouncedValidation'
-import { createIncrementalValidator } from './validate/validate'
+import { createIncrementalValidator, kinSourcesOf } from './validate/validate'
 import { computePreview } from './preview/computePreview'
 import { usePreviewPlayback, type PreviewPlayback } from './preview/usePreviewPlayback'
+import { makePreviewPort } from './preview/previewPort'
 import { parseNodes } from './syntax/kin'
 import { MenuBar } from './components/MenuBar'
 import { Explorer } from './components/Explorer'
@@ -18,6 +19,9 @@ import { Outline } from './components/Outline'
 import { TodoPanel } from './components/TodoPanel'
 import { scanTodos } from './todo/scanTodos'
 import { EditorPane, type EditorHandle } from './components/EditorPane'
+import { ThemeEditor } from './components/ThemeEditor'
+import { MediaView } from './components/MediaView'
+import { mediaKind } from './files/media'
 import { StoryGraph } from './components/StoryGraph'
 import { normalize as normalizeKey } from './shortcuts/keys'
 import { dispatchMap } from './shortcuts/bindings'
@@ -148,6 +152,17 @@ export function App({ gateway }: { gateway: FileGateway }) {
 
   // 派生量
   const active = activeBuffer(state)
+  /**
+   * 活动 tab 是媒体（图片 / 音频）时的查看器入参。媒体不进 `state.files`，故 `active` 为 null
+   * 而此值非 null——编辑区据此走 MediaView 分支。url 走项目资源解析器（Tauri 的 convertFileSrc）。
+   */
+  const activeMedia = useMemo(() => {
+    const path = state.activeFile
+    if (path === null || active !== null) return null
+    const kind = mediaKind(path)
+    return kind === null ? null : { path, kind, url: resolveRef.current(path) }
+    // resolveRef 随项目切换更新（projectDir 一并变），故与 activeFile 同列依赖即足。
+  }, [state.activeFile, state.projectDir, active])
   const nodes = useMemo(() => (active ? parseNodes(active.source) : []), [active])
   // 当前文件诊断（喂 EditorPane 画行内波浪线）；跨文件总览仍走 DiagnosticsList。
   const currentDiags = useMemo(
@@ -178,13 +193,17 @@ export function App({ gateway }: { gateway: FileGateway }) {
   }, [])
   const preview: PreviewPlayback = usePreviewPlayback(onPreviewCommit)
 
-  // AI 动作前先中止在飞的人工打字动画：否则动画后续的 doStep 会覆盖 AI 刚 recompute 出的瞬时态。
-  // 不改 AI 自身的瞬时行为——choose/restart 仍直调 recompute；preview.cancel 引用稳定（useCallback([])）。
-  const previewPort = useMemo<PreviewPort>(() => ({
-    snapshot: () => ({ play: playRef.current, stale: staleRef.current, interactionSeq: interactionSeqRef.current }),
-    choose: (pos: number) => { preview.cancel(); return recompute(programRef.current, [...interactionSeqRef.current, { kind: 'choice', pos }], resolveRef.current, playRef.current, true) },
-    submitInput: (text: string) => { preview.cancel(); return recompute(programRef.current, [...interactionSeqRef.current, { kind: 'input', text }], resolveRef.current, playRef.current, true) },
-    restart: () => { preview.cancel(); return recompute(programRef.current, [], resolveRef.current, playRef.current) },
+  // 预览端口（内置 AI / 外部控制 / UI「← 上一步」共用；实现与单测见 preview/previewPort.ts）。
+  // 每个动作前先中止在飞的人工打字动画：否则动画后续的 doStep 会覆盖刚 recompute 出的瞬时态。
+  // preview.cancel 引用稳定（useCallback([])），故端口对象只随 recompute 重建。
+  const previewPort = useMemo<PreviewPort>(() => makePreviewPort({
+    getSeq: () => interactionSeqRef.current,
+    getPlay: () => playRef.current,
+    getStale: () => staleRef.current,
+    getProgram: () => programRef.current,
+    getResolve: () => resolveRef.current,
+    recompute,
+    cancel: preview.cancel,
   }), [recompute, preview.cancel])
 
   const ai = useAiSession({
@@ -232,27 +251,41 @@ export function App({ gateway }: { gateway: FileGateway }) {
   // 待办面板数据（T075）：扫全项目 .kin 的 TODO/FIXME。draftBuffers 已含当前编辑文件的最新 buffer，
   // 故未保存的 // TODO 也即时出现；正则扫描成本极低，随 buffer 变化 useMemo 重算无压力。
   const todos = useMemo(
-    () => scanTodos(draftBuffers.filter((f) => f.path.endsWith('.kin')).map((f) => ({ path: f.path, text: f.source }))),
+    () => scanTodos(draftBuffers.filter((f) => isKinFile(f.path)).map((f) => ({ path: f.path, text: f.source }))),
     [draftBuffers],
   )
   /**
-   * 预览用的作品主题 css（T077）：项目内全部 `.css` + 字体经 player 加载器编译成一段文本。
-   * css 缓冲一变即重算 → 保存 / 编辑 css 时预览即时换肤。设置里关掉「应用作品主题」则为空串
-   * （作者 css 越界污染编辑器 UI 时的逃生阀）。
+   * 预览用的作品主题 css（T077）：项目内全部 `.css` + 字体经 player 加载器编译成一段文本，
+   * 再由 `scopeCss` 限定到预览容器 `.preview-stage`（T094）——预览只是编辑器窗口里的一块，
+   * 而 `<style>` 的规则是文档全局的，作者写 `body {}` / `*{}` 这类通用选择器不限定就会重绘
+   * 整个编辑器。限定后编辑器界面绝不受作品 css 影响。
+   * css 缓冲一变即重算 → 保存 / 编辑 css 时预览即时换肤。设置里关掉「应用作品主题」则为空串。
+   * 导出网页走 `onExportWebpage` 里另一次 `buildProjectCss`（**不**限定）——那里整页即播放器，
+   * `body {}` 本就是合法写法，别把这道限定挪到共用的编译函数里去。
    */
   const previewTheme = useMemo(() => {
     if (!state.projectDir) return { css: '', issues: [] as AssetIssue[] }
     const assets = discoverAssets(state.entries.map((e) => e.path))
-    return buildProjectCss(assets, {
+    const built = buildProjectCss(assets, {
       readCss: (p) => state.files[p]?.source ?? null,
       resolveAsset: resolveRef.current,
     })
+    return { css: scopeCss(built.css, '.preview-stage'), issues: built.issues }
     // resolveRef 随项目切换更新（projectDir 一并变），故不必入依赖。
   }, [state.projectDir, state.entries, state.files])
   // 只有「是否注入」受开关控制；资源问题与开关无关，关掉主题也照样提示（否则作者查不出族名为何不生效）。
   const previewCss = settings.previewProjectTheme ? previewTheme.css : ''
   /** 资源问题（非法族名 / 同名冲突 / 读不到）汇成一行提示——播放端静默跳过，作者这里要看得见。 */
   const assetWarnings = useMemo(() => previewTheme.issues.map(describeAssetIssue), [previewTheme])
+  /**
+   * 项目内**真正注册得成**的字体族名（主题编辑器的字体下拉取值；放进字体文件即可选）。
+   * 过 `validFont` 并去重——非法族名 buildProjectCss 本就不注册（列出来选了也不生效），
+   * 同名族按路径序后者覆盖、下拉里不该出现两条。
+   */
+  const projectFonts = useMemo(
+    () => [...new Set(discoverAssets(state.entries.map((e) => e.path)).fonts.map(familyOf).filter(validFont))],
+    [state.entries],
+  )
   const draftSignature = useMemo(
     () => JSON.stringify(draftBuffers.filter((f) => f.dirty).map((f) => [f.path, f.source])),
     [draftBuffers],
@@ -269,10 +302,8 @@ export function App({ gateway }: { gateway: FileGateway }) {
 
   // 防抖校验：跑全部缓冲
   const run = useCallback((rid: number): ValidationOutcome => {
-    // 只把 `.kin` 送进校验：缓冲里还有作品前端资源（css 等），它们不是 Kin 源码。
-    const files = Object.values(filesRef.current)
-      .filter((f) => f.path.endsWith('.kin'))
-      .map((f) => ({ path: f.path, source: f.source }))
+    // 只把 `.kin` 送进校验（口径见 kinSourcesOf——动作层 validate 消费的是同一份）。
+    const files = kinSourcesOf(Object.values(filesRef.current))
     const { diagnostics, program } = validatorRef.current.validate(files)
     return { runId: rid, diagnostics, program }
   }, [])
@@ -566,6 +597,24 @@ export function App({ gateway }: { gateway: FileGateway }) {
     try { const entry = await gateway.createFile(state.projectDir, rawName); dispatch({ type: 'file_created', file: entry }) }
     catch (e) { setNotice(`新建文件失败：${errMsg(e)}`) }
   }
+  /**
+   * 「作品主题…」：有主题文件就开它，没有才按模板新建 `theme.css` 并打开——存量项目
+   * （不含内置主题文件）的入口。**不退而求其次开别的 `.css`**：那些不是主题文件，
+   * 开出来也只是纯文本编辑器，帮不到「我想改外观」的作者。
+   */
+  const onOpenTheme = async () => {
+    if (!state.projectDir) return
+    // 只挑进得了缓冲的：非 UTF-8 的 .css 读不出文本、没进 state.files，open_tab 对它是 no-op，
+    // 选中它等于菜单点了没反应。
+    const existing = state.entries
+      .map((e) => e.path)
+      .find((p) => isThemeFile(p) && state.files[p] !== undefined)
+    if (existing) { dispatch({ type: 'open_tab', path: existing }); return }
+    try {
+      const entry = await gateway.createFile(state.projectDir, 'theme.css')
+      dispatch({ type: 'file_created', file: entry })
+    } catch (e) { setNotice(`创建主题文件失败：${errMsg(e)}`) }
+  }
   const onCreateFolder = async (relDir: string) => {
     if (!state.projectDir) return
     try { await gateway.createFolder(state.projectDir, relDir); dispatch({ type: 'folder_created', relDir }) }
@@ -782,14 +831,9 @@ export function App({ gateway }: { gateway: FileGateway }) {
     preview.restart(prog, start, nextSeed, resolveRef.current)
   }
 
-  // 返回上一步（作者调试工具）：丢弃 seq 末元素、经既有保位重算落回上一决定点（无动画，直接定格）。
-  // seq 空则 no-op。不改 seed（同一预览会话内后退确定性重建）；打断在飞的打字动画。
-  const onBack = () => {
-    const seq = interactionSeqRef.current
-    if (seq.length === 0) return
-    preview.cancel()
-    recompute(programRef.current, seq.slice(0, -1), resolveRef.current, playRef.current)
-  }
+  // 返回上一步（作者调试工具）：委派给预览端口的 back——与动作层 back 命令同一处实现，
+  // 不留两份逻辑各自演化。seq 空时端口内部即 no-op（不改 seed，同一预览会话内后退确定性重建）。
+  const onBack = () => { previewPort.back() }
 
   const dirtyMap = useMemo(() => {
     const m: Record<string, boolean> = {}
@@ -834,6 +878,7 @@ export function App({ gateway }: { gateway: FileGateway }) {
         onReportIssue={onReportIssue}
         onOpenSettings={onOpenSettings}
         onOpenProjectSettings={onOpenProjectSettings}
+        onOpenTheme={() => { void onOpenTheme() }}
         onZoomIn={onZoomIn}
         onZoomOut={onZoomOut}
         onZoomReset={onZoomReset}
@@ -951,25 +996,49 @@ export function App({ gateway }: { gateway: FileGateway }) {
               {ai.running && (
                 <div className="editor-readonly-banner" role="status">AI 正在修改，编辑区暂时只读</div>
               )}
-              <EditorPane
-                // 每个文件一个独立 EditorView：切档重挂，撤销历史天然隔离，
-                // 避免在文件 B 里 Ctrl+Z 撤回成文件 A 内容、doc 与 React state 串档。
-                key={state.activeFile ?? ''}
-                ref={editorRef}
-                source={active.source}
-                onChange={(s) => dispatch({ type: 'source_changed', path: active.path, source: s })}
-                caretLine={caretLine}
-                onCaretConsumed={() => setCaretLine(null)}
-                onCaretMove={setActiveLine}
-                onGoto={onJumpDiagnostic}
-                diagnostics={currentDiags}
-                program={program}
-                activeFile={state.activeFile}
-                highlight={view.highlight}
-                shortcuts={settings.shortcuts}
-                readOnly={ai.running}
-              />
+              {(() => {
+                const pane = (
+                  <EditorPane
+                    // 每个文件一个独立 EditorView：切档重挂，撤销历史天然隔离，
+                    // 避免在文件 B 里 Ctrl+Z 撤回成文件 A 内容、doc 与 React state 串档。
+                    key={state.activeFile ?? ''}
+                    ref={editorRef}
+                    source={active.source}
+                    onChange={(s) => dispatch({ type: 'source_changed', path: active.path, source: s })}
+                    caretLine={caretLine}
+                    onCaretConsumed={() => setCaretLine(null)}
+                    onCaretMove={setActiveLine}
+                    onGoto={onJumpDiagnostic}
+                    diagnostics={currentDiags}
+                    program={program}
+                    activeFile={state.activeFile}
+                    highlight={view.highlight}
+                    shortcuts={settings.shortcuts}
+                    readOnly={ai.running}
+                  />
+                )
+                // 只有作品主题文件给双模编辑器（外观 GUI ↔ 原文），文本编辑器作为「原文」页嵌入；
+                // 其余 `.css` 仍是纯文本编辑器——理由见 `isThemeFile`。
+                return isThemeFile(active.path) ? (
+                  <ThemeEditor
+                    key={`theme:${state.activeFile ?? ''}`}
+                    source={active.source}
+                    onChange={(s) => dispatch({ type: 'source_changed', path: active.path, source: s })}
+                    fonts={projectFonts}
+                    readOnly={ai.running}
+                    rawEditor={pane}
+                  />
+                ) : pane
+              })()}
             </>
+          ) : activeMedia ? (
+            // 媒体 tab（图片 / 音频）：无文本缓冲，只读呈现。AI 只读横幅在此无意义（本就不可编辑）。
+            <MediaView
+              key={state.activeFile ?? ''}
+              path={activeMedia.path}
+              url={activeMedia.url}
+              kind={activeMedia.kind}
+            />
           ) : (
             <div className="editor-empty">未打开文件</div>
           )}

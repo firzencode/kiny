@@ -4,6 +4,8 @@
  * 待办面板是辅助工具而非编译器，字符串里误写 `// TODO` 的极罕见误报可接受（提示而非保证）。
  */
 
+import { isKinFile } from '../files/gateway'
+
 export interface TodoItem {
   path: string // 所属 .kin 文件项目内路径
   line: number // 1-based 行号，与 onJump 一致
@@ -21,7 +23,7 @@ const TODO_RE = /(?:\/\/|\/\*)\s*(TODO|FIXME)\b[:：]?\s*(.*)/
 export function scanTodos(files: { path: string; text: string }[]): TodoItem[] {
   const out: TodoItem[] = []
   for (const f of files) {
-    if (!f.path.endsWith('.kin')) continue
+    if (!isKinFile(f.path)) continue
     const lines = f.text.split('\n')
     for (let i = 0; i < lines.length; i++) {
       const m = TODO_RE.exec(lines[i]!)

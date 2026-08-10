@@ -1,6 +1,20 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { zipSync, strToU8 } from 'fflate'
 import { importKip, listLibrary, openPackage, deleteStory } from './store'
+import { openDb, reqDone, STORE_STORIES } from './db'
+import type { StoredStory } from './types'
+
+/** 直接读 `stories` 记录里的封面 Blob（listLibrary 只给 objectURL，量不出体积）。 */
+async function storedCover(id: string): Promise<Blob | undefined> {
+  const db = await openDb()
+  try {
+    const tx = db.transaction(STORE_STORIES, 'readonly')
+    const s = await reqDone(tx.objectStore(STORE_STORIES).get(id) as IDBRequest<StoredStory | undefined>)
+    return s?.coverBlob
+  } finally {
+    db.close()
+  }
+}
 
 const MANIFEST = JSON.stringify({
   name: '测试故事', version: '1.0.0', engine: '0.1.0', entry: 'main.kin',
@@ -59,6 +73,42 @@ describe('library store', () => {
     const jia = list.find((i) => i.name === '甲')!
     expect(jia.coverUrl).toMatch(/^blob:/)
     expect(list.find((i) => i.name === '乙')!.coverUrl).toBeUndefined() // 无 cover 字段
+  })
+
+  it('导入时把封面压成缩略图存 stories，原图仍完整躺在 packages 里', async () => {
+    // 桩掉 jsdom 没有的两个浏览器 API，让 makeCoverThumb 真的走到重编码分支。
+    const original = new Uint8Array(300_000) // 「大封面」：超体积预算
+    const bytes = zipSync({
+      'kiny.json': strToU8(MANIFEST),
+      'main.kin': strToU8(MAIN),
+      'assets/c.png': original,
+    })
+    globalThis.createImageBitmap = (async () => ({ width: 1600, height: 2400, close: () => {} })) as unknown as typeof createImageBitmap
+    globalThis.OffscreenCanvas = class {
+      constructor(public width: number, public height: number) {}
+      getContext() { return { drawImage: () => {} } }
+      async convertToBlob() { return new Blob([new Uint8Array(4096)], { type: 'image/webp' }) }
+    } as unknown as typeof OffscreenCanvas
+    try {
+      const item = await importKip(bytes)
+      const list = await listLibrary()
+      expect(list).toHaveLength(1)
+      // 列表侧：拿到的是缩略图（体积远小于原图）
+      const thumb = await storedCover(item.id)
+      expect(thumb!.size).toBe(4096)
+      // 包体侧：原图分毫未动，阅读时照常可用
+      const pkg = await openPackage(item.id)
+      expect((pkg.assets.get('assets/c.png') as Blob).size).toBe(original.length)
+    } finally {
+      delete (globalThis as { createImageBitmap?: unknown }).createImageBitmap
+      delete (globalThis as { OffscreenCanvas?: unknown }).OffscreenCanvas
+    }
+  })
+
+  it('压不出缩略图的环境（无 OffscreenCanvas）→ 照旧存原封面，导入不失败', async () => {
+    expect(typeof OffscreenCanvas).toBe('undefined') // 前提：jsdom 无此 API，且上一用例的桩已清干净
+    const item = await importKip(kipBytes())
+    expect((await storedCover(item.id))!.size).toBe(3) // assets/c.png 的三个字节，原样
   })
 
   it('openPackage 取回可装配的包', async () => {

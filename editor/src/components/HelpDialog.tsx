@@ -230,7 +230,7 @@ const THEME_TOKENS: { name: string; use: string }[] = [
 
 /** 作者可依赖的稳定 DOM class（播放层结构锚点）。 */
 const THEME_CLASSES: { name: string; use: string }[] = [
-  { name: '.player', use: '播放层根（自定义选择器建议都以它为根，避免越界影响编辑器界面）' },
+  { name: '.player', use: '播放层根（自定义选择器建议都以它为根，避免误伤阅读器 / 网页书库自己的界面元素）' },
   { name: '.player-content', use: '居中阅读栏容器' },
   { name: '.story-log', use: '叙事流容器' },
   { name: '.narration', use: '一行正文（整行 <class=…> 的类名挂在这里）' },
@@ -244,8 +244,10 @@ const THEME_CLASSES: { name: string; use: string }[] = [
 const THEME_SNIPPET = `/* 项目内任意位置放 .css 即自动加载（按路径字典序；用 10- / 20- 前缀控序）。
    停用某个文件：改扩展名，如 skin.css.bak */
 
-/* ① 换 token —— 最省事的换肤方式 */
-:root {
+/* ① 换 token —— 最省事的换肤方式。以 .player 为根，别用 :root：
+   .player 上的声明直接落在阅读区元素本身，优先于从根元素继承来的宿主取值。
+   token 赋值集中在 theme.css 一个文件里，分散到多个 .css 会按字典序互相覆盖。 */
+.player {
   --kiny-page-bg: #f7f3e9;
   --kiny-text: #2b2622;
   --kiny-prose-font: "楷体";      /* 项目里放 楷体.woff2 即自动注册 */
@@ -260,8 +262,8 @@ const THEME_SNIPPET = `/* 项目内任意位置放 .css 即自动加载（按路
 .player .choice { border-radius: 2px; letter-spacing: .05em; }
 
 /* ③ 语义类 —— 对应正文里的 <class=名> */
-.kin-whisper { opacity: .6; font-style: italic; }
-.kin-letter  { background: rgba(0,0,0,.05); padding: 12px; border-radius: 6px; }`
+.player .kin-whisper { opacity: .6; font-style: italic; }
+.player .kin-letter  { background: rgba(0,0,0,.05); padding: 12px; border-radius: 6px; }`
 
 function ThemeScreen() {
   return (
@@ -320,7 +322,10 @@ function ThemeScreen() {
           <div className="help-syn-cat">上手</div>
           <div className="help-syn-sec">
             <div className="help-syn-sec-h"><h3>可抄的换肤片段</h3><span className="en">Starter</span></div>
-            <p className="help-syn-desc">新建一个 <code>theme.css</code>，粘贴下面内容按需改。</p>
+            <p className="help-syn-desc">
+              新建项目自带 <code>theme.css</code>，打开即可改；已有项目在资源管理器里新建一个名为
+              <code>theme.css</code> 的文件即得同一份模板。下面这段可直接粘进去按需改。
+            </p>
             <pre className="help-kin">{THEME_SNIPPET}</pre>
           </div>
         </div>

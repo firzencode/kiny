@@ -15,6 +15,8 @@ export interface ParamSpec {
   desc: string
   /** true = 内容型参数：CLI 只接 --<p>-file/--<p>-stdin，禁内联（防 shell 换行截断/长度上限静默丢内容）。仅 CLI 输入通道语义，不影响 JSON Schema。 */
   content?: true
+  /** true = 空串对此参数没有意义（路径 / 名称类）：CLI 本地拦下 `--k=`。仅 CLI 输入通道语义，不影响 JSON Schema。 */
+  nonEmpty?: true
 }
 
 /** 单条命令的运行时元数据。命令名/描述/参数的唯一真相源。 */
@@ -28,33 +30,36 @@ const s = (desc: string, required = true): ParamSpec => ({ type: 'string', requi
 const i = (desc: string, required = true): ParamSpec => ({ type: 'integer', required, desc })
 /** 内容型 string 参数（必填）：CLI 经 file/stdin 输入，禁内联。 */
 const c = (desc: string): ParamSpec => ({ type: 'string', required: true, desc, content: true })
+/** 路径 / 名称型 string 参数：空串无意义，CLI 本地拦下。 */
+const p = (desc: string, required = true): ParamSpec => ({ type: 'string', required, desc, nonEmpty: true })
 
 /**
- * 动作层全部 21 命令的运行时清单——单一真相源。
+ * 动作层全部 22 命令的运行时清单——单一真相源。
  * LLM tool-definitions（toolDefinitions.ts）与对外 REST/CLI 均从此派生，禁止别处再手写命令表。
  */
 export const ACTION_MANIFEST: readonly CommandSpec[] = [
-  { name: 'listProject', desc: '列出当前项目结构：项目根、manifest、文件清单、已打开的 tab 与活动文件。', params: {} },
-  { name: 'readFile', desc: '读取一个 .kin 文件当前编辑缓冲的源码（含是否有未保存改动）。', params: { path: s('项目根相对路径，如 chapters/a.kin') } },
-  { name: 'createFile', desc: '新建一个文件并打开为活动 tab。', params: { path: s('新文件的项目根相对路径') } },
-  { name: 'writeFile', desc: '整体替换某文件缓冲的内容（落脏标记、可撤销，不直接写盘）。', params: { path: s('目标文件路径'), source: c('新的完整源码') } },
-  { name: 'renamePath', desc: '重命名 / 移动一个文件或目录（入口文件会同步 kiny.json 的 entry）。', params: { from: s('原路径'), to: s('新路径') } },
-  { name: 'deletePath', desc: '删除一个文件或目录（入口文件不可删）。', params: { path: s('要删除的路径') } },
-  { name: 'createFolder', desc: '新建一个空目录。', params: { relDir: s('项目根相对目录路径') } },
-  { name: 'listNodes', desc: '列出某文件内的全部节点（含子节点）及其行号。', params: { path: s('目标文件路径') } },
-  { name: 'readNode', desc: '读取某文件内某个节点的源码片段（从 === 头到下一节点前）。', params: { path: s('目标文件路径'), node: s('节点名') } },
-  { name: 'replaceRange', desc: '按字符偏移替换某文件缓冲的一段区间（落脏标记、可撤销）。', params: { path: s('目标文件路径'), start: i('起始字符偏移（含）'), end: i('结束字符偏移（不含）'), text: c('替换文本') } },
-  { name: 'insertText', desc: '在某文件缓冲的指定字符偏移处插入文本（落脏标记、可撤销）。', params: { path: s('目标文件路径'), offset: i('插入位置的字符偏移'), text: c('要插入的文本') } },
+  { name: 'listProject', desc: '列出当前项目结构：项目根、manifest、文件清单（每条带 isKin / editable）、已打开的 tab 与活动文件。', params: {} },
+  { name: 'readFile', desc: '读取一个文本文件（.kin 故事，或 theme.css / 作品 css 等前端资源）当前编辑缓冲的源码（含是否有未保存改动）。', params: { path: p('项目根相对路径，如 chapters/a.kin 或 theme.css') } },
+  { name: 'createFile', desc: '新建一个文件并打开为活动 tab：命中已知文本扩展名（.kin/.css/.js/.json/.txt/.md/.html，归一为小写）则按该类型建并落对应脚手架；未命中（含无扩展名，如 cover.svg）一律补 .kin。', params: { path: p('新文件的项目根相对路径') } },
+  { name: 'writeFile', desc: '整体替换某文本文件（.kin，或 theme.css / 作品 css 等前端资源）缓冲的内容（落脏标记、可撤销，不直接写盘）。', params: { path: p('目标文件路径'), source: c('新的完整源码') } },
+  { name: 'renamePath', desc: '重命名 / 移动一个文件或目录（入口文件会同步 kiny.json 的 entry）。', params: { from: p('原路径'), to: p('新路径') } },
+  { name: 'deletePath', desc: '删除一个文件或目录（入口文件不可删）。', params: { path: p('要删除的路径') } },
+  { name: 'createFolder', desc: '新建一个空目录。', params: { relDir: p('项目根相对目录路径') } },
+  { name: 'listNodes', desc: '列出某文件内的全部节点（含子节点）及其行号。节点是 Kin 概念，仅对 .kin 文件有意义。', params: { path: p('目标 .kin 文件路径') } },
+  { name: 'readNode', desc: '读取某文件内某个节点的源码片段（从 === 头到下一节点前）。节点是 Kin 概念，仅对 .kin 文件有意义。', params: { path: p('目标 .kin 文件路径'), node: p('节点名') } },
+  { name: 'replaceRange', desc: '按字符偏移替换某文件缓冲的一段区间（落脏标记、可撤销）。', params: { path: p('目标文件路径'), start: i('起始字符偏移（含）'), end: i('结束字符偏移（不含）'), text: c('替换文本') } },
+  { name: 'insertText', desc: '在某文件缓冲的指定字符偏移处插入文本（落脏标记、可撤销）。', params: { path: p('目标文件路径'), offset: i('插入位置的字符偏移'), text: c('要插入的文本') } },
   { name: 'validate', desc: '对当前所有文件做一次跨文件校验，返回是否通过与诊断列表。', params: {} },
-  { name: 'getDiagnostics', desc: '取当前缓存的诊断（可按文件过滤），不重新校验。', params: { path: s('可选：只取此文件的诊断', false) } },
+  { name: 'getDiagnostics', desc: '取当前缓存的诊断（可按文件过滤），不重新校验。', params: { path: p('可选：只取此文件的诊断', false) } },
   { name: 'preview', desc: '取当前预览/运行的故事状态快照（PlayState）。', params: {} },
   { name: 'choose', desc: '在预览中做一个选择（推进剧情）。', params: { pos: i('选项序号') } },
   { name: 'submitInput', desc: '在预览的输入框中提交一段文本（推进剧情）。', params: { text: s('输入文本') } },
   { name: 'restart', desc: '重启预览，从故事开头重新运行。', params: {} },
-  { name: 'saveFile', desc: '把某文件缓冲写盘（清脏标记）。', params: { path: s('目标文件路径') } },
+  { name: 'back', desc: '在预览中撤销上一次选择 / 输入，回到上一决定点（已在起点则原样返回当前快照，不报错）。', params: {} },
+  { name: 'saveFile', desc: '把某文本文件（.kin，或 theme.css / 作品 css 等前端资源）缓冲写盘（清脏标记）。', params: { path: p('目标文件路径') } },
   { name: 'saveAll', desc: '把所有有未保存改动的文件写盘。', params: {} },
   { name: 'listKinSpec', desc: '列出 Kin 语言规范的章节目录（id + 标题 + 层级），用于发现可查的详细规则章节。', params: {} },
-  { name: 'readKinSpec', desc: '按章节 id 读取 Kin 规范某章 / 节的完整原文（规则、示例、边界），并返回其直接子节清单；取章只回章引言，子节经各自 id 再取。先用 listKinSpec 查 id。', params: { id: s('章节 id，如 5 或 5.3') } },
+  { name: 'readKinSpec', desc: '按章节 id 读取 Kin 规范某章 / 节的完整原文（规则、示例、边界），并返回其直接子节清单；取章只回章引言，子节经各自 id 再取。先用 listKinSpec 查 id。', params: { id: p('章节 id，如 5 或 5.3') } },
 ]
 
 /**

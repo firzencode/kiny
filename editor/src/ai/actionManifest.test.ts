@@ -27,6 +27,30 @@ describe('ACTION_MANIFEST', () => {
     const si = ACTION_MANIFEST.find((c) => c.name === 'submitInput')!
     expect(si.params.text.content).toBeUndefined()
   })
+  it('路径 / 名称型参数都带 nonEmpty（空串对它们没有意义，CLI 本地拦下）', () => {
+    // 反向断言：每个 string 且非 content 的参数都**必须**标 nonEmpty，除非在下面的显式豁免
+    // 清单里。正向列一份参数名清单（旧写法）在新增一个叫 dir/name/file 的参数时会静默漏标、
+    // 测试照样绿——必须反过来，让「漏标」本身触发红。
+    const EXEMPT = new Set(['submitInput.text']) // 读者在输入框直接回车提交空文本是合法操作
+    const missing: string[] = []
+    for (const cmd of ACTION_MANIFEST) {
+      for (const [key, p] of Object.entries(cmd.params)) {
+        if (p.type !== 'string' || p.content) continue
+        if (EXEMPT.has(`${cmd.name}.${key}`)) continue
+        if (p.nonEmpty !== true) missing.push(`${cmd.name}.${key}`)
+      }
+    }
+    expect(missing).toEqual([])
+  })
+  it('内容型与自由文本参数不带 nonEmpty', () => {
+    const marked: string[] = []
+    for (const cmd of ACTION_MANIFEST) {
+      for (const [key, p] of Object.entries(cmd.params)) {
+        if ((p.content || key === 'text') && p.nonEmpty) marked.push(`${cmd.name}.${key}`)
+      }
+    }
+    expect(marked).toEqual([])
+  })
 })
 
 describe('validateCommandArgs · 不可信输入的运行时参数校验', () => {

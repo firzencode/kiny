@@ -263,7 +263,7 @@ export function SettingsDialog({ open, settings, activeThemeId, customThemes, ai
                     <span className="settings-toggle-knob" />
                   </button>
                 </div>
-                <div className="settings-help">开启后，预览会加载项目内的 `.css` 与字体（作品主题），所见即读者所见（默认）。若作品 css 写了越界选择器、影响到编辑器界面，可关掉它。</div>
+                <div className="settings-help">开启后，预览会加载项目内的 `.css` 与字体（作品主题），所见即读者所见（默认）。关掉则预览用编辑器默认皮肤，便于对照。作品 css 只作用于预览区，无论开关都影响不到编辑器界面。</div>
               </div>
             )}
 

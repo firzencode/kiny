@@ -2,7 +2,9 @@
    作者在项目内任意 `.css` 里覆盖这些变量即可换肤，无需改写选择器；深度定制则以
    `.player` 为根书写选择器（避免越界影响宿主 UI，editor 预览尤甚）。
    默认值 = player 原生外观；宿主（reader / shelf / editor）在自己的 `:root` 里覆盖
-   同名 token 让阅读页与其皮肤一致，作品 css 再覆盖之。新增 token 从紧——每个都是长期契约。 */
+   同名 token 让阅读页与其皮肤一致，作品 css 再覆盖之。新增 token 从紧——每个都是长期契约。
+   改名 / 改默认值时同步两处：语言规范 §1.5 的 token 表、editor 新建项目内置的 `theme.css`
+   模板（`editor/src/files/gateway.ts` 的 `STARTER_THEME_CSS`，有单测比对本块的值）。 */
 :root {
   --kiny-page-bg: #0d1117;                                  /* 页面底色 */
   --kiny-text: #e8e8e8;                                     /* 正文文字色 */

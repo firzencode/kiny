@@ -1,8 +1,8 @@
 import type { Diagnostic } from '@kiny/engine'
 import type { PlayState, InteractionStep } from '@kiny/player'
 import type { EditorState, EditorAction } from '../state/editorReducer'
-import type { FileGateway, Manifest, ProjectFileEntry } from '../files/gateway'
-import type { ValidateResult } from '../validate/validate'
+import { isTextFile, type FileGateway, type Manifest } from '../files/gateway'
+import { kinSourcesOf, type ValidateResult } from '../validate/validate'
 import { parseNodes, type NodeInfo } from '../syntax/kin'
 import { tableOfContents, getSection, type SpecSection } from './kinSpec'
 import { SPEC_SECTIONS } from './kinSpecData'
@@ -38,6 +38,12 @@ export interface PreviewPort {
   choose(pos: number): PreviewSnapshot
   submitInput(text: string): PreviewSnapshot
   restart(): PreviewSnapshot
+  /**
+   * 撤销最后一次交互，回到上一决定点。**序列为空时不抛错**，直接回当前快照——
+   * 「已经在起点」不是错误，抛错只会把 agent 推进异常分支；它想知道还能不能退，
+   * 快照的 interactionSeq 长度就是答案。
+   */
+  back(): PreviewSnapshot
 }
 
 /** 动作层注入的依赖集。 */
@@ -77,6 +83,7 @@ export type ActionCommand =
   | { name: 'choose'; pos: number }
   | { name: 'submitInput'; text: string }
   | { name: 'restart' }
+  | { name: 'back' }
   // 保存
   | { name: 'saveFile'; path: string }
   | { name: 'saveAll' }
@@ -86,12 +93,29 @@ export type ActionCommand =
 
 export type ActionName = ActionCommand['name']
 
+/**
+ * `listProject` 回的单条文件信息。`editable` 即「能不能用 readFile / writeFile 动它」的
+ * **机器可读口径**（同 files 层的 `isTextFile`，不另立标准）——agent 不必靠猜扩展名。
+ */
+export interface ProjectEntryInfo {
+  path: string
+  /** 是否 Kin 故事文件（`listNodes` / `readNode` 仅对它有意义）。 */
+  isKin: boolean
+  /** 是否可读写的文本文件（`.kin` 与 `theme.css` / 作品 css 等前端资源都算；图片音频字体不算）。 */
+  editable: boolean
+}
+
 /** 命令名 → 结果类型映射。 */
 export interface ResultMap {
   listProject: {
     projectDir: string | null
     manifest: Manifest | null
-    entries: ProjectFileEntry[]
+    /**
+     * 文件清单。**不带 source**——`ProjectFileEntry.source` 是项目**载入时**的磁盘快照，
+     * 改过之后不更新，一并回给 agent 既撑大返回体又诱导它基于陈旧内容工作。
+     * 当前内容一律走 `readFile`（读的是编辑缓冲）。
+     */
+    entries: ProjectEntryInfo[]
     emptyDirs: string[]
     openTabs: string[]
     activeFile: string | null
@@ -112,6 +136,7 @@ export interface ResultMap {
   choose: PreviewSnapshot
   submitInput: PreviewSnapshot
   restart: PreviewSnapshot
+  back: PreviewSnapshot
   saveFile: { path: string }
   saveAll: { saved: string[] }
   listKinSpec: { sections: SpecSection[] }
@@ -120,10 +145,14 @@ export interface ResultMap {
 
 export type ResultFor<N extends ActionName> = ResultMap[N]
 
-/** 取一个已载入的 .kin 文件缓冲，缺失即抛错。 */
+/**
+ * 取一个已载入的文本文件缓冲（`.kin` 与作品前端资源都在此列），缺失即抛错。
+ * 文案与实际判据（缓冲是否存在）一致——说「非 .kin」是事实错误，会让 agent 认定
+ * `.css` 不可读而放弃。
+ */
 function buffer(ctx: ActionContext, path: string) {
   const buf = ctx.getState().files[path]
-  if (!buf) throw new Error(`文件不存在或非 .kin: ${path}`)
+  if (!buf) throw new Error(`文件不存在或不是可编辑的文本文件: ${path}`)
   return buf
 }
 
@@ -149,7 +178,8 @@ export async function runCommand<C extends ActionCommand>(
       return {
         projectDir: s.projectDir,
         manifest: s.manifest,
-        entries: s.entries,
+        // isKin 取 entry 自带的（gateway 载入时按同一 isKinFile 判定），不在这里二次判定。
+        entries: s.entries.map((e) => ({ path: e.path, isKin: e.isKin, editable: isTextFile(e.path) })),
         emptyDirs: s.emptyDirs,
         openTabs: s.openTabs,
         activeFile: s.activeFile,
@@ -239,7 +269,8 @@ export async function runCommand<C extends ActionCommand>(
     // ---- 校验 / 诊断 ----
     case 'validate': {
       const s = ctx.getState()
-      const files = Object.values(s.files).map((f) => ({ path: f.path, source: f.source }))
+      // 与 editor 自身的防抖校验同源：只送 `.kin`，作品前端资源（css 等）不是 Kin 源码。
+      const files = kinSourcesOf(Object.values(s.files))
       const { diagnostics, program } = ctx.validator.validate(files)
       ctx.dispatch({ type: 'validated', runId: s.runId, diagnostics })
       return { ok: program !== null, diagnostics } as ResultFor<C['name']>
@@ -256,6 +287,8 @@ export async function runCommand<C extends ActionCommand>(
       return ctx.preview.choose(cmd.pos) as ResultFor<C['name']>
     case 'submitInput':
       return ctx.preview.submitInput(cmd.text) as ResultFor<C['name']>
+    case 'back':
+      return ctx.preview.back() as ResultFor<C['name']>
     case 'restart':
       return ctx.preview.restart() as ResultFor<C['name']>
     // ---- 保存 ----
@@ -297,7 +330,7 @@ export const ACTION_NAMES: readonly ActionName[] = [
   'listProject', 'readFile', 'createFile', 'writeFile', 'renamePath', 'deletePath', 'createFolder',
   'listNodes', 'readNode', 'replaceRange', 'insertText',
   'validate', 'getDiagnostics',
-  'preview', 'choose', 'submitInput', 'restart',
+  'preview', 'choose', 'submitInput', 'restart', 'back',
   'saveFile', 'saveAll',
   'listKinSpec', 'readKinSpec',
 ]

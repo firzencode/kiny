@@ -1,5 +1,6 @@
 import { parse as defaultParse, ParseError, analyze as defaultAnalyze } from '@kiny/engine'
 import type { ProjectFile, Diagnostic, ValidatedProgram } from '@kiny/engine'
+import { isKinFile } from '../files/gateway'
 
 export interface ValidateResult {
   diagnostics: Diagnostic[]
@@ -81,4 +82,20 @@ export function createIncrementalValidator(deps: ValidatorDeps = {}) {
  */
 export function validateProject(files: { path: string; source: string }[]): ValidateResult {
   return createIncrementalValidator().validate(files)
+}
+
+/**
+ * 从编辑器缓冲里取出**送校验的 Kin 源码**。
+ *
+ * 缓冲装的是 gateway 载入的全部文本文件（`.kin` + 作品前端资源 css / js / json / txt / md / html），
+ * 后者不是 Kin 源码——喂进 parse 只会得到假诊断：`theme.css` 脚手架里的 `{` 会被当成未闭合插值，
+ * 而新建项目必带该文件，于是「必现一条不存在的错」。
+ *
+ * 这是「哪些缓冲算 Kin 源码」的**单点判定**，两处消费：App 的防抖校验与动作层 `validate`。
+ * 二者曾各自复述过滤逻辑而分叉（动作层漏了过滤），故收敛于此，勿再就地展开。
+ */
+export function kinSourcesOf(
+  buffers: readonly { path: string; source: string }[],
+): { path: string; source: string }[] {
+  return buffers.filter((f) => isKinFile(f.path)).map((f) => ({ path: f.path, source: f.source }))
 }

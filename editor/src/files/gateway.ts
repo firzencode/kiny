@@ -23,9 +23,14 @@ export interface ProjectFileEntry {
  */
 const TEXT_EXTS = ['.kin', '.css', '.js', '.json', '.txt', '.md', '.html']
 
-export function isTextFile(path: string): boolean {
+/** 路径末段命中的已知文本扩展名（小写，含点）；未命中返回 undefined。 */
+function textExtOf(path: string): string | undefined {
   const base = path.slice(path.lastIndexOf('/') + 1).toLowerCase()
-  return TEXT_EXTS.some((e) => base.endsWith(e))
+  return TEXT_EXTS.find((e) => base.endsWith(e))
+}
+
+export function isTextFile(path: string): boolean {
+  return textExtOf(path) !== undefined
 }
 
 /** 一次读盘的项目快照（携带全部文件 + 空目录）。 */
@@ -56,11 +61,15 @@ export interface FileGateway {
   pickDirectory(): Promise<string | null>
   /**
    * 在 parentDir 下建 `<projectFolderName(name)>` 子文件夹，铺 `<name>.kiw` + `main.kin`
-   * （`manifest.name` = 原始输入名）。返回新建项目根目录；目标子文件夹已存在则抛错，绝不覆盖。
+   * + `theme.css`（`manifest.name` = 原始输入名）。返回新建项目根目录；目标子文件夹已存在
+   * 则抛错，绝不覆盖。
    */
   newProject(parentDir: string, name: string): Promise<string>
   readProject(dir: string): Promise<LoadedProject>
-  /** 在项目内新建 .kin（脚手架空文件）。relPath 可含子目录，自动补 .kin。 */
+  /**
+   * 在项目内新建文件。relPath 可含子目录；文件名经 `normalizeNewFileName` 归一
+   * （已知文本扩展名尊重之，否则补 `.kin`），起始内容经 `starterContentFor` 按类型分派。
+   */
   createFile(dir: string, relPath: string): Promise<ProjectFileEntry>
   /** 写回项目内某文件（relPath 相对项目根）。 */
   writeFile(dir: string, relPath: string, text: string): Promise<void>
@@ -152,8 +161,59 @@ export const STARTER_MAIN_KIN = `=== 开场 ===
 -> END
 `
 
-/** 新建文件脚手架内容（createFile 用）。 */
+/** 新建 `.kin` 的脚手架内容（createFile 用）。 */
 export const STARTER_NEW_FILE = `=== 新节点 ===
+`
+
+/**
+ * 起始 `theme.css` 脚手架内容（newProject 内置 + createFile 新建同名文件用）。
+ * 以 `.player` 为根而非 `:root`：声明直接落在阅读区元素本身，优先于从根元素继承下来的
+ * 宿主取值；且不会漏到 editor 界面上。
+ * 列出的 token 名与默认值须与 `player/src/styles.css` 的 `:root` 保持一致（有单测守着）。
+ */
+export const STARTER_THEME_CSS = `/* 作品主题 —— 改这里就能换掉阅读页的外观。
+   项目里任意位置的 .css 都会自动生效；多个文件按路径字典序依次应用
+   （想控制先后就用 10- / 20- 这样的文件名前缀）。
+   不想让某个文件生效，把扩展名改掉即可（如 theme.css.bak）。 */
+
+.player {
+  /* ── 配色 ── */
+  --kiny-page-bg: #0d1117;                                   /* 页面底色 */
+  --kiny-text: #e8e8e8;                                      /* 正文文字色 */
+
+  /* ── 排印 ── */
+  --kiny-prose-font: system-ui, "Noto Sans SC", sans-serif;  /* 正文字体 */
+  --kiny-prose-size: 1.05rem;                                /* 正文字号 */
+  --kiny-prose-line-height: 1.9;                             /* 行高 */
+  --kiny-content-max-width: 680px;                           /* 阅读栏宽度 */
+
+  /* 想用自带字体？把字体文件（.woff2 / .ttf / .otf / .woff）放进项目任意位置，
+     族名就是文件名去掉扩展名。例如放 fonts/楷体.woff2，这里写：
+     --kiny-prose-font: "楷体", serif; */
+}
+
+/* 深度定制：以 .player 为根写选择器（阅读器 / 网页书库里，播放器之外还有它们自己的
+   界面元素，带 .player 前缀才不会误伤）。例如给底部固定区域加个底色：
+.player .panel-bottom { background: rgba(0, 0, 0, .3); }
+*/
+`
+
+/**
+ * 起始内容：`theme.css` 以外的 `.css`（createFile 用）。**纯注释、零 token 赋值**——
+ * 见 `starterContentFor` 的说明：带默认值的第二份 token 会按字典序盖掉作者调好的主题。
+ */
+export const STARTER_STYLE_CSS = `/* 作品样式 —— 项目里任意位置的 .css 都会自动生效，
+   多个文件按路径字典序依次应用（想控制先后就用 10- / 20- 这样的文件名前缀）。
+
+   配色 / 字体 / 字号这类整体外观请改 theme.css 里的 --kiny-* 变量；
+   在本文件里重复赋值会按字典序覆盖 theme.css，把主题改回默认。
+
+   本文件适合写选择器（务必带 .player 前缀——阅读器 / 网页书库里播放器之外
+   还有它们自己的界面元素，带前缀才不会误伤）：
+
+.player .panel-bottom { background: rgba(0, 0, 0, .3); }
+.player .kin-illustration { border-radius: 8px; }
+*/
 `
 
 /** 校验相对路径安全：禁止空串、`.`、绝对路径与 `..` 穿越，否则抛错。 */
@@ -174,13 +234,54 @@ export function assertRenameSafe(from: string, to: string): void {
   if (to === from || to.startsWith(`${from}/`)) throw new Error(`不能移入自身: ${to}`)
 }
 
-/** 把文件名归一为合法 .kin 名：去空白、补 .kin 后缀。空名抛错。 */
-export function normalizeKinName(raw: string): string {
+/**
+ * 新建文件名归一：已带**已知文本扩展名**（同 `isTextFile` 的 `TEXT_EXTS`）则尊重之、并把该
+ * 扩展名归一为小写，否则补 `.kin`。判定与「可编辑」共用同一份扩展名表，使「建得出」与
+ * 「打得开」天然一致。空名抛错。
+ *
+ * 扩展名必须归小写：下游对 `.kin` 的识别区分大小写（引擎与各宿主同口径），作者手打
+ * `第二章.KIN` 若原样保留，会得到一个资源管理器里能编辑、引擎却永不加载的哑文件。
+ */
+export function normalizeNewFileName(raw: string): string {
   const t = raw.trim()
   if (t === '') throw new Error('文件名不能为空')
-  const name = t.endsWith('.kin') ? t : `${t}.kin`
+  const ext = textExtOf(t)
+  const name = ext === undefined ? `${t}.kin` : `${t.slice(0, t.length - ext.length)}${ext}`
   assertSafeRelPath(name)
   return name
+}
+
+/**
+ * 是否 `.kin` 故事文件。**区分大小写**——与 readProject 的 isKin 判定、引擎的文件发现同口径，
+ * 免得 editor 认作故事文件而引擎不收。（`.css` 的判定则不区分大小写，同 `discoverAssets`。）
+ */
+export function isKinFile(path: string): boolean {
+  return path.endsWith('.kin')
+}
+
+/**
+ * 是否**作品主题文件**（约定名 `theme.css`，文件名不分大小写、同 `discoverAssets` 的扩展名口径；
+ * 子目录里的同名文件也算）。
+ *
+ * 这是「哪个文件是主题」的单点判定，两处消费：主题模板只发给它（见 `starterContentFor`），
+ * 「外观」GUI 也只对它出现。理由同一条：零目录约定下项目内全部 `.css` 都会被加载并按路径
+ * 字典序拼接，第二个样式文件里既不该拿到整份 token 默认值、也不该开 GUI——GUI 会把播放层
+ * 默认值当成「这个作品现在的样子」显示（真正生效的是主题文件里的值），随手一拖就把 token
+ * 写进那个文件、按字典序盖死主题，而扫描器是单文件的、结构上看不见这件事。
+ */
+export function isThemeFile(path: string): boolean {
+  return path.slice(path.lastIndexOf('/') + 1).toLowerCase() === 'theme.css'
+}
+
+/**
+ * 新建文件的起始内容：`.kin` 落故事脚手架、`theme.css` 落主题模板、其它 `.css` 落样式空壳、
+ * 其它已知文本类型留空。
+ */
+export function starterContentFor(relPath: string): string {
+  if (isKinFile(relPath)) return STARTER_NEW_FILE
+  if (isThemeFile(relPath)) return STARTER_THEME_CSS
+  if (relPath.toLowerCase().endsWith('.css')) return STARTER_STYLE_CSS
+  return ''
 }
 
 /** 起始 manifest 脚手架（newProject 用，name 由调用方填）。 */
@@ -229,7 +330,7 @@ export function buildProjectData(
   projectCss = '',
 ): string {
   const fileMap: Record<string, string> = {}
-  for (const f of files) if (f.path.endsWith('.kin')) fileMap[f.path] = f.source
+  for (const f of files) if (isKinFile(f.path)) fileMap[f.path] = f.source
   const json = JSON.stringify({ manifest: JSON.stringify(manifest), files: fileMap, assetBase: '', css: projectCss })
   return json.replace(/[<>&]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`)
 }

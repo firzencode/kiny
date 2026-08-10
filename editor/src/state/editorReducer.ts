@@ -1,6 +1,7 @@
 import type { Diagnostic } from '@kiny/engine'
-import type { LoadedProject, Manifest, ProjectFileEntry } from '../files/gateway'
+import { isKinFile, type LoadedProject, type Manifest, type ProjectFileEntry } from '../files/gateway'
 import { underPath, entryAfterRename } from '../util/paths'
+import { mediaKind } from '../files/media'
 
 export interface FileBuffer { path: string; source: string; savedSource: string; dirty: boolean }
 
@@ -49,10 +50,17 @@ const sortNames = (ns: string[]) => [...ns].sort((a, b) => (a < b ? -1 : a > b ?
 /** 可编辑缓冲 = gateway 载入了文本的文件（.kin + 作品前端资源 css/js/json/txt/md/html）。 */
 const hasText = (f: ProjectFileEntry) => f.source !== undefined
 /** 故事文件顺序（入口候选）只含 `.kin`——css 等资源不是故事文件。 */
-const kinOnly = (paths: string[]) => sortNames(paths.filter((p) => p.endsWith('.kin')))
+const kinOnly = (paths: string[]) => sortNames(paths.filter(isKinFile))
 const byPath = (a: ProjectFileEntry, b: ProjectFileEntry) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)
 // key 在 from 子树下则改名，否则原样返回（entryAfterRename 返回 null 即不在子树下）。
 const renameKey = (key: string, from: string, to: string): string => entryAfterRename(key, from, to) ?? key
+/**
+ * 可开 tab 的路径 = 有文本缓冲的文件，**或** 项目里的媒体文件（图片 / 音频）。
+ * 媒体不进 `files`（它没有文本），故这条判据不能只看 `files`——但它同样是 tab，
+ * 只是内容由 MediaView 只读呈现：永不脏、永不被保存、`activeBuffer` 对它返回 null。
+ */
+const canOpenTab = (s: EditorState, path: string): boolean =>
+  s.files[path] !== undefined || (mediaKind(path) !== null && s.entries.some((e) => e.path === path))
 
 export function editorReducer(s: EditorState, a: EditorAction): EditorState {
   switch (a.type) {
@@ -61,9 +69,17 @@ export function editorReducer(s: EditorState, a: EditorAction): EditorState {
       for (const f of a.project.files) if (hasText(f)) { const src = f.source ?? ''; files[f.path] = { path: f.path, source: src, savedSource: src, dirty: false } }
       const entry = a.project.manifest.entry
       const hasEntry = files[entry] !== undefined
-      // restore（会话恢复）优先；调用方已用 resolveSession 对当前文件校验降级过，这里直接采用。
-      const openTabs = a.restore ? a.restore.openTabs : hasEntry ? [entry] : []
-      const activeFile = a.restore ? a.restore.activeFile : hasEntry ? entry : null
+      // restore（会话恢复）优先；调用方已用 resolveSession 对「文件还在不在」校验降级过。
+      // 这里再滤一道「开得出吗」：有文本缓冲的，或图片 / 音频（字体等二进制没有查看器，
+      // 恢复成 tab 只会得到一个空壳）。activeFile 落在被滤掉的路径上时降级为首个存活 tab。
+      const openable = (p: string) =>
+        files[p] !== undefined || (mediaKind(p) !== null && a.project.files.some((f) => f.path === p))
+      const restored = a.restore ? a.restore.openTabs.filter(openable) : null
+      const restoredActive = a.restore?.activeFile ?? null
+      const openTabs = restored ?? (hasEntry ? [entry] : [])
+      const activeFile = restored
+        ? restoredActive !== null && restored.includes(restoredActive) ? restoredActive : restored[0] ?? null
+        : hasEntry ? entry : null
       return {
         projectDir: a.project.dir, manifest: a.project.manifest, manifestFile: a.project.manifestFile, entry,
         files, fileOrder: kinOnly(Object.keys(files)),
@@ -104,10 +120,10 @@ export function editorReducer(s: EditorState, a: EditorAction): EditorState {
       }
     }
     case 'open_tab':
-      if (!s.files[a.path]) return s
+      if (!canOpenTab(s, a.path)) return s
       return { ...s, openTabs: s.openTabs.includes(a.path) ? s.openTabs : [...s.openTabs, a.path], activeFile: a.path }
     case 'set_active':
-      if (!s.files[a.path]) return s
+      if (!canOpenTab(s, a.path)) return s
       return { ...s, activeFile: a.path }
     case 'close_tab': {
       const idx = s.openTabs.indexOf(a.path)

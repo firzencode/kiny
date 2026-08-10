@@ -30,6 +30,7 @@ function setup(over: Partial<ComponentProps<typeof MenuBar>> = {}) {
     onReportIssue: vi.fn(),
     onOpenSettings: vi.fn(),
     onOpenProjectSettings: vi.fn(),
+    onOpenTheme: vi.fn(),
     onZoomIn: vi.fn(),
     onZoomOut: vi.fn(),
     onZoomReset: vi.fn(),

@@ -2228,7 +2228,7 @@ dependencies = [
 
 [[package]]
 name = "kiny-reader"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "log",
  "serde",

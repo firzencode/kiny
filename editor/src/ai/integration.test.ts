@@ -42,7 +42,7 @@ function makeHarness() {
     },
   })
   const snap: PreviewSnapshot = { play: null, stale: false, interactionSeq: [] }
-  const preview: PreviewPort = { snapshot: () => snap, choose: () => snap, submitInput: () => snap, restart: () => snap }
+  const preview: PreviewPort = { snapshot: () => snap, choose: () => snap, submitInput: () => snap, restart: () => snap, back: () => snap }
   const ctx: ActionContext = { getState: () => state, dispatch, gateway, validator: createIncrementalValidator(), preview }
   return { ctx, getState: () => state, gateway }
 }

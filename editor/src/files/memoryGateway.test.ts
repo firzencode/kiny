@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { createMemoryGateway } from './memoryGateway'
+import { STARTER_THEME_CSS } from './gateway'
 
 
 describe('memoryGateway readProject（路径模型）', () => {
@@ -43,6 +44,23 @@ describe('memoryGateway readProject（路径模型）', () => {
     await expect(gw.createFile('/p', 'chapters/new.kin')).rejects.toThrow('已存在')
   })
 
+  it('createFile 建 .css：不被吞成 .kin，isKin false，落主题模板', async () => {
+    const gw = createMemoryGateway({
+      files: { '/p/kiny.json': JSON.stringify({ name: 'P', version: '1', engine: '0.1.0', entry: 'main.kin' }), '/p/main.kin': '' },
+    })
+    const e = await gw.createFile('/p', 'theme.css')
+    expect(e).toMatchObject({ path: 'theme.css', isKin: false, source: STARTER_THEME_CSS })
+    expect(await gw.readTextFile('/p', 'theme.css')).toBe(STARTER_THEME_CSS)
+  })
+
+  it('createFile 建其它已知文本类型：留空内容、isKin false', async () => {
+    const gw = createMemoryGateway({
+      files: { '/p/kiny.json': JSON.stringify({ name: 'P', version: '1', engine: '0.1.0', entry: 'main.kin' }), '/p/main.kin': '' },
+    })
+    const e = await gw.createFile('/p', 'notes.md')
+    expect(e).toMatchObject({ path: 'notes.md', isKin: false, source: '' })
+  })
+
   it('makeResolveAsset 用项目根相对路径', () => {
     const gw = createMemoryGateway({ files: {} })
     expect(gw.makeResolveAsset('/p')('assets/x.jpg')).toBe('mem://assets/x.jpg')
@@ -83,6 +101,14 @@ describe('memoryGateway 项目文件（.kiw）与打开', () => {
     expect(proj.manifestFile).toBe('雾港.kiw')
     expect(proj.manifest.name).toBe('雾港')
     expect(proj.manifest.entry).toBe('main.kin')
+  })
+
+  it('newProject 内置 theme.css（发现性：作者打开自己的项目就看见主题文件）', async () => {
+    const gw = createMemoryGateway({ files: {} })
+    const dir = await gw.newProject('/loc', '雾港')
+    const proj = await gw.readProject(dir)
+    expect(proj.files.map((f) => f.path)).toEqual(['main.kin', 'theme.css'])
+    expect(await gw.readTextFile(dir, 'theme.css')).toBe(STARTER_THEME_CSS)
   })
 
   it('newProject 目标已存在 → 抛错、不覆盖', async () => {
