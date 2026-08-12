@@ -28,6 +28,12 @@ import { dispatchMap } from './shortcuts/bindings'
 import type { CommandId } from './shortcuts/registry'
 import { DiagnosticsList } from './components/DiagnosticsList'
 import { PreviewPane } from './components/PreviewPane'
+import { SearchPanel, computeReplace } from './components/SearchPanel'
+import { StatusBar } from './components/StatusBar'
+import { RenameNodeDialog } from './components/RenameNodeDialog'
+import { applyRename, type RenamePlan, type RenameTarget } from './refactor/renameNode'
+import { statsFor } from './stats/countStats'
+import { buildManuscript } from './export/manuscript'
 import { SidebarResizer } from './components/SidebarResizer'
 import { ColResizer } from './components/ColResizer'
 import { HelpDialog, type HelpScreen } from './components/HelpDialog'
@@ -115,6 +121,9 @@ export function App({ gateway }: { gateway: FileGateway }) {
   // 导入资源同名冲突：弹三选框；resolver 承接 Promise，选择后回填。
   const [importConflict, setImportConflict] = useState<{ destRel: string } | null>(null)
   const conflictResolver = useRef<((d: { choice: ConflictChoice; applyRest: boolean }) => void) | null>(null)
+  // 项目级搜索面板（Ctrl/Cmd+Shift+F）与节点重命名弹窗。
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [renameTarget, setRenameTarget] = useState<RenameTarget | null>(null)
 
   const editorRef = useRef<EditorHandle>(null)
 
@@ -164,6 +173,8 @@ export function App({ gateway }: { gateway: FileGateway }) {
     // resolveRef 随项目切换更新（projectDir 一并变），故与 activeFile 同列依赖即足。
   }, [state.activeFile, state.projectDir, active])
   const nodes = useMemo(() => (active ? parseNodes(active.source) : []), [active])
+  // 字数统计：当前文件 + 项目双口径（状态栏展示）。
+  const wordCounts = useMemo(() => statsFor(Object.values(state.files), active), [state.files, active])
   // 当前文件诊断（喂 EditorPane 画行内波浪线）；跨文件总览仍走 DiagnosticsList。
   const currentDiags = useMemo(
     () => (active ? state.diagnostics.filter((d) => d.file === active.path) : []),
@@ -468,6 +479,77 @@ export function App({ gateway }: { gateway: FileGateway }) {
     } catch (e) {
       setNotice(`导出失败：${errMsg(e)}`)
     }
+  }
+
+  // 导出线性文稿（Markdown / 纯文本）：基于 AST 摊平全部 .kin，弹原生保存框落盘。
+  const onExportManuscript = async (format: 'md' | 'txt') => {
+    if (!state.projectDir || !state.manifest) return
+    const name = state.manifest.name
+    const sources = kinSourcesOf(Object.values(state.files))
+    if (sources.length === 0) {
+      setNotice('项目里没有 .kin 故事文件可导出')
+      return
+    }
+    let text: string
+    try {
+      text = buildManuscript(sources, { format, title: name })
+    } catch (e) {
+      setNotice(`导出失败：${errMsg(e)}`)
+      return
+    }
+    const ext = format
+    const done = await gateway.exportManuscript(`《${name}》线性文稿.${ext}`, text, ext)
+    if (done) setNotice(`已导出线性文稿（${format.toUpperCase()}）`, 'success')
+  }
+
+  // 搜索面板：打开/关闭；打开时确保有可搜文件。
+  const onToggleSearch = () => {
+    if (state.projectDir === null) return
+    setSearchOpen((v) => !v)
+  }
+
+  // 搜索替换应用：把新源码 dispatch 进缓冲（落脏标记，不写盘）；全量替换前弹确认。
+  const onApplySearchReplace = async (path: string | null, query: string, replacement: string, opts: { caseSensitive?: boolean; wholeWord?: boolean; regex?: boolean }) => {
+    const buffers = Object.values(state.files)
+    const changes = computeReplace(buffers, path, query, replacement, opts)
+    if (changes.length === 0) return
+    const total = changes.reduce((a, c) => a + c.count, 0)
+    if (path === null && !(await gateway.confirm(`将替换 ${changes.length} 个文件中的 ${total} 处匹配，确认继续？`))) return
+    for (const c of changes) dispatch({ type: 'source_changed', path: c.path, source: c.source })
+    setNotice(`已替换 ${total} 处（${changes.length} 个文件），改动未写盘`, 'success')
+  }
+
+  // 节点重命名：F2 / 菜单 → 取光标所在节点；大纲 ✎ → 直接传节点名。
+  const openRenameFor = (name: string) => {
+    if (!state.activeFile) {
+      setNotice('当前没有打开的故事文件')
+      return
+    }
+    setRenameTarget({ path: state.activeFile, name })
+  }
+  const onRenameNodeCommand = () => {
+    if (!active) {
+      setNotice('当前没有打开的故事文件')
+      return
+    }
+    const nodes = parseNodes(active.source)
+    let name: string | null = null
+    for (const n of nodes) {
+      if (n.line <= activeLine) name = n.name
+      else break
+    }
+    if (name === null) {
+      setNotice('光标不在任何节点内')
+      return
+    }
+    openRenameFor(name)
+  }
+  const onApplyRename = (plan: RenamePlan) => {
+    for (const r of applyRename(Object.values(state.files), plan)) {
+      dispatch({ type: 'source_changed', path: r.path, source: r.source })
+    }
+    setRenameTarget(null)
+    setNotice(`已重命名「${plan.oldName}」→「${plan.newName}」（${plan.referenceCount} 处引用，改动未写盘）`, 'success')
   }
 
   // 关 tab 守卫：脏则弹确认框，否则直接关。
@@ -780,6 +862,8 @@ export function App({ gateway }: { gateway: FileGateway }) {
     zoomReset: () => onZoomReset(),
     // editor 域 / readonly 命令：全局不派发（CM / 原生处理），占位以满足 Record 完整性。
     toggleComment: () => {}, undo: () => {}, redo: () => {}, cut: () => {}, copy: () => {}, paste: () => {}, selectAll: () => {},
+    searchInFiles: () => { if (committedStateRef.current.projectDir !== null) setSearchOpen((v) => !v) },
+    renameNode: () => { if (committedStateRef.current.projectDir !== null) onRenameNodeCommand() },
   }
   // 生效的 global 域派发表（组合 → 命令 id），随自定义覆盖更新。
   const globalDispatchRef = useRef<Map<string, CommandId>>(new Map())
@@ -868,6 +952,9 @@ export function App({ gateway }: { gateway: FileGateway }) {
         onSaveAll={onSaveAll}
         onExportKip={onExportKip}
         onExportWebpage={onExportWebpage}
+        onExportManuscript={(f) => { void onExportManuscript(f) }}
+        onSearchInFiles={onToggleSearch}
+        onRenameNode={onRenameNodeCommand}
         onExit={requestExit}
         onEdit={(cmd) => editorRef.current?.exec(cmd)}
         onSetTheme={setPresetTheme}
@@ -971,6 +1058,7 @@ export function App({ gateway }: { gateway: FileGateway }) {
               nodes={nodes}
               activeLine={activeLine}
               onJump={(line) => { setCaretLine(line); setActiveLine(line) }}
+              onRename={(name) => openRenameFor(name)}
               collapsed={view.outlineCollapsed}
               onToggleCollapse={() => setView((v) => ({ ...v, outlineCollapsed: !v.outlineCollapsed }))}
             />
@@ -1047,6 +1135,17 @@ export function App({ gateway }: { gateway: FileGateway }) {
             onJump={onJumpDiagnostic}
             collapsed={view.diagnosticsCollapsed}
             onToggleCollapse={() => setView((v) => ({ ...v, diagnosticsCollapsed: !v.diagnosticsCollapsed }))}
+          />
+          {searchOpen && active && (
+            <SearchPanel
+              buffers={Object.values(state.files)}
+              onJump={onJumpDiagnostic}
+              onApplyReplace={(path, query, replacement, opts) => { void onApplySearchReplace(path, query, replacement, opts) }}
+            />
+          )}
+          <StatusBar
+            file={wordCounts.file}
+            project={wordCounts.project}
           />
           {view.preview && <ColResizer edge="right" onResize={onResizeEditorPreview} ariaLabel="调整编辑区与右侧面板占比" />}
         </div>
@@ -1145,6 +1244,14 @@ export function App({ gateway }: { gateway: FileGateway }) {
         destRel={importConflict?.destRel ?? null}
         onChoose={resolveImportConflict}
       />
+      {renameTarget !== null && (
+        <RenameNodeDialog
+          buffers={kinSourcesOf(Object.values(state.files))}
+          target={renameTarget}
+          onApply={onApplyRename}
+          onCancel={() => setRenameTarget(null)}
+        />
+      )}
       </>
       )}
     </div>

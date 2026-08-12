@@ -27,6 +27,12 @@ export interface MenuBarProps {
   onSaveAll: () => void
   onExportKip: () => void
   onExportWebpage: () => void
+  /** 导出线性文稿（format 'md' | 'txt'）。 */
+  onExportManuscript: (format: 'md' | 'txt') => void
+  /** 打开项目级搜索面板。 */
+  onSearchInFiles: () => void
+  /** 对光标所在节点发起重命名。 */
+  onRenameNode: () => void
   onExit: () => void
   onEdit: (cmd: EditCmd) => void
   onSetTheme: (t: PresetId) => void
@@ -100,6 +106,14 @@ export function MenuBar(p: MenuBarProps) {
         { label: '作品主题...', disabled: !p.projectName, act: p.onOpenTheme },
         { label: '导出故事包（.kip）...', disabled: !p.projectName || p.errorCount > 0, act: p.onExportKip },
         { label: '导出独立网页...', disabled: !p.projectName || p.errorCount > 0, act: p.onExportWebpage },
+        {
+          label: '导出线性文稿',
+          disabled: !p.projectName,
+          sub: [
+            { label: 'Markdown (.md)', act: () => p.onExportManuscript('md') },
+            { label: '纯文本 (.txt)', act: () => p.onExportManuscript('txt') },
+          ],
+        },
         { sep: true },
         { label: '退出', sc: 'Alt+F4', act: p.onExit },
       ],
@@ -117,6 +131,8 @@ export function MenuBar(p: MenuBarProps) {
         { label: '全选', sc: scFor('selectAll'), act: () => p.onEdit('selectAll') },
         { sep: true },
         { label: '查找...', sc: 'Ctrl+F', disabled: true },
+        { label: '在文件中搜索...', sc: scFor('searchInFiles'), disabled: !p.projectName, act: p.onSearchInFiles },
+        { label: '重命名节点...', sc: scFor('renameNode'), disabled: !p.projectName, act: p.onRenameNode },
         { label: '跳转到节点...', sc: 'Ctrl+P', disabled: true },
       ],
     },

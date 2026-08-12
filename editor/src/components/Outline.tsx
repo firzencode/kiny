@@ -8,12 +8,15 @@ export function Outline({
   nodes,
   activeLine,
   onJump,
+  onRename,
   collapsed,
   onToggleCollapse,
 }: {
   nodes: NodeInfo[]
   activeLine: number
   onJump: (line: number) => void
+  /** 请求重命名某节点（行尾 ✎ 按钮）。 */
+  onRename?: (name: string) => void
   collapsed?: boolean
   onToggleCollapse?: () => void
 }) {
@@ -49,6 +52,20 @@ export function Outline({
               </span>
               <span className="onode-name">{n.name}</span>
               {n.diverts > 0 && <span className="onode-meta">→{n.diverts}</span>}
+              {onRename && (
+                <button
+                  type="button"
+                  className="onode-rename"
+                  aria-label={`重命名节点 ${n.name}`}
+                  title="重命名节点（自动更新全部跳转引用）"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onRename(n.name)
+                  }}
+                >
+                  ✎
+                </button>
+              )}
             </li>
           ))}
         </ul>

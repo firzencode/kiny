@@ -30,6 +30,7 @@
 
 - **写故事的 IDE**——CodeMirror 6 语法高亮、编辑时实时增量 lint / 诊断、节点大纲导航、多文件树 + 多 tab。
 - **实时预览**——边写边看，确定性重放当前故事；编译出错时降级保留上一有效版本。
+- **写作工具**——项目级搜索 / 替换（跨文件、大小写 / 全词 / 正则、批量替换）、正文字数统计（当前文件 + 项目两档）、节点安全重命名（改节点名自动更新全部跳转引用）、导出线性文稿（Markdown / 纯文本，摊平分支便于审校与对接其它写作流）。
 - **一键导出**——导出独立自包含网页（注入故事数据 + 拷贝资源，脱机可玩）、导出 `.kip`（供 reader 导入）。
 - **省心**——会话恢复、自动保存、深 / 浅色主题切换。
 
@@ -55,6 +56,8 @@ npm run build:viewer            # 浏览器阅读器静态产物
 npm run build:shelf             # 网页书库应用静态产物（可部署到任意静态站点）
 npm run tauri:build             # editor 的桌面端安装包
 npm run tauri:build:reader      # reader 的桌面端安装包
+npm run release:win             # Windows 一键发布（NSIS + 免安装 zip，汇总到 output/）
+npm run release:mac             # macOS 一键发布（.dmg，汇总到 output/）
 ```
 
 editor 的 Windows 产物（NSIS 安装器 + MSI，`<version>` 为当前版本）：
@@ -63,6 +66,17 @@ editor 的 Windows 产物（NSIS 安装器 + MSI，`<version>` 为当前版本�
 editor/src-tauri/target/release/bundle/nsis/kiny-editor_<version>_x64-setup.exe
 editor/src-tauri/target/release/bundle/msi/kiny-editor_<version>_x64_en-US.msi
 ```
+
+macOS 产物（.app + .dmg，`<version>` 为当前版本）：
+
+```
+editor/src-tauri/target/release/bundle/macos/kiny-editor.app
+editor/src-tauri/target/release/bundle/dmg/kiny-editor_<version>_aarch64.dmg
+reader/src-tauri/target/release/bundle/macos/kiny-reader.app
+reader/src-tauri/target/release/bundle/dmg/kiny-reader_<version>_aarch64.dmg
+```
+
+macOS 产物默认 ad-hoc 签名、未公证，本机使用无碍；对外分发需另行签名公证（否则对方首次打开需右键 → 打开）。
 
 `tauri dev` / `tauri build` 跨平台可用，已在 macOS 与 Windows 验证。
 

@@ -266,6 +266,16 @@ export const tauriFileGateway: FileGateway = {
     await writeTextFile(picked, contents)
     return true
   },
+  async exportManuscript(defaultName, contents, ext) {
+    const picked = await save({
+      defaultPath: defaultName,
+      filters: [{ name: ext === 'md' ? 'Markdown 文稿' : '纯文本', extensions: [ext] }],
+    })
+    if (typeof picked !== 'string') return false
+    await grantProjectScope(await dirname(picked))
+    await writeTextFile(picked, contents)
+    return true
+  },
   async confirm(message) {
     return ask(message, { title: 'Kiny Editor', kind: 'warning' })
   },
