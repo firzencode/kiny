@@ -55,6 +55,8 @@ npm run build:viewer            # 浏览器阅读器静态产物
 npm run build:shelf             # 网页书库应用静态产物（可部署到任意静态站点）
 npm run tauri:build             # editor 的桌面端安装包
 npm run tauri:build:reader      # reader 的桌面端安装包
+npm run release:win             # Windows 一键发布（NSIS + 免安装 zip，汇总到 output/）
+npm run release:mac             # macOS 一键发布（.dmg，汇总到 output/）
 ```
 
 editor 的 Windows 产物（NSIS 安装器 + MSI，`<version>` 为当前版本）：
@@ -63,6 +65,17 @@ editor 的 Windows 产物（NSIS 安装器 + MSI，`<version>` 为当前版本�
 editor/src-tauri/target/release/bundle/nsis/kiny-editor_<version>_x64-setup.exe
 editor/src-tauri/target/release/bundle/msi/kiny-editor_<version>_x64_en-US.msi
 ```
+
+macOS 产物（.app + .dmg，`<version>` 为当前版本）：
+
+```
+editor/src-tauri/target/release/bundle/macos/kiny-editor.app
+editor/src-tauri/target/release/bundle/dmg/kiny-editor_<version>_aarch64.dmg
+reader/src-tauri/target/release/bundle/macos/kiny-reader.app
+reader/src-tauri/target/release/bundle/dmg/kiny-reader_<version>_aarch64.dmg
+```
+
+macOS 产物默认 ad-hoc 签名、未公证，本机使用无碍；对外分发需另行签名公证（否则对方首次打开需右键 → 打开）。
 
 `tauri dev` / `tauri build` 跨平台可用，已在 macOS 与 Windows 验证。
 
