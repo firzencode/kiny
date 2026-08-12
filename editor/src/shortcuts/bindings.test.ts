@@ -24,7 +24,7 @@ describe('shortcuts/bindings', () => {
   })
 
   it('effectiveKeys：合法覆盖生效，非法覆盖回落默认', () => {
-    expect(effectiveKeys({ help: 'F2' }).get('help')).toBe('F2')
+    expect(effectiveKeys({ help: 'F3' }).get('help')).toBe('F3')
     expect(effectiveKeys({ help: 'A' }).get('help')).toBe('F1') // 裸字母非法 → 回落
   })
 
@@ -65,9 +65,15 @@ describe('shortcuts/bindings', () => {
   })
 
   it('dispatchMap：覆盖后按新键派发', () => {
-    const g = dispatchMap('global', { help: 'F2' })
-    expect(g.get('F2')).toBe('help')
+    const g = dispatchMap('global', { help: 'F3' })
+    expect(g.get('F3')).toBe('help')
     expect(g.has('F1')).toBe(false)
+  })
+
+  it('dispatchMap：新命令默认绑定（搜索 Mod+Shift+F / 重命名 F2）', () => {
+    const g = dispatchMap('global', {})
+    expect(g.get('Mod+Shift+F')).toBe('searchInFiles')
+    expect(g.get('F2')).toBe('renameNode')
   })
 
   it('effectiveBindings：展示序同 COMMANDS、含定义', () => {

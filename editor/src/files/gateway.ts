@@ -110,6 +110,11 @@ export interface FileGateway {
    * 用户取消返 false，写入成功返 true。（不走浏览器 `<a download>`——Tauri WebView 里那是静默 no-op。）
    */
   exportThemeFile(defaultName: string, contents: string): Promise<boolean>
+  /**
+   * 导出线性文稿：弹原生保存对话框选落点并写入 Markdown / 纯文本（defaultName 为建议文件名，ext 为 'md' | 'txt'）。
+   * 用户取消返 false，写入成功返 true。
+   */
+  exportManuscript(defaultName: string, contents: string, ext: 'md' | 'txt'): Promise<boolean>
   /** 危险操作确认：真实现弹原生框，内存桩返回固定值。 */
   confirm(message: string): Promise<boolean>
   /** 强制关闭窗口（destroy，绕过 close-requested 守卫，避免自触发死循环）。 */

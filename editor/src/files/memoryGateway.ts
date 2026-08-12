@@ -18,6 +18,8 @@ export interface MemoryGatewayInit {
   themeExportSink?: { defaultName: string; contents: string }[]
   /** exportThemeFile 是否模拟用户选了落点（true=写入并返 true；false=取消返 false）。缺省 true。 */
   themeSaveConfirmed?: boolean
+  /** exportManuscript 调用记录（供断言）。 */
+  manuscriptSink?: { defaultName: string; contents: string; ext: 'md' | 'txt' }[]
   webpageDir?: string | null
   webpageSink?: { dest: string; projectData: string; files: string[] }[]
   draftStore?: DraftStore
@@ -192,6 +194,11 @@ export function createMemoryGateway(init: MemoryGatewayInit): FileGateway {
     exportThemeFile: async (defaultName, contents) => {
       if (init.themeSaveConfirmed === false) return false
       init.themeExportSink?.push({ defaultName, contents })
+      return true
+    },
+    exportManuscript: async (defaultName, contents, ext) => {
+      if (init.themeSaveConfirmed === false) return false
+      init.manuscriptSink?.push({ defaultName, contents, ext })
       return true
     },
     confirm: async () => init.confirmResult ?? true,

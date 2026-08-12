@@ -22,6 +22,8 @@ export type CommandId =
   | 'copy'
   | 'paste'
   | 'selectAll'
+  | 'searchInFiles'
+  | 'renameNode'
 
 /** 派发域：global = window keydown；editor = CodeMirror keymap。 */
 export type Scope = 'global' | 'editor'
@@ -46,6 +48,8 @@ export const COMMANDS: CommandDef[] = [
   { id: 'saveAll', label: '全部保存', category: '文件', defaultKeys: 'Mod+Alt+S', scope: 'global' },
   { id: 'openSettings', label: '设置', category: '文件', defaultKeys: 'Mod+,', scope: 'global' },
   { id: 'toggleComment', label: '注释 / 取消注释当前行', category: '编辑', defaultKeys: 'Mod+/', scope: 'editor' },
+  { id: 'searchInFiles', label: '在文件中搜索', category: '编辑', defaultKeys: 'Mod+Shift+F', scope: 'global' },
+  { id: 'renameNode', label: '重命名节点', category: '编辑', defaultKeys: 'F2', scope: 'global' },
   { id: 'undo', label: '撤销', category: '编辑', defaultKeys: 'Mod+Z', scope: 'editor', readonly: true },
   { id: 'redo', label: '重做', category: '编辑', defaultKeys: 'Mod+Y', scope: 'editor', readonly: true },
   { id: 'cut', label: '剪切', category: '编辑', defaultKeys: 'Mod+X', scope: 'editor', readonly: true },
