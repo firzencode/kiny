@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Linux 回归：install:all → build:core → 全仓 typecheck + 测试。
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm run install:all
+      - run: npm run build:core
+      - run: npm run typecheck
+      - run: npm test
+
+  # macOS 发布：editor / reader 的 tauri build，产出 .dmg 作为 artifact（PR 也出产物便于试装）。
+  macos-release:
+    runs-on: macos-latest # arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            editor/src-tauri
+            reader/src-tauri
+      - run: npm run install:all
+      - run: npm run release:mac
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kiny-macos-dmg
+          path: output/*.dmg
+          if-no-files-found: error
+
+  # Windows 回归：build:core + 桌面端编译（--no-bundle，验证跨平台可编译，不产安装包）。
+  windows-regression:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            editor/src-tauri
+            reader/src-tauri
+      - run: npm run install:all
+      - run: npm run build:core
+      - run: npm --prefix editor run tauri build -- --no-bundle
+      - run: npm --prefix reader run tauri build -- --no-bundle
