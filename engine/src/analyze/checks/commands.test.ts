@@ -122,6 +122,33 @@ describe('checkCommands', () => {
     })
   })
 
+  describe('@divider 形态特判', () => {
+    it('无参 / 带类名一参：零诊断', () => {
+      expect(run('=== A ===\n@divider()\n-> END')).toEqual([])
+      expect(run('=== A ===\n@divider("幕间")\n-> END')).toEqual([])
+    })
+    it('参数可为表达式（运行期求值，不静态拦截）', () => {
+      expect(run('=== A ===\n@divider(clsName)\n-> END')).toEqual([])
+    })
+    it('arity 2 → divider-arity', () => {
+      expect(run('=== A ===\n@divider("a", "b")\n-> END').map((d) => d.code)).toContain('divider-arity')
+    })
+    it('类名不合法（含空格 / 点 / 空串）→ divider-class', () => {
+      expect(run('=== A ===\n@divider("two words")\n-> END').map((d) => d.code)).toContain('divider-class')
+      expect(run('=== A ===\n@divider("has.dot")\n-> END').map((d) => d.code)).toContain('divider-class')
+      expect(run('=== A ===\n@divider("")\n-> END').map((d) => d.code)).toContain('divider-class')
+    })
+    it('类名写成数字字面量 → divider-class', () => {
+      expect(run('=== A ===\n@divider(42)\n-> END').map((d) => d.code)).toContain('divider-class')
+    })
+    it('中文 / 连字符类名合法（与行内 <class=名> 同规则）', () => {
+      expect(run('=== A ===\n@divider("幕间-粗")\n-> END')).toEqual([])
+    })
+    it('不报 unknown-command', () => {
+      expect(run('=== A ===\n@divider()\n-> END').map((d) => d.code)).not.toContain('unknown-command')
+    })
+  })
+
   describe('@img 形态特判', () => {
     it('一 / 二 / 三参：零诊断', () => {
       expect(run('=== A ===\n@img("assets/t.jpg")\n-> END')).toEqual([])

@@ -6,10 +6,13 @@ import { type HostState, type ResolveAsset, emptyHost, applyCommand, applyPanel 
  * 正文流里的一条内容。`image` 是 `@img` 产出的插图——与 narration 并列的一条内容行，
  * 随正文滚动、留在阅读历史里（区别于始终垫在底下的全屏背景层 `@bg_show`）。
  * `src` 已 resolve 为宿主 URL（归约时解析，与 sfx 同处）；`cls` 存作者写的**原始**类名，渲染时才加前缀。
+ * `divider` 是 `@divider` 产出的分割线，与 image 同形态——块级、独占正文流一条，故**不进** RichSpan
+ * 体系：块级元素套进 `<p class="narration">` 是无效 HTML 嵌套。
  */
 export type LogEntry =
   | { kind: 'narration'; spans: RichSpan[] }
   | { kind: 'image'; src: string; alt?: string; cls?: string }
+  | { kind: 'divider'; cls?: string }
   | { kind: 'end' }
 
 /** 待填输入框的可呈现态（varName 是 engine 内部事，宿主渲染不需要，故不下放）。 */
@@ -92,15 +95,28 @@ export function imageEntry(
   const entry: Extract<LogEntry, { kind: 'image' }> = { kind: 'image', src: resolve(rawSrc.trim()) }
   if (typeof args[1] === 'string' && args[1] !== '') entry.alt = args[1]
   const cls = args[2]
-  if (typeof cls === 'string' && VALID_IMG_CLASS.test(cls.trim())) entry.cls = cls.trim()
+  if (typeof cls === 'string' && VALID_CLASS.test(cls.trim())) entry.cls = cls.trim()
   else if (cls !== undefined) warnings.push(`player: @img 的类名非法（${String(cls)}），已忽略`)
   return entry
 }
 
-/** 类名合法性（与行内 `<class=名>` 同规则）：Unicode 字母数字与 `_ -`，不含空格与点。 */
-const VALID_IMG_CLASS = /^[\p{L}\p{N}_-]+$/u
+/**
+ * `@divider([类名])` → 分割线 log 项。与 `imageEntry` 的分歧：**永不返回 null**——
+ * `@img` 路径非法要整条跳过（没有路径就没有图），而分割线没有必需参数，一个坏类名不该让
+ * 分隔本身消失，故只丢类名、照常产出。
+ */
+export function dividerEntry(args: unknown[], warnings: string[]): Extract<LogEntry, { kind: 'divider' }> {
+  const entry: Extract<LogEntry, { kind: 'divider' }> = { kind: 'divider' }
+  const cls = args[0]
+  if (typeof cls === 'string' && VALID_CLASS.test(cls.trim())) entry.cls = cls.trim()
+  else if (cls !== undefined) warnings.push(`player: @divider 的类名非法（${String(cls)}），已忽略`)
+  return entry
+}
 
-/** 归约单个事件：文字 / 插图进 log（并标记产出一行）、sfx 瞬时收集、clear 清 log、sleep 标记停顿、其余走 applyCommand。 */
+/** 类名合法性（与行内 `<class=名>` 同规则）：Unicode 字母数字与 `_ -`，不含空格与点。 */
+const VALID_CLASS = /^[\p{L}\p{N}_-]+$/u
+
+/** 归约单个事件：文字 / 插图 / 分割线进 log（并标记产出一行）、sfx 瞬时收集、clear 清 log、sleep 标记停顿、其余走 applyCommand。 */
 function reduceEvent(
   e: ReturnType<Story['continue']>,
   log: LogEntry[],
@@ -121,6 +137,11 @@ function reduceEvent(
     // flow 模式照常自动流过——与 narration 同等待遇。路径非法则整条跳过、不算产出行。
     const entry = imageEntry(e.args, resolve, warnings)
     return entry === null ? { log, host, producedLine: false } : { log: [...log, entry], host, producedLine: true }
+  }
+  if (e.name === 'divider') {
+    // 与插图同等待遇：分割线是正文流里的一条**内容行**，producedLine 让 step 在此返回——
+    // line 模式停下等点击（「点击 → 出现分割线 → 点击 → 下一段」正是幕间节奏），flow 模式照常流过。
+    return { log: [...log, dividerEntry(e.args, warnings)], host, producedLine: true }
   }
   if (e.name === 'clear') return { log: [], host, producedLine: false } // 清屏：清空已显示正文；bg/bgm 不动
   // 演出停顿：不改任何状态，只把**原始**参数交给调用方（step 据此中断并归一，advance 直接吞——

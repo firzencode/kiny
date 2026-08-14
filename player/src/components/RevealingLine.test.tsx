@@ -131,6 +131,21 @@ describe('RevealingLine（打字机逐字揭示）', () => {
       expect(revealed(container)).toBe('凶手就是…')
     })
 
+    // instant 是**宿主**说「这一行立即完成、不做任何等待」（editor 预览的快进调试开关）。
+    // 与 speed<=0 分开：后者是作者的作品设定，分段停顿照留（叙事节奏不是动效）。
+    it('instant：两档停顿都不等，整行一次出完并即刻 onComplete', () => {
+      const onComplete = vi.fn()
+      const { container } = render(<RevealingLine spans={PAUSED} speed={SPEED} fade={0} instant onComplete={onComplete} />)
+      expect(container.textContent).toBe('凶手就是…你自己！')
+      expect(onComplete).toHaveBeenCalledTimes(1)
+    })
+
+    it('speed<=0 不等于 instant：作者设的瞬显仍停在标记处', () => {
+      const { container } = render(<RevealingLine spans={PAUSED} speed={0} fade={0} />)
+      act(() => { vi.advanceTimersByTime(500) })
+      expect(revealed(container)).toBe('凶手就是…') // 每段瞬显，但标记处仍等
+    })
+
     it('整行未完时不触发 onComplete；续段揭示完整行才触发一次', () => {
       const onComplete = vi.fn()
       const { rerender } = render(<RevealingLine spans={PAUSED} speed={SPEED} fade={0} skipToken={0} onComplete={onComplete} />)
@@ -255,6 +270,12 @@ describe('RevealingLine（打字机逐字揭示）', () => {
       act(() => { vi.advanceTimersByTime(1) }) // 满 2000ms → 自动续段
       act(() => { vi.advanceTimersByTime(70) }) // 后半段 7 字
       expect(revealed(container)).toBe('门开了，什么都没有。')
+    })
+
+    it('instant：毫秒档定时器根本不起，同一帧整行出完', () => {
+      const { container } = render(<RevealingLine spans={TIMED} speed={SPEED} fade={0} instant />)
+      expect(container.textContent).toBe('门开了，什么都没有。')
+      expect(vi.getTimerCount()).toBe(0) // 没有在飞的停顿定时器
     })
 
     it('等待期间点击被忽略：既不提前续段，也不整行立显', () => {
@@ -387,5 +408,21 @@ describe('RevealingLine（打字机逐字揭示）', () => {
     expect(boxes).toHaveLength(1)
     // 逐字 rchar 在其内层（淡入动画照旧逐字）
     expect(boxes[0]!.querySelectorAll('.rchar').length).toBeGreaterThan(0)
+  })
+
+  // 两态一致的**结构性护栏**：揭示中走 toCells 的 br 单元、定格后走 RichText，两条路径各自
+  // 渲染换行，本用例锁住产出的 <br> 数量相同，任一路径漏掉 break 即红。
+  // ⚠ 这不覆盖 T113 done-when 里「空白两态一致」那半——那半是 CSS（white-space: pre-wrap），
+  // jsdom 不解析样式表，只能靠人工冒烟。详见 docs/memory/player-two-render-paths-whitespace.md。
+  it('换行在揭示中与定格后一致：<br> 数量不因定格而变', () => {
+    const spans: RichSpan[] = [{ text: '上' }, { kind: 'break' }, { text: '下' }]
+    const { container } = render(<RevealingLine spans={spans} speed={SPEED} fade={200} />)
+    act(() => { vi.advanceTimersByTime(30) }) // 3 个单元（上 / 换行 / 下）全出，进入淡入拖尾期
+    expect(container.querySelector('.rchar')).not.toBeNull() // 仍是逐字态，未定格
+    const duringReveal = container.querySelectorAll('br').length
+    act(() => { vi.advanceTimersByTime(200) }) // 拖尾播完 → 定格切 RichText
+    expect(container.querySelector('.rchar')).toBeNull()
+    expect(duringReveal).toBe(1)
+    expect(container.querySelectorAll('br')).toHaveLength(duringReveal)
   })
 })

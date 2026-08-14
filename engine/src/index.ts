@@ -8,7 +8,7 @@ export type {
   Command, InlineSegment, InlineStyle, RichTextIssue,
 } from './parser'
 // analyze
-export { analyze, resolveStart, openingKnotName } from './analyze'
+export { analyze, resolveStart, openingKnotName, COMMAND_NAMES } from './analyze'
 export type { Diagnostic, AnalyzeResult, ValidatedProgram } from './analyze'
 // runtime
 export { createStory, restoreStory, Story, RuntimeError, plainText } from './runtime'

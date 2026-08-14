@@ -1,5 +1,8 @@
 import { assembleFromFiles, type Story, type ValidatedProgram } from '@kiny/engine'
-import { discoverAssets, buildProjectCss, type ResolveAsset } from '@kiny/player'
+import {
+  discoverAssets, buildProjectCss, parseCharacters,
+  type ResolveAsset, type CharacterTable,
+} from '@kiny/player'
 import type { UnzippedKip } from '../kip/unzipKip'
 
 export interface Loaded {
@@ -12,6 +15,8 @@ export interface Loaded {
   assetUrls: string[]
   /** 作品前端资源编译出的 css（字体 objectURL 已就位、`url()` 已重写）。 */
   projectCss: string
+  /** 作品角色表（`characters.json`）；未带 / 坏文件 = 空表，不着色。 */
+  characters: CharacterTable
 }
 
 /**
@@ -45,5 +50,6 @@ export function loadFromLibrary(pkg: UnzippedKip): Loaded {
     version: res.meta.version,
     assetUrls,
     projectCss,
+    characters: parseCharacters(pkg.charactersText),
   }
 }

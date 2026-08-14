@@ -663,6 +663,7 @@ button {
   color: var(--text-faint);
 }
 .preview-restart,
+.preview-fast,
 .preview-back {
   display: inline-flex;
   align-items: center;
@@ -677,12 +678,33 @@ button {
   font-size: 12px;
 }
 .preview-back { margin-right: 6px; }
+.preview-fast { margin-right: 6px; }
 .preview-restart:hover,
+.preview-fast:hover,
 .preview-back:hover:not(:disabled) {
   background: var(--bg-2);
   color: var(--text);
 }
 .preview-back:disabled { opacity: 0.4; cursor: default; }
+/* 快进开着时按钮常亮：它改变作品表现，作者一眼要看得出自己开着（另有工具栏的「⏩ 快进中」标记）。 */
+.preview-fast.on {
+  background: var(--accent-soft);
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+/* 必须写在 .on 之后：同特异性下后者胜，否则上面那条会把 .preview-fast:hover 压掉，
+   快进开着时按钮就没有悬停反馈了。 */
+.preview-fast.on:hover {
+  background: color-mix(in srgb, var(--accent) 26%, transparent);
+}
+/* 与 stale / 资源问题角标同一档视觉，只是换成强调色——那两个是警示，这个是「你开着一个调试开关」。 */
+.preview-fast-mark {
+  font-size: 11.5px;
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-radius: 999px;
+  padding: 2px 9px;
+}
 .preview-empty {
   flex: 1;
   display: flex;
@@ -734,10 +756,14 @@ button {
   .preview-stage .panel-left,
   .preview-stage .panel-right { padding-top: 46px; }
 }
-.preview-stage .bg-layer {
+/* 底图与其色罩在 player 基础样式里是 `position: fixed`；预览区里必须改 absolute——`.player` 的
+   container-type 在 Chromium 实测**不**为 fixed 后代建立 containing block（同侧栏那条），fixed
+   会相对视口、把底图和罩子铺满整个编辑器窗口。定位是这里唯一该改的东西：模糊与压暗的档位**不**在
+   此覆盖，预览与读者端同吃 player 的 `filter`，否则同一份稿子在预览里与读者手里深浅不同。 */
+.preview-stage .bg-layer,
+.preview-stage .bg-overlay {
   position: absolute;
   inset: 0;
-  filter: blur(2px) brightness(0.6);
 }
 /* 压暗遮罩、正文排版、选项配色一律走 `--kiny-*` token（上方 :root 已映射到编辑器皮肤），
    此处不再直接写属性——否则 `.preview-stage .x` 的高特异性会盖过作者覆盖的 token，
@@ -1025,6 +1051,14 @@ button {
 .theme-numeric { display: flex; align-items: center; gap: 10px; }
 .theme-numeric input[type="range"] { flex: 1; max-width: 240px; accent-color: var(--accent, currentColor); }
 .theme-numeric-val { min-width: 4.5em; font-family: var(--mono, monospace); font-size: 11px; color: var(--text-faint); }
+
+/* 角色编辑器（characters.json）：复用主题编辑器的双页签与控件外观，只改行布局。
+   一行 = 色块 + 名字 + 控件组，问题提示跨满整行。 */
+.character-row { grid-template-columns: auto minmax(80px, 9em) 1fr; align-items: start; }
+.character-row .theme-text { max-width: none; }
+.character-row .theme-select { width: auto; }
+.character-row > p { grid-column: 1 / -1; margin: 2px 0 0; }
+.character-swatch { width: 22px; height: 22px; border-radius: 5px; border: 1px solid var(--border-2); }
 
 /* 预置主题：换整套风格的加速器。色板即预览——底色 / 文字色 / 字体三样一眼看全。 */
 .theme-preset-hint { margin: 0 0 9px; font-size: 11.5px; line-height: 1.7; color: var(--text-faint); }

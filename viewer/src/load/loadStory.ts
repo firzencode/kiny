@@ -18,6 +18,11 @@ export interface InlineProject {
    * `file://` 下无法 fetch 旁挂文本、且 Chrome 拒载外链字体，故必须内联随页面走。
    */
   css?: string
+  /**
+   * 角色表 `characters.json` 的**原始文本**（导出管线内联）。`file://` 下无法 fetch 旁挂文本，
+   * 故与 css 同样内联随页面走。
+   */
+  characters?: string
 }
 
 /** 内联数据探测结果：无注入（占位/缺 manifest）| 合法 | 有 manifest 但形状损坏。 */
@@ -52,7 +57,8 @@ export async function loadStory(seed = randomSeed()): Promise<LoadOutcome> {
     const inline = probe.project
     const files = new Map(Object.entries(inline.files))
     const css = typeof inline.css === 'string' ? inline.css : ''
-    return buildStory(inline.manifest, files, inline.assetBase ?? '', seed, 'kiny.json', css)
+    const characters = typeof inline.characters === 'string' ? inline.characters : null
+    return buildStory(inline.manifest, files, inline.assetBase ?? '', seed, 'kiny.json', css, characters)
   }
   return loadDemo('demo/', seed)
 }

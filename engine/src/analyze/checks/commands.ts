@@ -32,7 +32,7 @@ function checkMillis(raw: string): 'ok' | 'bad' | 'dynamic' {
 }
 
 /**
- * 未知 @命令 + `@input` / `@sleep` / `@panel` / `@img` 形态特判
+ * 未知 @命令 + `@input` / `@sleep` / `@panel` / `@img` / `@divider` 形态特判
  * （元数：变量存在性由 checkVariables 经片段引用检查覆盖）。
  */
 export function checkCommands(files: ProjectFile[]): Diagnostic[] {
@@ -78,6 +78,18 @@ export function checkCommands(files: ProjectFile[]): Diagnostic[] {
             const tpl = el.args[1]!.trim()
             if (stringLiteral(el.args[1]!) === null && NON_STRING_LITERAL.test(tpl)) {
               out.push({ severity: 'error', code: 'panel-template', message: `@panel 的模板必须是字符串：「${tpl}」`, file, line: el.line })
+            }
+          }
+        } else if (el.name === 'divider') {
+          // @divider([类名])：0–1 参。唯一参数是类名，与 @img 第三参同规格——
+          // **只对字面量做形态校验**，表达式参不拦（运行期由 player 兜底，与 @img / @sleep 同策略）。
+          if (el.args.length > 1) {
+            out.push({ severity: 'error', code: 'divider-arity', message: `@divider 需要 0 或 1 个参数（[类名]）`, file, line: el.line })
+          } else if (el.args.length === 1) {
+            const rawCls = el.args[0]!.trim()
+            const cls = stringLiteral(el.args[0]!)
+            if (cls !== null ? !validClass(cls) : NON_STRING_LITERAL.test(rawCls)) {
+              out.push({ severity: 'error', code: 'divider-class', message: `@divider 的类名不合法：「${rawCls}」（只含 Unicode 字母数字与 _ -）`, file, line: el.line })
             }
           }
         } else if (el.name === 'img') {

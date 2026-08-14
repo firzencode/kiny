@@ -36,6 +36,15 @@ import { sortByPath } from '../order'
 const STEP_BUDGET = 10_000
 const DEFAULT_SEED = GOLDEN_SEED
 
+/**
+ * 按换行切文本（`\r\n` / `\r` 先归一为 `\n`，免残留 `\r` 成为不可见怪字符）。
+ * 返回的段与换行**交替**，首尾不修剪——写几个换行就换几行（`"行\n"` → `['行', '']`，段末那个空段
+ * 意味着一处 break）。归一化在此收口，调用方只需在段间插 break。
+ */
+function splitLines(text: string): string[] {
+  return text.replace(/\r\n?/g, '\n').split('\n')
+}
+
 export class Story {
   private readonly stack = new FrameStack()
   private buffer: RichSpan[] | null = null
@@ -837,6 +846,7 @@ export class Story {
   /**
    * 渲染行内片段为富文本 spans：literal 取 value + 其 style；interp 段求值转串（null/undefined→空串）
    * 并承继其 style；break → 换行 span。空文本段不产 span；相邻同样式文本段归并（纯文本恒为单 span）。
+   * 文本里的**换行符等价于 `<br>`**（切分见模块顶部 `splitLines`）。
    * `line` 为片段所在行（TextLine.line / Choice.line），出错时透传给 RuntimeError 定位。
    */
   private renderSpans(segments: InlineSegment[], line = 0): RichSpan[] {
@@ -844,11 +854,14 @@ export class Story {
     // `<pause>` 标记落在「其后首个**有内容**的 span」上：空插值（`{undefined}`）不消费它，
     // 否则 `前半…<pause>{空}后半` 的停顿会凭空消失。顺延时**档位一并携带**。
     let pausePending: PauseKind | null = null
+    const pushBreak = () => {
+      raw.push(pausePending !== null ? { kind: 'break', pauseBefore: pausePending } : { kind: 'break' })
+      pausePending = null
+    }
     for (const seg of segments) {
       if (seg.pauseBefore) pausePending = seg.pauseBefore
       if (seg.kind === 'break') {
-        raw.push(pausePending !== null ? { kind: 'break', pauseBefore: pausePending } : { kind: 'break' })
-        pausePending = null
+        pushBreak()
         continue
       }
       let text: string
@@ -863,8 +876,17 @@ export class Story {
         text = v === undefined || v === null ? '' : String(v)
       }
       if (text === '') continue // 空段：pausePending 保留，顺延给下一个有内容的段
-      raw.push(makeTextSpan(text, seg.style, pausePending ?? undefined))
-      pausePending = null
+      // 换行符 → break span，与 `<br>` 同构。literal 段与插值段**一视同仁**：正文 / 选项的
+      // literal 来自源码单行（parser 已按行切）天然无换行，而 `@panel` 的模板源串是 JS 求值
+      // 结果，其字面换行落在 literal 段——只处理插值段会漏掉它。
+      const parts = splitLines(text)
+      for (let i = 0; i < parts.length; i++) {
+        if (i > 0) pushBreak()
+        const part = parts[i]!
+        if (part === '') continue // 首尾 / 连续换行切出的空段：同样不产 span、不消费 pausePending
+        raw.push(makeTextSpan(part, seg.style, pausePending ?? undefined))
+        pausePending = null
+      }
     }
     return mergeSpans([], raw) // 经 coalesce 归并相邻同样式段
   }

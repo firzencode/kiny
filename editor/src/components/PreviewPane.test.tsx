@@ -36,6 +36,20 @@ describe('PreviewPane', () => {
     expect(screen.getByRole('button', { name: /上一步/ })).toBeDisabled() // seq 空（预览起点）→ 禁用
   })
 
+  it('「⏩ 快进」开关：点击回调 onToggleFastForward；开着时按下态 + 工具栏亮「快进中」标记（T116）', async () => {
+    const onToggle = vi.fn()
+    const { rerender } = render(<PreviewPane play={atChoice} stale={false} seed={0x5eed} onChoose={vi.fn()} onSubmitInput={vi.fn()} onRestart={vi.fn()} onBack={vi.fn()} canGoBack={false} onToggleFastForward={onToggle} />)
+    const btn = screen.getByRole('button', { name: /快进/ })
+    expect(btn).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.queryByText('⏩ 快进中')).toBeNull()
+    await userEvent.click(btn)
+    expect(onToggle).toHaveBeenCalledTimes(1)
+    // 快进改变作品表现，开着时必须一眼可见——按下态 + 常驻标记两处都盯住。
+    rerender(<PreviewPane play={atChoice} stale={false} seed={0x5eed} onChoose={vi.fn()} onSubmitInput={vi.fn()} onRestart={vi.fn()} onBack={vi.fn()} canGoBack={false} onToggleFastForward={onToggle} fastForward />)
+    expect(screen.getByRole('button', { name: /快进/ })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByText('⏩ 快进中')).toBeInTheDocument()
+  })
+
   it('停在 @input：输入框可用，回车提交以文本回调 onSubmitInput', async () => {
     const onSubmitInput = vi.fn()
     const atInput: PlayState = {

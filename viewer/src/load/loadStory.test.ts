@@ -35,6 +35,32 @@ describe('loadStory', () => {
     }
   })
 
+  it('内联 characters 被解析进角色表；缺席 / 写坏 → 空表且故事照常', async () => {
+    ;(window as unknown as { __KINY_PROJECT__?: unknown }).__KINY_PROJECT__ = {
+      manifest: MANIFEST,
+      files: { 'main.kin': MAIN },
+      characters: '{"阿黎娅":{"color":"#7fb3d5"}}',
+    }
+    const out = await loadStory(123)
+    expect(out.ok && out.value.characters.get('阿黎娅')).toBe('#7fb3d5')
+
+    ;(window as unknown as { __KINY_PROJECT__?: unknown }).__KINY_PROJECT__ = {
+      manifest: MANIFEST,
+      files: { 'main.kin': MAIN },
+      characters: '{坏 json',
+    }
+    const bad = await loadStory(123)
+    expect(bad.ok && bad.value.characters.size).toBe(0)
+    expect(bad.ok && bad.value.story.canContinue).toBe(true)
+
+    ;(window as unknown as { __KINY_PROJECT__?: unknown }).__KINY_PROJECT__ = {
+      manifest: MANIFEST,
+      files: { 'main.kin': MAIN },
+    }
+    const none = await loadStory(123)
+    expect(none.ok && none.value.characters.size).toBe(0)
+  })
+
   it('内联数据可自定义 assetBase', async () => {
     ;(window as unknown as { __KINY_PROJECT__?: unknown }).__KINY_PROJECT__ = {
       manifest: MANIFEST,

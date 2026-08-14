@@ -1016,6 +1016,44 @@ describe('App 作品前端资源（T077）', () => {
     expect(await g.readTextFile('/proj', 'theme.css')).toBe('.player{--kiny-page-bg:#fff}')
   })
 
+  it('「文件 → 作品角色…」：项目里没有角色表时按模板新建 characters.json 并打开', async () => {
+    const g = createMemoryGateway({
+      pickedDir: '/proj',
+      files: {
+        '/proj/kiny.json': JSON.stringify({ name: '雾港', version: '1.0.0', engine: '0.1.0', entry: 'main.kin' }),
+        '/proj/main.kin': MAIN,
+      },
+    })
+    render(<App gateway={g} />)
+    await fileMenu('打开项目...')
+    await screen.findAllByText('main.kin')
+    await fileMenu('作品角色...')
+    // 新建的 characters.json 已打开为角色编辑器，模板里的两个示例角色进了 GUI
+    expect(await screen.findByRole('tab', { name: '角色' })).toBeInTheDocument()
+    const names = screen.getAllByRole('textbox').map((el) => (el as HTMLInputElement).value)
+    expect(names).toEqual(['克里斯托弗', '阿黎娅'])
+    expect((await screen.findAllByText('characters.json')).length).toBeGreaterThan(0)
+  })
+
+  it('「文件 → 作品角色…」：已有 characters.json 时打开它，不重复新建', async () => {
+    const g = createMemoryGateway({
+      pickedDir: '/proj',
+      files: {
+        '/proj/kiny.json': JSON.stringify({ name: '雾港', version: '1.0.0', engine: '0.1.0', entry: 'main.kin' }),
+        '/proj/main.kin': MAIN,
+        '/proj/characters.json': '{"林然":{}}',
+      },
+    })
+    render(<App gateway={g} />)
+    await fileMenu('打开项目...')
+    await screen.findAllByText('main.kin')
+    await fileMenu('作品角色...')
+    expect(await screen.findByRole('tab', { name: '角色' })).toBeInTheDocument()
+    // 打开的是原有那个文件（内容还在），没有被模板覆盖
+    expect(await g.readTextFile('/proj', 'characters.json')).toBe('{"林然":{}}')
+    expect(screen.getAllByRole('textbox').map((el) => (el as HTMLInputElement).value)).toEqual(['林然'])
+  })
+
   it('资源问题（非法族名）→ 预览栏出现提示角标', async () => {
     const g = createMemoryGateway({
       pickedDir: '/proj',

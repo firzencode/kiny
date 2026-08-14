@@ -24,9 +24,11 @@ function build(kin: string): { program: ValidatedProgram; start: string } {
 function Harness({
   onReady,
   extraOnCommit,
+  fastForward = false,
 }: {
   onReady: (pb: PreviewPlayback) => void
   extraOnCommit?: (state: PlayState, sfx: string[]) => void
+  fastForward?: boolean
 }) {
   const [play, setPlay] = useState<PlayState | null>(null)
   const [sfx, setSfx] = useState<string[]>([])
@@ -34,7 +36,7 @@ function Harness({
     setPlay(state)
     setSfx(s)
     extraOnCommit?.(state, s)
-  })
+  }, fastForward)
   onReady(pb)
   if (!play) return null
   return <Player state={play} onChoose={() => {}} sfx={sfx} reveal={pb.reveal} onContentClick={pb.onContentClick} />
@@ -162,6 +164,91 @@ describe('usePreviewPlayback', () => {
     expect(container.textContent).not.toContain('第二行。')
     pump(900, 100)
     expect(container.textContent).toContain('第二行。')
+  })
+
+  // 快进（T116）：作者调试开关，旁路掉全部演出等待。四条各盯一种等待 + 一条盯不外溢。
+  describe('快进', () => {
+    it('逐行模式与句中 <pause> 都不再等，一路流到决定点', () => {
+      const { program, start } = build('@step_mode("line")\n第一行<pause>还有后半句。\n第二行。\n* [继续] -> END\n')
+      let pb!: PreviewPlayback
+      const { container } = render(<Harness onReady={(p) => { pb = p }} fastForward />)
+      act(() => { pb.restart(program, start, 1, RESOLVE) })
+      pump(300, 50) // 不点任何一下
+      expect(container.textContent).toContain('还有后半句。') // 句中点击档没停
+      expect(container.textContent).toContain('第二行。') // line 模式没等点击
+      expect(screen.getByRole('button', { name: '继续' })).toBeInTheDocument()
+    })
+
+    it('毫秒档 <pause=毫秒> 不起定时器，同一帧就出完整行', () => {
+      const { program, start } = build('前半<pause=5000>后半。\n* [继续] -> END\n')
+      let pb!: PreviewPlayback
+      const { container } = render(<Harness onReady={(p) => { pb = p }} fastForward />)
+      act(() => { pb.restart(program, start, 1, RESOLVE) })
+      pump(200, 50) // 远小于 5000ms
+      expect(container.textContent).toContain('后半。')
+    })
+
+    it('@sleep 不等满', () => {
+      const { program, start } = build('第一行。\n@sleep(5000)\n第二行。\n-> END\n')
+      let pb!: PreviewPlayback
+      const { container } = render(<Harness onReady={(p) => { pb = p }} fastForward />)
+      act(() => { pb.restart(program, start, 1, RESOLVE) })
+      pump(200, 50)
+      expect(container.textContent).toContain('第二行。')
+    })
+
+    it('不发音效（旁路等待后音效会挤成一声噪响）', () => {
+      const { program, start } = build('@sfx("a.mp3")\n第一行。\n* [继续] -> END\n')
+      const sfxSeen: string[][] = []
+      let pb!: PreviewPlayback
+      render(<Harness onReady={(p) => { pb = p }} extraOnCommit={(_s, sfx) => sfxSeen.push(sfx)} fastForward />)
+      act(() => { pb.restart(program, start, 1, RESOLVE) })
+      pump(300, 50)
+      expect(sfxSeen.length).toBeGreaterThan(0) // every 对空数组永真——先确认真有 commit 发生
+      expect(sfxSeen.every((s) => s.length === 0)).toBe(true)
+    })
+
+    // 拨开关那一刻已经在等的两种情况：不放行的话「开关当场无效」，要再点一下才起作用，
+    // 而作者点快进最自然的时机恰恰就是盯着不动的画面时。
+    it('拨开关时正卡在 @sleep：就地放行，不必等满剩余时长', () => {
+      // `@text_speed(0)` 不可省：默认速度下 200ms 内第一行还在打字（含淡入拖尾），
+      // 拨开关时压根没停在 sleep 上，这条就退化成「拨开关时正在打字」、测不到它要测的东西。
+      const { program, start } = build('@text_speed(0)\n第一行。\n@sleep(9000)\n第二行。\n-> END\n')
+      let pb!: PreviewPlayback
+      const Wrap = ({ ff }: { ff: boolean }) => <Harness onReady={(p) => { pb = p }} fastForward={ff} />
+      const { container, rerender } = render(<Wrap ff={false} />)
+      act(() => { pb.restart(program, start, 1, RESOLVE) })
+      pump(200, 50)
+      expect(container.textContent).toContain('第一行。') // 已停在 sleep 上（而非仍在打字）
+      expect(container.textContent).not.toContain('第二行。')
+      act(() => { rerender(<Wrap ff />) }) // ← 此刻拨开快进
+      pump(100, 50) // 远小于剩余的 8800ms
+      expect(container.textContent).toContain('第二行。')
+    })
+
+    it('拨开关时正停在行尾等点击（line 模式）：自动流起来，不必再点一下', () => {
+      const { program, start } = build('@step_mode("line")\n@text_speed(0)\n第一行。\n第二行。\n* [继续] -> END\n')
+      let pb!: PreviewPlayback
+      const Wrap = ({ ff }: { ff: boolean }) => <Harness onReady={(p) => { pb = p }} fastForward={ff} />
+      const { container, rerender } = render(<Wrap ff={false} />)
+      act(() => { pb.restart(program, start, 1, RESOLVE) })
+      pump(300, 50)
+      expect(container.textContent).not.toContain('第二行。') // 等点击
+      act(() => { rerender(<Wrap ff />) }) // ← 此刻拨开快进
+      pump(300, 50)
+      expect(container.textContent).toContain('第二行。')
+      expect(screen.getByRole('button', { name: '继续' })).toBeInTheDocument()
+    })
+
+    it('关掉快进后一切照旧：line 模式仍等点击', () => {
+      const { program, start } = build('@step_mode("line")\n@text_speed(0)\n第一行。\n第二行。\n-> END\n')
+      let pb!: PreviewPlayback
+      const { container } = render(<Harness onReady={(p) => { pb = p }} />)
+      act(() => { pb.restart(program, start, 1, RESOLVE) })
+      pump(300, 50)
+      expect(container.textContent).toContain('第一行。')
+      expect(container.textContent).not.toContain('第二行。')
+    })
   })
 
   it('@sleep：cancel（编辑触发重算）作废在飞停顿，不再续步', () => {

@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { resolveStart, validFont } from '@kiny/engine'
 import type { ValidatedProgram } from '@kiny/engine'
-import { discoverAssets, buildProjectCss, scopeCss, familyOf } from '@kiny/player'
+import { discoverAssets, buildProjectCss, scopeCss, familyOf, parseCharacters, CHARACTERS_FILE } from '@kiny/player'
 import type { PlayState, ResolveAsset, InteractionStep, AssetIssue } from '@kiny/player'
 import type { FileGateway, Manifest } from './files/gateway'
-import { defaultKipName, defaultWebpageDirName, buildProjectData, projectFileName, isTextFile, isThemeFile, isKinFile } from './files/gateway'
+import { defaultKipName, defaultWebpageDirName, buildProjectData, projectFileName, isTextFile, isThemeFile, isCharactersFile, isKinFile } from './files/gateway'
 import { editorReducer, initialEditorState, anyDirty, activeBuffer } from './state/editorReducer'
 import { useDebouncedValidation, type ValidationOutcome } from './hooks/useDebouncedValidation'
 import { createIncrementalValidator, kinSourcesOf } from './validate/validate'
@@ -20,6 +20,7 @@ import { TodoPanel } from './components/TodoPanel'
 import { scanTodos } from './todo/scanTodos'
 import { EditorPane, type EditorHandle } from './components/EditorPane'
 import { ThemeEditor } from './components/ThemeEditor'
+import { CharacterEditor } from './components/CharacterEditor'
 import { MediaView } from './components/MediaView'
 import { mediaKind } from './files/media'
 import { StoryGraph } from './components/StoryGraph'
@@ -191,7 +192,10 @@ export function App({ gateway }: { gateway: FileGateway }) {
     setStale(false); staleRef.current = false
     setSfxQueue(sfx)
   }, [])
-  const preview: PreviewPlayback = usePreviewPlayback(onPreviewCommit)
+  // 快进（作者调试开关）：会话内保持、**不持久化**到设置——它改变作品表现，跨会话记着容易让作者
+  // 忘了开着、误判自己的演出效果。配合预览栏那个常驻标记，忘关的代价最多到下次重开编辑器为止。
+  const [fastForward, setFastForward] = useState(false)
+  const preview: PreviewPlayback = usePreviewPlayback(onPreviewCommit, fastForward)
 
   // 预览端口（内置 AI / 外部控制 / UI「← 上一步」共用；实现与单测见 preview/previewPort.ts）。
   // 每个动作前先中止在飞的人工打字动画：否则动画后续的 doStep 会覆盖刚 recompute 出的瞬时态。
@@ -275,6 +279,16 @@ export function App({ gateway }: { gateway: FileGateway }) {
   }, [state.projectDir, state.entries, state.files])
   // 只有「是否注入」受开关控制；资源问题与开关无关，关掉主题也照样提示（否则作者查不出族名为何不生效）。
   const previewCss = settings.previewProjectTheme ? previewTheme.css : ''
+  /**
+   * 预览用的角色表（T111）：直接取**编辑缓冲**，零 IO——作者在「角色」GUI 或「原文」页改一个
+   * 字，预览立刻换色，不必先保存。JSON 写坏了就是空表（那一刻不着色），与播放端同一条容错，
+   * 作者在预览里立刻看得见。
+   * 只认项目根那一份约定名文件（与 `theme.css` 同性质），子目录里的同名文件不作数。
+   */
+  // 依赖只取那一份文件的文本：依赖整个 `state.files` 会让任何文件的任何一次击键都新建一张
+  // 角色表，从而作废 player 那边按表引用做的 span 缓存。
+  const charactersSource = state.files[CHARACTERS_FILE]?.source ?? null
+  const previewCharacters = useMemo(() => parseCharacters(charactersSource), [charactersSource])
   /** 资源问题（非法族名 / 同名冲突 / 读不到）汇成一行提示——播放端静默跳过，作者这里要看得见。 */
   const assetWarnings = useMemo(() => previewTheme.issues.map(describeAssetIssue), [previewTheme])
   /**
@@ -461,7 +475,13 @@ export function App({ gateway }: { gateway: FileGateway }) {
       readCss: (p) => state.files[p]?.source ?? null,
       resolveAsset: (p) => fontUris.get(p) ?? p,
     }).css
-    const projectData = buildProjectData(state.manifest, Object.values(state.files), exportCss)
+    // 角色表原文随页内联（同 css：`file://` 下不能 fetch 旁挂文本）。
+    const projectData = buildProjectData(
+      state.manifest,
+      Object.values(state.files),
+      exportCss,
+      state.files[CHARACTERS_FILE]?.source ?? '',
+    )
     try {
       const dest = await gateway.exportWebpage(state.projectDir, parent, defaultWebpageDirName(state.manifest.name), projectData)
       setNotice(`已导出到 ${dest}`, 'success')
@@ -614,6 +634,22 @@ export function App({ gateway }: { gateway: FileGateway }) {
       const entry = await gateway.createFile(state.projectDir, 'theme.css')
       dispatch({ type: 'file_created', file: entry })
     } catch (e) { setNotice(`创建主题文件失败：${errMsg(e)}`) }
+  }
+  /**
+   * 「作品角色…」：有 `characters.json` 就开它，没有则按模板建一个再开。
+   * 与 `onOpenTheme` 同一条路——没有这个入口，作者只有在恰好新建一个名字精确为
+   * `characters.json` 的文件时才会撞见角色编辑器，等于这个功能不存在。
+   */
+  const onOpenCharacters = async () => {
+    if (!state.projectDir) return
+    if (state.files[CHARACTERS_FILE] !== undefined) {
+      dispatch({ type: 'open_tab', path: CHARACTERS_FILE })
+      return
+    }
+    try {
+      const entry = await gateway.createFile(state.projectDir, CHARACTERS_FILE)
+      dispatch({ type: 'file_created', file: entry })
+    } catch (e) { setNotice(`创建角色表失败：${errMsg(e)}`) }
   }
   const onCreateFolder = async (relDir: string) => {
     if (!state.projectDir) return
@@ -879,6 +915,7 @@ export function App({ gateway }: { gateway: FileGateway }) {
         onOpenSettings={onOpenSettings}
         onOpenProjectSettings={onOpenProjectSettings}
         onOpenTheme={() => { void onOpenTheme() }}
+        onOpenCharacters={() => { void onOpenCharacters() }}
         onZoomIn={onZoomIn}
         onZoomOut={onZoomOut}
         onZoomReset={onZoomReset}
@@ -1017,18 +1054,32 @@ export function App({ gateway }: { gateway: FileGateway }) {
                     readOnly={ai.running}
                   />
                 )
-                // 只有作品主题文件给双模编辑器（外观 GUI ↔ 原文），文本编辑器作为「原文」页嵌入；
-                // 其余 `.css` 仍是纯文本编辑器——理由见 `isThemeFile`。
-                return isThemeFile(active.path) ? (
-                  <ThemeEditor
-                    key={`theme:${state.activeFile ?? ''}`}
-                    source={active.source}
-                    onChange={(s) => dispatch({ type: 'source_changed', path: active.path, source: s })}
-                    fonts={projectFonts}
-                    readOnly={ai.running}
-                    rawEditor={pane}
-                  />
-                ) : pane
+                // 两个约定名文件给双模编辑器（GUI ↔ 原文），文本编辑器作为「原文」页嵌入；
+                // 其余 `.css` / `.json` 仍是纯文本编辑器——理由见 `isThemeFile`。
+                if (isThemeFile(active.path)) {
+                  return (
+                    <ThemeEditor
+                      key={`theme:${state.activeFile ?? ''}`}
+                      source={active.source}
+                      onChange={(s) => dispatch({ type: 'source_changed', path: active.path, source: s })}
+                      fonts={projectFonts}
+                      readOnly={ai.running}
+                      rawEditor={pane}
+                    />
+                  )
+                }
+                if (isCharactersFile(active.path)) {
+                  return (
+                    <CharacterEditor
+                      key={`chars:${state.activeFile ?? ''}`}
+                      source={active.source}
+                      onChange={(s) => dispatch({ type: 'source_changed', path: active.path, source: s })}
+                      readOnly={ai.running}
+                      rawEditor={pane}
+                    />
+                  )
+                }
+                return pane
               })()}
             </>
           ) : activeMedia ? (
@@ -1083,8 +1134,9 @@ export function App({ gateway }: { gateway: FileGateway }) {
               ) : (
                 <PreviewPane play={play} stale={stale} sfx={sfxQueue} seed={previewSeed} onChoose={onChoosePreview} onSubmitInput={onSubmitInputPreview} onRestart={onRestart}
                   onBack={onBack} canGoBack={interactionSeqRef.current.length > 0}
+                  fastForward={fastForward} onToggleFastForward={() => setFastForward((v) => !v)}
                   reveal={preview.reveal} onContentClick={preview.onContentClick}
-                  projectCss={previewCss} assetWarnings={assetWarnings} />
+                  projectCss={previewCss} assetWarnings={assetWarnings} characters={previewCharacters} />
               )}
             </div>
           </div>

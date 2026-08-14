@@ -1,4 +1,4 @@
-import type { ResolveAsset } from '@kiny/player'
+import { CHARACTERS_FILE, type ResolveAsset } from '@kiny/player'
 import type { DraftStore } from '../state/drafts'
 import type { ChatStore } from '../state/chatStore'
 
@@ -213,7 +213,20 @@ export const STARTER_STYLE_CSS = `/* 作品样式 —— 项目里任意位置�
 
 .player .panel-bottom { background: rgba(0, 0, 0, .3); }
 .player .kin-illustration { border-radius: 8px; }
+.player .kin-divider { width: 100%; }
 */
+`
+
+/**
+ * 新建 `characters.json` 的起始内容：两个示例角色，一个自动配色、一个写死颜色。
+ * 键顺序即声明顺序、决定自动配色槽位，故模板本身就展示了「留空 = 自动」这条约定。
+ */
+export const STARTER_CHARACTERS_JSON = `{
+  "克里斯托弗": {},
+  "阿黎娅": {
+    "color": "#7fb3d5"
+  }
+}
 `
 
 /** 校验相对路径安全：禁止空串、`.`、绝对路径与 `..` 穿越，否则抛错。 */
@@ -274,12 +287,26 @@ export function isThemeFile(path: string): boolean {
 }
 
 /**
- * 新建文件的起始内容：`.kin` 落故事脚手架、`theme.css` 落主题模板、其它 `.css` 落样式空壳、
- * 其它已知文本类型留空。
+ * 作品角色表文件。与 `isThemeFile` 同一性质的**单点判定**：「角色」GUI 只对它出现，新建文件的
+ * 模板也只发给它。
+ *
+ * 判定是**精确的全路径比较**，不像 `isThemeFile` 那样只看末段、忽略大小写——因为播放端四端
+ * 取的都是项目根那一份、按精确名比较（`CHARACTERS_FILE`）。判定放宽一格，作者就能造出
+ * 「编辑器给了角色 GUI、四端却全都不认」的文件（Windows 上新建 `Characters.json` 尤其容易
+ * 撞上），而且没有任何提示。两侧口径必须一致。
+ */
+export function isCharactersFile(path: string): boolean {
+  return path === CHARACTERS_FILE
+}
+
+/**
+ * 新建文件的起始内容：`.kin` 落故事脚手架、`theme.css` 落主题模板、`characters.json` 落角色表
+ * 模板、其它 `.css` 落样式空壳、其它已知文本类型留空。
  */
 export function starterContentFor(relPath: string): string {
   if (isKinFile(relPath)) return STARTER_NEW_FILE
   if (isThemeFile(relPath)) return STARTER_THEME_CSS
+  if (isCharactersFile(relPath)) return STARTER_CHARACTERS_JSON
   if (relPath.toLowerCase().endsWith('.css')) return STARTER_STYLE_CSS
   return ''
 }
@@ -318,8 +345,9 @@ export function defaultWebpageDirName(storyName: string): string {
 
 /**
  * 组装导出独立网页的内联数据（写入 `window.__KINY_PROJECT__`，对应 viewer 的 InlineProject）：
- * manifest 文本 + 各 .kin 路径→源码 + 作品主题 css。资源走相对引用（项目文件原样拷到导出目录），
- * 故 assetBase 空。**只收 `.kin`**——css 等前端资源经 projectCss 内联，不进故事文件表。
+ * manifest 文本 + 各 .kin 路径→源码 + 作品主题 css + 角色表原文。资源走相对引用（项目文件原样
+ * 拷到导出目录），故 assetBase 空。**只收 `.kin`**——css 与角色表等非故事文件各走独立字段内联，
+ * 不进故事文件表。
  *
  * 数据被原样拼进导出 index.html 的内联 `<script>`，故须转义 `< > &`——否则 .kin 文本里的
  * `</script>` 会提前闭合脚本、损坏页面。`\uXXXX` 是合法 JSON 转义，浏览器解析回原字符，往返无损。
@@ -328,9 +356,16 @@ export function buildProjectData(
   manifest: Manifest,
   files: { path: string; source: string }[],
   projectCss = '',
+  charactersText = '',
 ): string {
   const fileMap: Record<string, string> = {}
   for (const f of files) if (isKinFile(f.path)) fileMap[f.path] = f.source
-  const json = JSON.stringify({ manifest: JSON.stringify(manifest), files: fileMap, assetBase: '', css: projectCss })
+  const json = JSON.stringify({
+    manifest: JSON.stringify(manifest),
+    files: fileMap,
+    assetBase: '',
+    css: projectCss,
+    characters: charactersText,
+  })
   return json.replace(/[<>&]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`)
 }

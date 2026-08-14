@@ -386,6 +386,71 @@ describe('@img 正文插图', () => {
   })
 })
 
+describe('@divider 正文分割线', () => {
+  /** 取全部 divider log 项。 */
+  const dividers = (s: PlayState) => s.log.filter((e) => e.kind === 'divider')
+
+  it('无参：产出 divider log 项', () => {
+    const r = advance(makeStory('@divider()\n-> END\n'), initialState, RESOLVE)
+    expect(dividers(r.state)).toEqual([{ kind: 'divider' }])
+  })
+
+  it('带类名：cls 存作者写的原始类名（前缀留给渲染层，与 @img 同规格）', () => {
+    const r = advance(makeStory('@divider("幕间")\n-> END\n'), initialState, RESOLVE)
+    expect(dividers(r.state)).toEqual([{ kind: 'divider', cls: '幕间' }])
+  })
+
+  it('分割线是一条内容行：step 在此返回（line 模式据此停下等点击）', () => {
+    const src = '第一幕结束。\n@divider()\n第二幕开始。\n-> END\n'
+    const story = makeStory(src)
+    const s1 = step(story, initialState, RESOLVE)
+    expect(plainText(logSpans(s1.state, 0))).toBe('第一幕结束。')
+    expect(dividers(s1.state)).toHaveLength(0) // 尚未到分割线
+
+    const s2 = step(story, s1.state, RESOLVE) // 分割线独占一步
+    expect(dividers(s2.state)).toHaveLength(1)
+    expect(s2.state.log.filter((e) => e.kind === 'narration')).toHaveLength(1) // 没顺带把下一行也出了
+
+    const s3 = step(story, s2.state, RESOLVE)
+    expect(plainText(logSpans(s3.state, 1))).toBe('第二幕开始。')
+  })
+
+  // 与 @img 的分歧点：@img 路径非法 → 整条跳过（没有路径就没有图）；@divider 没有必需参数，
+  // 一个坏类名不该让分隔本身消失，故只丢类名、照常产出。
+  it('运行期类名非法：仍产出分割线，只丢类名（step 路径 warn）', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const story = makeStory('~ let c = "two words"\n@divider(c)\n-> END\n')
+    const s1 = step(story, initialState, RESOLVE)
+    expect(dividers(s1.state)).toEqual([{ kind: 'divider' }])
+    expect(warn).toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
+  it('advance（重放 / editor 编辑重算）吞掉 warn：同一处笔误不随每次重算刷屏', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    advance(makeStory('~ let c = "two words"\n@divider(c)\n一行。\n-> END\n'), initialState, RESOLVE)
+    expect(warn).not.toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
+  it('@clear 把分割线连同正文一并清除（无特判）', () => {
+    const r = advance(makeStory('@divider()\n一行。\n@clear()\n之后。\n-> END\n'), initialState, RESOLVE)
+    expect(dividers(r.state)).toHaveLength(0)
+  })
+
+  it('不变量：连续 step 累积态 == 一次 advance 排空', () => {
+    const src = '第一幕结束。\n@divider("幕间")\n第二幕开始。\n-> END\n'
+    const stepped = (() => {
+      const story = makeStory(src)
+      let s = initialState
+      for (let i = 0; i < 10 && !s.ended; i++) s = step(story, s, RESOLVE).state
+      return s
+    })()
+    const drained = advance(makeStory(src), initialState, RESOLVE).state
+    expect(stepped.log).toEqual(drained.log)
+  })
+})
+
 describe('choose', () => {
   it('选第一个分支后推进到结束、追加 end 标记', () => {
     const story = makeStory(KIN)

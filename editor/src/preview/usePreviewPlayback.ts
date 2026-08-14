@@ -34,8 +34,23 @@ export interface PreviewPlayback {
   cancel: () => void
 }
 
-export function usePreviewPlayback(onCommit: (state: PlayState, sfx: string[]) => void): PreviewPlayback {
+/** 快进时给下游的空音效数组。提到模块级：每次 commit 新建会让引用每行都变，白白多一轮渲染。 */
+const NO_SFX: string[] = []
+
+/**
+ * @param fastForward 快进（作者调试开关）：旁路掉**全部演出等待**——正文瞬显、句中 `<pause>`
+ *   两档不停、`@sleep` 不等、`line` 模式自动流过，音效一律不发（旁路等待后原本隔开的几个
+ *   音效会挤成一声噪响；与「← 上一步」不重放音效同口径）。只作用于预览，不碰作品数据。
+ *   作品里的环由 engine 的 `STEP_BUDGET` 兜住（超限报「疑似死循环」），此处不另设保护。
+ */
+export function usePreviewPlayback(
+  onCommit: (state: PlayState, sfx: string[]) => void,
+  fastForward = false,
+): PreviewPlayback {
   const [active, setActive] = useState(false)
+  // 放 ref：commit / onLatestRevealed 在 timer 与揭示回调里跑，不能读闭包快照。
+  const fastForwardRef = useRef(fastForward)
+  fastForwardRef.current = fastForward
   const [skipToken, setSkipToken] = useState(0)
   // line 模式：最新行已显示完、等点击出下一行（Player 据此亮推进提示三角）。
   const [awaitingClick, setAwaitingClick] = useState(false)
@@ -76,17 +91,19 @@ export function usePreviewPlayback(onCommit: (state: PlayState, sfx: string[]) =
   const commit = useCallback((gen: number, state: PlayState, sfx: string[], pendingSleep?: number) => {
     if (gen !== genRef.current) return // 已被 cancel / 新一轮 restart-choose 取代
     lastStateRef.current = state
-    onCommit(state, sfx)
+    onCommit(state, fastForwardRef.current ? NO_SFX : sfx)
     setAwaitingClick(false) // 新状态：要么开始打新行，要么抵暂停点——都不在「等点击」
     clearSleep()
     if (pendingSleep !== undefined) {
       revealingRef.current = false // 停顿中：既不在揭示、也不在等读者
       waitingSleepRef.current = true
+      // 快进：零延时续步。仍走 timer 而不同步调 doStep——同步会在 commit 内重入，
+      // 且绕开「停顿在飞时被 cancel / 新状态作废」这条既有路径。
       sleepTimerRef.current = setTimeout(() => {
         sleepTimerRef.current = null
         waitingSleepRef.current = false
         doStepRef.current()
-      }, pendingSleep)
+      }, fastForwardRef.current ? 0 : pendingSleep)
       return
     }
     revealingRef.current = !(state.ended || state.choices.length > 0 || state.input !== null || state.error != null)
@@ -101,6 +118,29 @@ export function usePreviewPlayback(onCommit: (state: PlayState, sfx: string[]) =
     commit(gen, r.state, r.sfx, r.pendingSleep)
   }, [commit])
   doStepRef.current = doStep
+
+  /**
+   * 拨开快进的那一刻，把**已经在等**的两种情况就地放行。
+   *
+   * 作者点「快进」最自然的时机恰恰是盯着不动的画面时，而这两种等待都不会自己醒过来：
+   * - `@sleep` 的时长在布防那一刻就定死了（且停顿本不可点击跳过）——重新以零延时布防；
+   * - `line` 模式停在行尾等点击时，那一行的 `onComplete` 已按行去重触发过、不会再来一次
+   *   （揭示侧的 `firedRef`），故链条断在这里——直接续一步把它带起来。
+   * 不这么做的话，「拨开关时正在等待」＝ 开关当场无效，要再点一下才生效。
+   */
+  useEffect(() => {
+    if (!fastForward) return
+    if (waitingSleepRef.current && sleepTimerRef.current !== null) {
+      clearTimeout(sleepTimerRef.current)
+      sleepTimerRef.current = setTimeout(() => {
+        sleepTimerRef.current = null
+        waitingSleepRef.current = false
+        doStepRef.current()
+      }, 0)
+      return
+    }
+    if (awaitingClick) doStep()
+  }, [fastForward, awaitingClick, doStep])
 
   const run = useCallback((story: Story, resolve: ResolveAsset, first: AdvanceResult) => {
     genRef.current++
@@ -139,7 +179,8 @@ export function usePreviewPlayback(onCommit: (state: PlayState, sfx: string[]) =
   const onLatestRevealed = useCallback(() => {
     revealingRef.current = false
     const cur = lastStateRef.current
-    if (cur.host.stepMode === 'flow') {
+    // 快进无视 stepMode：line 模式本该等点击，调试时那也是演出节奏，一并流过。
+    if (fastForwardRef.current || cur.host.stepMode === 'flow') {
       doStep()
       return
     }
@@ -163,8 +204,15 @@ export function usePreviewPlayback(onCommit: (state: PlayState, sfx: string[]) =
     setAwaitingClick(waiting === 'click')
   }, [])
 
+  // 快进时速度 / 淡入取 0 且要求 instant：前者让整行瞬显，后者额外把句中 `<pause>` 两档一并跳过
+  //（单靠 speed=0 跳不过——那是作者的作品设定，RevealingLine 会保留分段停顿）。
   const reveal: RevealBinding | undefined = active
-    ? { speed: lastStateRef.current.host.textSpeed, fade: lastStateRef.current.host.textFade, skipToken, onLatestRevealed, onAwaitingPause, awaitingClick }
+    ? {
+        speed: fastForward ? 0 : lastStateRef.current.host.textSpeed,
+        fade: fastForward ? 0 : lastStateRef.current.host.textFade,
+        instant: fastForward,
+        skipToken, onLatestRevealed, onAwaitingPause, awaitingClick,
+      }
     : undefined
 
   return { active, reveal, onContentClick: active ? onContentClick : undefined, restart, choose, submit, cancel }

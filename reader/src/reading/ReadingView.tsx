@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Story, ValidatedProgram } from '@kiny/engine'
-import { Player, usePlayback, initialState, ProjectStyles, type PlayState, type ResolveAsset } from '@kiny/player'
+import {
+  Player, usePlayback, initialState, ProjectStyles,
+  type PlayState, type ResolveAsset, type CharacterTable,
+} from '@kiny/player'
 import { listSaves, writeSaveSerial, deleteSave, genSaveId } from '../saves/store'
 import { captureSave, restoreSave } from '../saves/snapshot'
 import { AUTO_SAVE_ID, type SaveRecord } from '../saves/types'
@@ -17,7 +20,7 @@ function fmtTime(ts: number): string {
  * 「存档 / 读档」面板可手动存多份、择一读取、删除。storyId 缺省时禁用存档（如纯渲染测试）。
  */
 export function ReadingView({
-  story, program, storyId, resolveAsset, initial, title, onBack, projectCss = '',
+  story, program, storyId, resolveAsset, initial, title, onBack, projectCss = '', characters,
 }: {
   story: Story
   program?: ValidatedProgram
@@ -29,6 +32,8 @@ export function ReadingView({
   onBack: () => void
   /** 作品前端资源编译出的 css（字体 + 主题）；缺省为无（纯渲染测试）。 */
   projectCss?: string
+  /** 作品角色表（`characters.json`）；缺省为无（纯渲染测试）。 */
+  characters?: CharacterTable
 }) {
   // 驱动交给 usePlayback（逐行揭示 + stepMode）；读档时整体换 story + 从存档态续。
   const [driven, setDriven] = useState<{ story: Story; initial: PlayState }>({ story, initial: initial ?? initialState })
@@ -153,6 +158,7 @@ export function ReadingView({
         onSubmitInput={onSubmitInput}
         reveal={pb.reveal}
         onContentClick={pb.onContentClick}
+        characters={characters}
       />
 
       {toast && <div className="reading-toast" role="status">{toast}</div>}

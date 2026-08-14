@@ -1,5 +1,6 @@
 import { unzipSync, strFromU8 } from 'fflate'
 import { findManifest } from '@kiny/engine'
+import { CHARACTERS_FILE } from '@kiny/player'
 
 export interface UnzippedKip {
   manifestName: string
@@ -10,6 +11,8 @@ export interface UnzippedKip {
   assets: Map<string, Blob>
   /** `.css` 的 UTF-8 文本（作品主题需文本才能重写 `url()`；同一文件亦留在 assets 里）。 */
   cssFiles: Map<string, string>
+  /** 角色表 `characters.json` 的 UTF-8 文本（需文本解析，Blob 不够用）；作品未带则 null。 */
+  charactersText: string | null
 }
 
 const MIME: Record<string, string> = {
@@ -43,6 +46,7 @@ export function unzipKip(bytes: Uint8Array): UnzippedKip {
   const kinFiles = new Map<string, string>()
   const assets = new Map<string, Blob>()
   const cssFiles = new Map<string, string>()
+  let charactersText: string | null = null
   for (const name of names) {
     if (name === manifestName) continue
     const data = entries[name]!
@@ -52,6 +56,7 @@ export function unzipKip(bytes: Uint8Array): UnzippedKip {
     }
     assets.set(name, new Blob([data], { type: mimeOf(name) }))
     if (name.toLowerCase().endsWith('.css')) cssFiles.set(name, strFromU8(data))
+    if (name === CHARACTERS_FILE) charactersText = strFromU8(data)
   }
-  return { manifestName, manifestText, kinFiles, assets, cssFiles }
+  return { manifestName, manifestText, kinFiles, assets, cssFiles, charactersText }
 }

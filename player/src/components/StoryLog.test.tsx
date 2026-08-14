@@ -158,4 +158,59 @@ describe('StoryLog', () => {
       scroll.mockRestore()
     })
   })
+
+  describe('@divider 正文分割线', () => {
+    const DIV: LogEntry = { kind: 'divider', cls: '幕间' }
+
+    it('渲染 <hr>，基线 class 恒在、作者类名加 kin- 前缀追加', () => {
+      const { container } = render(<StoryLog entries={[DIV]} />)
+      const hr = container.querySelector('hr')!
+      expect(hr.className).toBe('kin-divider kin-幕间')
+    })
+
+    it('无作者类名时只有基线 class', () => {
+      const { container } = render(<StoryLog entries={[{ kind: 'divider' }]} />)
+      expect(container.querySelector('hr')!.className).toBe('kin-divider')
+    })
+
+    // 块级分隔必须是 story-log 的**直接子元素**——套进 <p class="narration"> 就是无效 HTML 嵌套
+    // （客户端渲染能建出来，但静态预渲染会被 HTML parser 拆开）。这正是本任务不做成行内标签的原因。
+    it('是 story-log 的直接子元素，不套在 <p> 里', () => {
+      const { container } = render(<StoryLog entries={[DIV]} />)
+      const hr = container.querySelector('hr')!
+      expect(hr.parentElement!.className).toBe('story-log')
+      expect(container.querySelector('p hr')).toBeNull()
+    })
+
+    it('分割线不挂 RevealingLine（无揭示过程，与插图同）', () => {
+      const { container } = render(<StoryLog entries={[DIV]} reveal={{ speed: 100, fade: 50 }} />)
+      expect(container.querySelector('.narration-reveal')).toBeNull()
+    })
+
+    // 以下两条锁的是**推进链**而非渲染：只加渲染分支、忘了把 divider 纳入 latestContent 扫描与
+    // 立即上报，上面那些渲染用例照样全绿，而 flow 模式会在分割线处永久卡死。见
+    // docs/memory/log-entry-must-report-revealed.md。
+    it('最新条目是分割线 → 立即上报一次 onLatestRevealed（否则 flow 永久卡死）', () => {
+      const onLatestRevealed = vi.fn()
+      render(<StoryLog entries={[DIV]} reveal={{ speed: 100, fade: 50, onLatestRevealed }} />)
+      expect(onLatestRevealed).toHaveBeenCalledTimes(1)
+    })
+
+    it('分割线在最新位置时，其上方的叙事行不被误当成「最新」而重播打字机', () => {
+      const entries: LogEntry[] = [{ kind: 'narration', spans: [{ text: '第一幕结束。' }] }, DIV]
+      const { container } = render(<StoryLog entries={entries} reveal={{ speed: 100, fade: 50 }} />)
+      expect(container.querySelector('.narration-reveal')).toBeNull()
+      expect(container.textContent).toContain('第一幕结束。') // 静态呈现，不是打字中的空白
+    })
+
+    it('StrictMode 双跑 effect 只上报一次（两次报 = flow 多走一步、下一行打字机被跳过）', () => {
+      const onLatestRevealed = vi.fn()
+      render(
+        <StrictMode>
+          <StoryLog entries={[DIV]} reveal={{ speed: 100, fade: 50, onLatestRevealed }} />
+        </StrictMode>,
+      )
+      expect(onLatestRevealed).toHaveBeenCalledTimes(1)
+    })
+  })
 })

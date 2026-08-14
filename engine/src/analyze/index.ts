@@ -13,9 +13,13 @@ import { checkRichText } from './checks/richtext'
 import { checkMissingChoiceMarker } from './checks/missing-choice-marker'
 import { checkNonJsonGlobals } from './checks/non-json-globals'
 import { addOpeningKnots } from './opening'
+import { COMMAND_NAMES as COMMAND_NAMES_INTERNAL } from './constants'
 
 export type { Diagnostic, AnalyzeResult, ValidatedProgram } from './types'
 export { openingKnotName, resolveStart } from './opening'
+// 宿主侧要拿它做命令补全等 UI（editor 的补全清单直接派生自此，不手抄——手抄会漂）。
+// 收成 ReadonlySet 再出门：它是全进程命令校验的真相源，宿主一句 `.add(…)` 就能悄悄放行未知命令。
+export const COMMAND_NAMES: ReadonlySet<string> = COMMAND_NAMES_INTERNAL
 
 /** 语义检查总入口：建符号表 → 跑全部检查 → 产出 program 或诊断集。 */
 export function analyze(files: ProjectFile[]): AnalyzeResult {

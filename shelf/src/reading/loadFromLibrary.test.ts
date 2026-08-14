@@ -42,6 +42,28 @@ describe('loadFromLibrary', () => {
     expect(loadFromLibrary(unzipKip(bytes)).projectCss).toBe('')
   })
 
+  it('角色表：`.kip` 里的 characters.json 被解析进角色表', () => {
+    const bytes = zipSync({
+      'kiny.json': strToU8(MANIFEST),
+      'main.kin': strToU8(MAIN),
+      'characters.json': strToU8('{"阿黎娅":{"color":"#7fb3d5"}}'),
+    })
+    expect(loadFromLibrary(unzipKip(bytes)).characters.get('阿黎娅')).toBe('#7fb3d5')
+  })
+
+  it('无 / 坏 characters.json → 空表，作品照常装配', () => {
+    const none = zipSync({ 'kiny.json': strToU8(MANIFEST), 'main.kin': strToU8(MAIN) })
+    expect(loadFromLibrary(unzipKip(none)).characters.size).toBe(0)
+    const bad = zipSync({
+      'kiny.json': strToU8(MANIFEST),
+      'main.kin': strToU8(MAIN),
+      'characters.json': strToU8('{坏 json'),
+    })
+    const loaded = loadFromLibrary(unzipKip(bad))
+    expect(loaded.characters.size).toBe(0)
+    expect(loaded.story.canContinue).toBe(true)
+  })
+
   it('装配失败（manifest 非法 JSON）→ 抛错', () => {
     const bytes = zipSync({ 'kiny.json': strToU8('not json'), 'main.kin': strToU8(MAIN) })
     expect(() => loadFromLibrary(unzipKip(bytes))).toThrow()

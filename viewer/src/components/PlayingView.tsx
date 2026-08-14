@@ -1,6 +1,9 @@
 import { useEffect, useRef } from 'react'
 import type { Story } from '@kiny/engine'
-import { Player, usePlayback, type ResolveAsset, type PlayState, type InteractionStep } from '@kiny/player'
+import {
+  Player, usePlayback,
+  type ResolveAsset, type PlayState, type InteractionStep, type CharacterTable,
+} from '@kiny/player'
 import { saveProgress } from '../load/progress'
 
 /**
@@ -12,7 +15,7 @@ import { saveProgress } from '../load/progress'
  * 缺这些 props 时退化为纯播放（如单元测试 / 无持久化场景），不改行为。
  */
 export function PlayingView({
-  story, resolveAsset, initialState, initialSeq, progressKey, seed, onRestart,
+  story, resolveAsset, initialState, initialSeq, progressKey, seed, onRestart, characters,
 }: {
   story: Story
   resolveAsset: ResolveAsset
@@ -21,6 +24,8 @@ export function PlayingView({
   progressKey?: string
   seed?: number
   onRestart?: () => void
+  /** 作品角色表（`characters.json`）；缺省为无（纯渲染测试）。 */
+  characters?: CharacterTable
 }) {
   const pb = usePlayback(story, resolveAsset, initialState)
   const seqRef = useRef<InteractionStep[]>(initialSeq ? [...initialSeq] : [])
@@ -53,6 +58,7 @@ export function PlayingView({
       <Player
         state={pb.state} sfx={pb.sfx} reveal={pb.reveal}
         onChoose={onChoose} onSubmitInput={onSubmitInput} onContentClick={pb.onContentClick}
+        characters={characters}
       />
       {onRestart && (
         <button type="button" className="restart-btn" onClick={onRestart}>重新开始</button>

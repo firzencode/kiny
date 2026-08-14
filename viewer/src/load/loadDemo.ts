@@ -1,5 +1,5 @@
 import { findManifest } from '@kiny/engine'
-import { discoverAssets, buildProjectCss } from '@kiny/player'
+import { discoverAssets, buildProjectCss, CHARACTERS_FILE } from '@kiny/player'
 import { buildStory, randomSeed, type LoadOutcome, type LoadedStory } from './buildStory'
 
 export type { LoadOutcome, LoadedStory }
@@ -22,6 +22,7 @@ export async function loadDemo(base = 'demo/', seed = randomSeed()): Promise<Loa
   let manifestText: string
   let manifestName: string
   let projectCss = ''
+  let charactersText: string | null = null
   const files = new Map<string, string>()
   try {
     const index = JSON.parse(await text('files.json')) as string[]
@@ -30,17 +31,20 @@ export async function loadDemo(base = 'demo/', seed = randomSeed()): Promise<Loa
     manifestName = found.name
     const entryPaths = index.filter((p) => p.endsWith('.kin'))
     const assets = discoverAssets(index.filter((p) => p !== manifestName))
-    // 并行 fetch manifest + 全部 .kin + 全部 .css（此前逐个 await 串行，N 个文件 N 趟往返）；
+    // 并行 fetch manifest + 全部 .kin + 全部 .css + 角色表（此前逐个 await 串行，N 个文件 N 趟往返）；
     // 结果按 entryPaths（即 files.json 顺序）插入 files，保持文件表插入序不变（Q5）。
-    // css 取不到**不算加载失败**（各自 catch 成 null）——样式缺失只是不好看，故事照样能读。
+    // css / 角色表取不到**不算加载失败**（各自 catch 成 null）——缺了只是不好看，故事照样能读。
+    const hasCharacters = index.includes(CHARACTERS_FILE)
     const [mText, ...rest] = await Promise.all([
       text(manifestName),
       ...entryPaths.map((p) => text(p)),
       ...assets.css.map((p) => text(p).catch(() => null)),
+      ...(hasCharacters ? [text(CHARACTERS_FILE).catch(() => null)] : []),
     ])
     manifestText = mText as string
     entryPaths.forEach((p, i) => files.set(p, rest[i] as string))
     const cssText = new Map(assets.css.map((p, i) => [p, rest[entryPaths.length + i] as string | null]))
+    if (hasCharacters) charactersText = rest[entryPaths.length + assets.css.length] as string | null
     projectCss = buildProjectCss(assets, {
       readCss: (p) => cssText.get(p) ?? null,
       resolveAsset: (name) => base + name,
@@ -49,5 +53,5 @@ export async function loadDemo(base = 'demo/', seed = randomSeed()): Promise<Loa
     return { ok: false, message: e instanceof Error ? e.message : '加载失败' }
   }
 
-  return buildStory(manifestText, files, base, seed, manifestName, projectCss)
+  return buildStory(manifestText, files, base, seed, manifestName, projectCss, charactersText)
 }

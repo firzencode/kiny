@@ -1,4 +1,5 @@
 import { assembleFromFiles } from '@kiny/engine'
+import { CHARACTERS_FILE } from '@kiny/player'
 import { unzipKip, type UnzippedKip } from '../kip/unzipKip'
 import { readDisplayMeta } from '../kip/displayMeta'
 import { openDb, txDone, reqDone, STORE_STORIES, STORE_PACKAGES } from './db'
@@ -71,8 +72,11 @@ export async function openPackage(id: string): Promise<UnzippedKip> {
   // 作品主题需要 css 文本（重写其中的 url()）。库里只存了 Blob，故在此现读——
   // 不动存储 schema，早于本特性入库的书也照样能用主题。
   const cssFiles = new Map<string, string>()
+  // 角色表同理（解析需要文本，库里只有 Blob），一并现读。
+  let charactersText: string | null = null
   for (const [name, blob] of assets) {
     if (name.toLowerCase().endsWith('.css')) cssFiles.set(name, await blob.text())
+    if (name === CHARACTERS_FILE) charactersText = await blob.text()
   }
   return {
     manifestName: pkg.manifestName,
@@ -80,6 +84,7 @@ export async function openPackage(id: string): Promise<UnzippedKip> {
     kinFiles: new Map(Object.entries(pkg.kinFiles)),
     assets,
     cssFiles,
+    charactersText,
   }
 }
 

@@ -11,6 +11,8 @@ import { spanClassName } from './spanClasses'
  * 之后才切换连贯 RichText 并触发 `onComplete`——否则尾部仍在淡入的字会瞬间跳到全不透明。
  * 无障碍：`prefers-reduced-motion` 或 speed<=0 → 整行瞬显（覆盖作者设置）；但**分段停顿保留**
  * （每段瞬显、标记处仍等待）——停顿是叙事节奏，不是动效。
+ * 唯一的例外是 `instant`：那是**宿主**说「这一行立即完成、不做任何等待」（editor 预览的快进调试
+ * 开关），停顿一并跳过。读者端不传，故上面那条规矩对读者恒成立。
  * 句中 `<pause>` 标记把一行切成多段，两档：
  * - **点击档**（`<pause>`）：揭示到边界即停、等读者点击续下一段（`skipToken` 递增）。
  * - **毫秒档**（`<pause=毫秒>`）：起定时器，停满时长自动续下一段；等待期间点击**完全无效**
@@ -28,6 +30,7 @@ export function RevealingLine({
   speed,
   fade,
   skipToken,
+  instant = false,
   onComplete,
   onAwaitingPause,
 }: {
@@ -35,18 +38,24 @@ export function RevealingLine({
   speed: number
   fade: number
   skipToken?: number
+  /** 宿主要求立即完成、不做任何等待（见 `RevealBinding.instant`）。 */
+  instant?: boolean
   onComplete?: () => void
   onAwaitingPause?: (waiting: AwaitKind) => void
 }) {
   const cells = useMemo(() => toCells(spans), [spans])
   const total = cells.length
-  const bounds = useMemo(() => pauseBounds(cells), [cells])
+  // 宿主要求不做任何等待 → 段边界清空。两档停顿都由 bounds 驱动（`nextLimit` / `enterPauseWait`），
+  // 清掉它即两档一并旁路，不必在计时分支里各加一处判断。
+  const bounds = useMemo(() => (instant ? [] : pauseBounds(cells)), [cells, instant])
   const reduced = usePrefersReducedMotion()
-  const instant = reduced || speed <= 0
+  // 是否整行瞬显。三个来源：无障碍偏好、作者的 `@text_speed(0)`、宿主的 instant。
+  // 前两者**保留**分段停顿（叙事节奏，不是动效），只有 instant 连停顿一起跳——差别在上面的 bounds。
+  const instantReveal = reduced || speed <= 0 || instant
   // 瞬显且无停顿标记 → 首帧即整行（reset effect 是 passive effect、在 paint 之后才跑，
   // 初值从 0 起会让 reduced-motion 读者每行闪一帧空白）。有标记时首帧仍从 0 起，
   // 由 reset effect 同批算出首段——那一批里 count 不会渲染出中间的 0。
-  const fastWhole = instant && bounds.length === 0
+  const fastWhole = instantReveal && bounds.length === 0
   const [count, setCount] = useState(fastWhole ? total : 0)
   // 已定格：全字出完**且**淡入拖尾播完（或被 skip/瞬显截断）→ 切连贯 RichText。
   const [settled, setSettled] = useState(fastWhole)
@@ -67,8 +76,8 @@ export function RevealingLine({
   const countRef = useRef(fastWhole ? total : 0)
   const settledRef = useRef(fastWhole)
   const awaitingRef = useRef<AwaitKind>(null)
-  const instantRef = useRef(instant)
-  instantRef.current = instant
+  const instantRef = useRef(instantReveal)
+  instantRef.current = instantReveal
   const speedRef = useRef(speed)
   speedRef.current = speed
   const fadeRef = useRef(fade)
@@ -217,7 +226,9 @@ export function RevealingLine({
     revealSegment()
     return clearTimers
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cells, speed, instant, total, fade])
+    // instant 单列一项：它只经 bounds 影响本 effect，而 bounds 不在依赖里；若作品设了
+    // `@text_speed(0)`，instantReveal 恒真、切换 instant 不会让它变化，漏掉就仍停在 <pause>。
+  }, [cells, speed, instantReveal, instant, total, fade])
 
   // 上报「停在句中标记」给宿主（据此亮 / 灭推进提示三角 + 做点击门控）。
   // 只在**值变化**时上报，且挂载时的初始 null 不报——否则会覆盖宿主刚因「整行揭示完」设上的等待态。
@@ -258,7 +269,7 @@ export function RevealingLine({
   // 定格后用连贯 RichText（DOM 与静态行一致：合并文本节点、标签渲染，getByText 可匹配）；
   // 打字中与淡入拖尾期保持逐字 span，让在飞的 char-fade 动画自然播完。
   if (settled) return <RichText spans={spans} />
-  const animate = !instant && fade > 0
+  const animate = !instantReveal && fade > 0
   return (
     <span className="narration-reveal">
       {groupByClass(cells.slice(0, count)).map((g, gi) => {

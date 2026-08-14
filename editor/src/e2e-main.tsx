@@ -33,14 +33,19 @@ const MAIN = `开场白：雾港的夜。
 const params = new URLSearchParams(location.search)
 /** 作品 css（`?css=` 传，URL 编码）。不传则项目内无 `.css`，预览走编辑器默认皮肤。 */
 const projectCss = params.get('css') ?? ''
+/** 角色表原文（`?characters=` 传）。不传则项目内无 `characters.json`，正文不着色。 */
+const charactersJson = params.get('characters') ?? ''
+/** 故事正文（`?kin=` 传）。不传用上面那份默认脚本。 */
+const mainKin = params.get('kin') ?? MAIN
 
 // manifest 用当前形态的 `<项目名>.kiw`，不用 legacy 的 `kiny.json`——否则每次 e2e 都在跑
 // 迁移分支，测不到今天真实的加载路径。
 const files: Record<string, string> = {
   '/proj/雾港之夜.kiw': JSON.stringify({ name: '雾港之夜', version: '1.0.0', engine: '0.1.0', entry: 'main.kin' }),
-  '/proj/main.kin': MAIN,
+  '/proj/main.kin': mainKin,
 }
 if (projectCss !== '') files['/proj/theme.css'] = projectCss
+if (charactersJson !== '') files['/proj/characters.json'] = charactersJson
 
 // 每次加载从干净状态起步：设置 / 会话 / 草稿都存在 localStorage，跨用例残留会让断言随
 // 执行顺序漂移。本入口不测持久化，清掉最可预测。

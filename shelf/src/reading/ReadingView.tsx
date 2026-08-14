@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Story, ValidatedProgram } from '@kiny/engine'
-import { Player, usePlayback, initialState, ProjectStyles, type PlayState, type ResolveAsset } from '@kiny/player'
+import {
+  Player, usePlayback, initialState, ProjectStyles,
+  type PlayState, type ResolveAsset, type CharacterTable,
+} from '@kiny/player'
 import { listSaves, writeSaveSerial, deleteSave, genSaveId } from '../saves/store'
 import { captureSave, restoreSave } from '../saves/snapshot'
 import { AUTO_SAVE_ID, type SaveRecord } from '../saves/types'
@@ -24,6 +27,7 @@ function fmtTime(ts: number): string {
  */
 export function ReadingView({
   story, program, storyId, resolveAsset, initial, title, onBack, projectCss = '', persistent = true,
+  characters,
 }: {
   story: Story
   program?: ValidatedProgram
@@ -37,6 +41,8 @@ export function ReadingView({
   projectCss?: string
   /** 这本书是否持久留存；false = 临时模式，隐藏全部存档 UI、不写 auto 存档。缺省 true。 */
   persistent?: boolean
+  /** 作品角色表（`characters.json`）；缺省为无（纯渲染测试）。 */
+  characters?: CharacterTable
 }) {
   const saveKey = persistent ? storyId : undefined
   const [driven, setDriven] = useState<{ story: Story; initial: PlayState }>({ story, initial: initial ?? initialState })
@@ -178,6 +184,7 @@ export function ReadingView({
         onSubmitInput={onSubmitInput}
         reveal={pb.reveal}
         onContentClick={pb.onContentClick}
+        characters={characters}
       />
 
       {toast && <div className="reading-toast" role="status">{toast}</div>}

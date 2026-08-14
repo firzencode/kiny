@@ -40,6 +40,8 @@ export interface MenuBarProps {
   onOpenProjectSettings: () => void
   /** 打开作品主题文件：有 `theme.css` 就开它，没有则按模板建一个再开（存量项目的路）。 */
   onOpenTheme: () => void
+  /** 打开作品角色表：有 `characters.json` 就开它，没有则按模板建一个再开。 */
+  onOpenCharacters: () => void
   onZoomIn: () => void
   onZoomOut: () => void
   onZoomReset: () => void
@@ -98,6 +100,7 @@ export function MenuBar(p: MenuBarProps) {
         { label: '关闭项目', disabled: !p.projectName, act: p.onCloseProject },
         { label: '项目设置...', disabled: !p.projectName, act: p.onOpenProjectSettings },
         { label: '作品主题...', disabled: !p.projectName, act: p.onOpenTheme },
+        { label: '作品角色...', disabled: !p.projectName, act: p.onOpenCharacters },
         { label: '导出故事包（.kip）...', disabled: !p.projectName || p.errorCount > 0, act: p.onExportKip },
         { label: '导出独立网页...', disabled: !p.projectName || p.errorCount > 0, act: p.onExportWebpage },
         { sep: true },

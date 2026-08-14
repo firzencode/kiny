@@ -218,6 +218,7 @@ export function App() {
           initial={view.reading.initial}
           title={view.reading.loaded.title}
           projectCss={view.reading.loaded.projectCss}
+          characters={view.reading.loaded.characters}
           persistent={degraded !== true}
           onBack={onBack}
         />

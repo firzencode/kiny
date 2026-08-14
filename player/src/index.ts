@@ -19,6 +19,9 @@ export { scopeCss } from './assets/scopeCss'
 export type { AssetIssue, AssetSources } from './assets/buildCss'
 export { rewriteCssUrls, resolveRelative } from './assets/rewrite'
 export { ProjectStyles } from './assets/ProjectStyles'
+// 角色台词着色：`characters.json` → 角色表，渲染入口按行首标注给 spans 着色
+export { parseCharacters, slotColor, slotHexApprox, CHARACTERS_FILE, SLOT_HUES } from './characters/table'
+export type { CharacterTable } from './characters/table'
 // playback
 export { usePlayback } from './playback/usePlayback'
 export type { Playback } from './playback/usePlayback'

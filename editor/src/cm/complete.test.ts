@@ -1,7 +1,14 @@
 import { describe, it, expect } from 'vitest'
+import { COMMAND_NAMES as ENGINE_COMMAND_NAMES } from '@kiny/engine'
 import { matchCommand, matchDivert, matchVariable, currentKnotAt, COMMAND_NAMES } from './complete'
 
 describe('matchCommand（@命令补全）', () => {
+  // 补全清单派生自 engine，不手抄。这条锁住派生链通畅——其余用例都是拿清单和自己比，
+  // 若有人改回手抄副本、又漏了新命令，只有这里会红。
+  it('命令清单派生自 engine，新增命令自动进补全', () => {
+    expect(COMMAND_NAMES).toEqual([...ENGINE_COMMAND_NAMES])
+    expect(COMMAND_NAMES).toContain('divider')
+  })
   it('@ 后空前缀：全部命令名、backup 0', () => {
     const m = matchCommand('@')!
     expect(m.options).toEqual(COMMAND_NAMES)

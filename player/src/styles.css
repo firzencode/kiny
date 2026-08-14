@@ -12,7 +12,7 @@
   --kiny-prose-size: 1.05rem;                               /* 正文字号 */
   --kiny-prose-line-height: 1.9;                            /* 正文行高 */
   --kiny-content-max-width: 680px;                          /* 阅读栏宽 */
-  --kiny-bg-overlay: rgba(10, 14, 20, .55);                 /* 氛围底图压暗遮罩 */
+  --kiny-bg-overlay: rgba(10, 14, 20, .55);                 /* 氛围底图压暗遮罩（无底图时不生效） */
   --kiny-control-bg: rgba(255, 255, 255, .06);              /* 选项按钮 / 输入框底色 */
   --kiny-control-bg-hover: rgba(255, 255, 255, .14);
   --kiny-control-text: #fff;
@@ -32,7 +32,12 @@
   background-size: cover; background-position: center;
   filter: blur(3px) brightness(.45); transition: background-image .6s ease;
 }
-.bg-layer::after { content: ""; position: absolute; inset: 0; background: var(--kiny-bg-overlay); }
+/* 底图的色罩，**另起一层**、且只在有底图时由 BackgroundLayer 渲染（见该组件注释）。
+   两条都不能省：① 塞进 .bg-layer 当伪元素会被那一层的 filter 连带压暗，作者写的
+   --kiny-bg-overlay 就不等于实际罩色；② 没有底图时若仍铺这一层，页面底色会被它罩住
+   ——那正是「设了 #f6f1e6 却量出 #B9B5AD」的成因，浅色主题上尤其显眼。
+   z-index 与 .bg-layer 同为 0、DOM 在其后 → 恰好叠在底图之上、正文（z-index ≥ 1）之下。 */
+.bg-overlay { position: fixed; inset: 0; z-index: 0; background: var(--kiny-bg-overlay); }
 
 /* 阅读流：视口高的 column flex，正文在内部滚动容器（.player-content）里滚——
    固定区域（@panel 底栏）是流内 flex 项、占据实际空间，正文滚动区在其上方结束、
@@ -47,8 +52,10 @@
   /* 阅读区自身即**尺寸查询容器**：侧栏「整列 vs 折叠」按本容器宽度判定，不按视口。
      viewer / reader 里阅读区就是视口，行为与视口断点一致；editor 预览是嵌在编辑器里的
      一小块，按视口判定会在「窗口宽、预览窄」时误用宽屏布局，把正文挤成一字一列的竖条。
-     附带收益：container-type 使 .player 成为内部 position:fixed 元素的定位基准，
-     侧栏 / 底图 / 静音键在 editor 里自动落在预览区内，无需按端覆盖成 absolute。 */
+     注意 container-type 的 layout containment 在 Chromium 实测**不**为 position:fixed 后代
+     建立 containing block——fixed 层在 editor 里仍相对视口、会跑出预览区。故侧栏 / 底图 /
+     底图色罩 / 静音键都由 editor 各自覆盖成 absolute（见 editor/src/styles.css 的 .preview-stage
+     那几条）；**在此新增任何 fixed 铺底层时，记得同去补一条覆盖**。 */
   container-type: inline-size; container-name: player; }
 /* player-content 必须自成定位层（z-index ≥ 1）：它与 .bg-layer 同为 .player 的子元素，
    而 .bg-layer 是 positioned（fixed, z-index:0）。若 player-content 留在普通流（无定位），
@@ -73,9 +80,26 @@
 .narration { margin: 0; line-height: var(--kiny-prose-line-height); font-size: var(--kiny-prose-size); }
 .story-end { margin: 12px 0; text-align: center; opacity: .6; letter-spacing: .2em; }
 
+/* 空白保留（T113）：逐字揭示时每字是独立 span，非 pre-wrap 会让连续空格折叠、行首空格被吃，
+   文字位置随揭示抖动——故 .narration-reveal 一直是 pre-wrap（见下）。这里给**定格后**的三处
+   渲染补上同一声明，两态才一致：否则同一段文字在定格那一瞬间空格塌陷、排版跳变。
+   源码行首空白已由 parser 裁掉（block.ts 的 trimStart），故不会把 .kin 的缩进显出来。
+   换行不靠这条 —— 换行符在 engine 侧已切成 break span（等价 <br>），是数据不是样式。 */
+.narration, .choice, .panel { white-space: pre-wrap; }
+
 /* 正文插图（@img）：只给安全底线——不溢出阅读列、块级、水平居中。尺寸 / 边框 / 间距等外观
    归作品 css（覆盖 .kin-illustration 或作者自己的类名），与 @panel「默认无装饰」同哲学。 */
 .kin-illustration { display: block; max-width: 100%; height: auto; margin-inline: auto; }
+
+/* 正文分割线（@divider）。这里**必须**给完整默认外观——分割线本身就是装饰，没有外观它就不存在，
+   故不套用 @panel / @img 的「只给安全底线」。取居中短线：读作叙事分隔而非界面分隔条，与
+   .story-end 的调子一致（满宽线在阅读列里偏硬）。
+   线色**直接从正文色推导**，不借 --kiny-panel-border：那个 token 的公开契约是「固定区域发丝线色」，
+   作者把面板边框调透明（「我不要面板边框」是完全合理的操作）会连带让正文分割线整篇消失，且毫无提示。
+   借 --kiny-text 则天然随主题与作者自定义底色走，同样不新增 token。
+   `border: 0` 不可省：浏览器给 <hr> 的默认边框会与下面的 border-top 叠成双线。 */
+.kin-divider { width: 30%; margin: 10px auto; border: 0;
+  border-top: 1px solid color-mix(in srgb, var(--kiny-text) 22%, transparent); }
 
 /* 打字机逐字淡入（T033）：每字挂 char-fade 动画，时长 = @text_fade。 */
 .narration-reveal { white-space: pre-wrap; }
@@ -102,7 +126,7 @@
   .advance-indicator::after { animation: none; opacity: .7; }
 }
 
-/* 选项 */
+/* 选项。注意 `.choice` 另有一条 `white-space: pre-wrap`（见上「空白保留」），别漏。 */
 .choices { display: flex; flex-direction: column; gap: 10px; margin-top: 18px; }
 .choice { text-align: left; padding: 12px 16px; font: inherit; font-size: 1rem; color: var(--kiny-control-text);
   background: var(--kiny-control-bg); border: 1px solid var(--kiny-control-border);
@@ -131,7 +155,8 @@
    `--kiny-panel-*` token（底色 / 文字色 / 描边色）+ `.panel-left` 等选择器是作者覆盖锚点，
    覆盖 `--kiny-panel-bg` 即从「无容器」变「有容器」，深度定制走项目 css。
    left / right 用 `position: fixed`：钉死在阅读区、不随正文滚动（定位基准是 .player 这个
-   查询容器，见其 container-type——viewer / reader 里即视口，editor 里即预览区）。 */
+   查询容器，见其 container-type——viewer / reader 里即视口，editor 里即预览区）。
+   注意 `.panel` 另有一条 `white-space: pre-wrap`（见上「空白保留」），别漏。 */
 .panel { color: var(--kiny-panel-text); background: var(--kiny-panel-bg);
   border: 0 solid var(--kiny-panel-border);
   /* 比正文降一档：字号走 clamp 流体，字距拉开——不靠容器也能与正文分层。

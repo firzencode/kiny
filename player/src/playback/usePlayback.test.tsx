@@ -5,6 +5,7 @@ import { loadProjectFromFiles, analyze, resolveStart, createStory, plainText } f
 import type { Story } from '@kiny/engine'
 import { usePlayback } from './usePlayback'
 import { Player } from '../components/Player'
+import type { RevealBinding } from '../components/StoryLog'
 import { initialState, advance, type PlayState } from '../driver/storyDriver'
 import type { ResolveAsset } from '../host/commands'
 
@@ -54,6 +55,21 @@ describe('usePlayback', () => {
   afterEach(() => {
     vi.runOnlyPendingTimers()
     vi.useRealTimers()
+  })
+
+  // `instant`（跳过分段停顿）是 editor 预览快进开关专用的**宿主**意图。读者端一旦传上，
+  // 作者写的句中 `<pause>` 会在 viewer / reader / shelf 里静默失效——把「不传」钉成断言，
+  // 而不是只靠注释与类型可选。
+  it('读者端不传 instant：分段停顿对读者恒生效', () => {
+    let seen: RevealBinding | undefined
+    function Probe({ story }: { story: Story }) {
+      const pb = usePlayback(story, RESOLVE)
+      seen = pb.reveal
+      return null
+    }
+    render(<Probe story={makeStory('第一行。\n* [继续] -> END\n')} />)
+    expect(seen).toBeDefined()
+    expect(seen?.instant).toBeUndefined()
   })
 
   it('flow 模式：逐行打字机自动续，最终抵选项', () => {
@@ -336,6 +352,37 @@ describe('usePlayback', () => {
       const story = makeStory(KIN)
       const r = advance(story, initialState, RESOLVE)
       expect(r.state.log.filter((e) => e.kind === 'image')).toHaveLength(1)
+    })
+  })
+
+  describe('@divider 正文分割线', () => {
+    const KIN = '@text_speed(0)\n第一幕结束。\n@divider()\n第二幕开始。\n* [继续] -> END\n'
+
+    it('flow 模式：分割线后自动续到下一行（回归：不上报揭示完成会永久卡死）', () => {
+      const { container } = render(<Harness story={makeStory(KIN)} />)
+      pump()
+      expect(container.querySelector('hr.kin-divider')).not.toBeNull()
+      expect(container.textContent).toContain('第二幕开始。') // 越过分割线继续流到选项
+      expect(screen.getByRole('button', { name: '继续' })).toBeInTheDocument()
+    })
+
+    it('line 模式：分割线后停住、三角亮，点击才出下一条', () => {
+      const kin = '@text_speed(0)\n@step_mode("line")\n第一幕结束。\n@divider()\n第二幕开始。\n* [继续] -> END\n'
+      const { container } = render(<Harness story={makeStory(kin)} />)
+      pump(500, 50)
+      act(() => { fireEvent.click(content(container)) }) // 出分割线
+      pump(300, 50)
+      expect(container.querySelector('hr.kin-divider')).not.toBeNull()
+      expect(container.textContent).not.toContain('第二幕开始。') // 停在分割线这条内容上
+      expect(container.querySelector('.advance-indicator')).not.toBeNull()
+      act(() => { fireEvent.click(content(container)) })
+      pump(300, 50)
+      expect(container.textContent).toContain('第二幕开始。')
+    })
+
+    it('读档 / 重放（advance 排空路径）分割线确定性重现在正文历史里', () => {
+      const r = advance(makeStory(KIN), initialState, RESOLVE)
+      expect(r.state.log.filter((e) => e.kind === 'divider')).toHaveLength(1)
     })
   })
 

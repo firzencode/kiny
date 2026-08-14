@@ -107,6 +107,54 @@ describe('loadStory', () => {
     if (out.ok) expect(out.projectCss).toBe('')
   })
 
+  it('角色表：读到 characters.json 就解析出角色表', async () => {
+    readDir.mockResolvedValue([
+      { name: 'kiny.json', isFile: true, isDirectory: false },
+      { name: 'main.kin', isFile: true, isDirectory: false },
+      { name: 'characters.json', isFile: true, isDirectory: false },
+    ])
+    readTextFile.mockImplementation(async (p: string) => {
+      if (p.endsWith('kiny.json')) return MANIFEST
+      if (p.endsWith('main.kin')) return MAIN_KIN
+      if (p.endsWith('characters.json')) return '{"阿黎娅":{"color":"#7fb3d5"}}'
+      throw new Error('unexpected ' + p)
+    })
+
+    const out = await loadStory('/lib/f', 1)
+    expect(out.ok).toBe(true)
+    if (out.ok) expect(out.characters.get('阿黎娅')).toBe('#7fb3d5')
+  })
+
+  it('无 characters.json / 读失败 → 空表，故事照常加载', async () => {
+    readDir.mockResolvedValue([
+      { name: 'kiny.json', isFile: true, isDirectory: false },
+      { name: 'main.kin', isFile: true, isDirectory: false },
+    ])
+    readTextFile.mockImplementation(async (p: string) => {
+      if (p.endsWith('kiny.json')) return MANIFEST
+      if (p.endsWith('main.kin')) return MAIN_KIN
+      throw new Error('unexpected ' + p)
+    })
+    const none = await loadStory('/lib/g', 1)
+    expect(none.ok && none.characters.size).toBe(0)
+    // 文件在、但读不出来（权限 / 编码）：同样降级为不着色，不阻断阅读。
+    expect(readTextFile.mock.calls.every((c) => !String(c[0]).endsWith('characters.json'))).toBe(true)
+
+    readDir.mockResolvedValue([
+      { name: 'kiny.json', isFile: true, isDirectory: false },
+      { name: 'main.kin', isFile: true, isDirectory: false },
+      { name: 'characters.json', isFile: true, isDirectory: false },
+    ])
+    readTextFile.mockImplementation(async (p: string) => {
+      if (p.endsWith('kiny.json')) return MANIFEST
+      if (p.endsWith('main.kin')) return MAIN_KIN
+      throw new Error('EACCES')
+    })
+    const unreadable = await loadStory('/lib/h', 1)
+    expect(unreadable.ok).toBe(true)
+    if (unreadable.ok) expect(unreadable.characters.size).toBe(0)
+  })
+
   it('根缺 manifest（无 .kiw 无 kiny.json）→ 报错', async () => {
     readDir.mockResolvedValue([{ name: 'main.kin', isFile: true, isDirectory: false }])
     const out = await loadStory('/lib/c')

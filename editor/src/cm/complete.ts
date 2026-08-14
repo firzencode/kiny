@@ -8,15 +8,15 @@
  * `kinCompletionSource` 从 `kinContextField` 读符号表、从 doc 现算当前节点。
  */
 import type { CompletionContext, CompletionResult, Completion } from '@codemirror/autocomplete'
-import type { ValidatedProgram } from '@kiny/engine'
+import { COMMAND_NAMES as ENGINE_COMMAND_NAMES, type ValidatedProgram } from '@kiny/engine'
 import { parseNodes } from '../syntax/kin'
 import { getKinContext } from './context'
 
-/** §11.1 内置命令名（engine COMMAND_NAMES 的 UI 副本；校验仍以 engine 为准）。 */
-export const COMMAND_NAMES = [
-  'bg_show', 'bg_hide', 'bgm_play', 'bgm_pause', 'bgm_stop', 'sfx', 'img',
-  'clear', 'step_mode', 'text_speed', 'text_fade', 'sleep', 'panel', 'input',
-]
+/**
+ * §11.1 内置命令名，**直接派生自 engine**——补全候选顺序即 engine 的声明顺序（按功能分组）。
+ * 不手抄一份副本：副本天然会漂，新增命令时只改 engine、忘了这里，作者敲不出补全而测试照样全绿。
+ */
+export const COMMAND_NAMES = [...ENGINE_COMMAND_NAMES]
 
 /** 一次匹配的结果：backup = 已输入前缀长度（from = pos - backup）；options = 候选名。 */
 export interface Match {

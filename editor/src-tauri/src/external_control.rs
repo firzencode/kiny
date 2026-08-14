@@ -12,7 +12,6 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 use axum::{extract::State, http::StatusCode, response::IntoResponse, routing::any, Router};
-use axum::body::Bytes;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::oneshot;
@@ -58,6 +57,52 @@ pub fn check_token(expected: &str, got: Option<&str>) -> bool {
     matches!(got, Some(t) if t == expected)
 }
 
+/// 请求体上限。UTF-8 中文约 3 字节/字，16 MiB ≈ 560 万汉字——任何真实作品的单个文件都远够
+/// （`writeFile` 是整文件覆写，故这是单文件额度），同时仍是有效防呆边界，挡住本机进程误发
+/// GB 级 body 打爆内存。**防呆值不是性能承诺**：几 MiB 的单文件在编辑器组件里本就会卡。
+/// **单一真相源在此**——CLI 侧不复制该常量，超限一律靠服务端 413 报出（见 spec §4）。
+pub const MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
+
+/// 请求体的三态判定。
+pub enum BodyOutcome {
+    /// 解析成功。空 body → `Value::Null`（GET 无 body 走这条）。
+    Ok(serde_json::Value),
+    /// 超过 `MAX_BODY_BYTES`（或读取中断）。
+    TooLarge,
+    /// 非空但不是合法 JSON。
+    BadJson,
+}
+
+/// 纯函数：把「读 body 的结果」判成三态，供 `proxy` 分流；可脱离 axum / Tauri 单测。
+/// 入参 `None` 表示调用方的 `to_bytes` 已判超限。
+///
+/// 三态**必须各自可辨**。这里曾是 `unwrap_or_else(|_| Bytes::new())` 加 `unwrap_or(Null)`，
+/// 把「超限」与「坏 JSON」双双降级成空 body，于是两者都一路走到 webview 的
+/// 「缺少命令名 name」——报出的原因与真实原因毫无关系，作者只会以为命令拼错了。
+/// 这与 CLI 侧 T106 / T108 堵的是同一类缺陷：失败绝不能伪装成另一种失败。
+pub fn classify_body(bytes: Option<&[u8]>) -> BodyOutcome {
+    let Some(b) = bytes else { return BodyOutcome::TooLarge };
+    if b.is_empty() {
+        return BodyOutcome::Ok(serde_json::Value::Null);
+    }
+    match serde_json::from_slice(b) {
+        Ok(v) => BodyOutcome::Ok(v),
+        Err(_) => BodyOutcome::BadJson,
+    }
+}
+
+/// 统一的错误响应：JSON 体 `{ok:false,error}`，与命令失败回的形状一致。
+/// 回纯文本的话客户端 `r.json()` 会抛，真实原因当场丢失——token 不匹配因此曾被报成
+/// 「端口可能已变，请重开外部控制」，把人引向完全无关的操作。
+fn err_json(status: StatusCode, msg: &str) -> axum::response::Response {
+    (
+        status,
+        [("content-type", "application/json")],
+        serde_json::json!({ "ok": false, "error": msg }).to_string(),
+    )
+        .into_response()
+}
+
 /// 纯函数：一次 stop 是否应作用于当前句柄。
 /// - 请求 None = force：恒真（用于启动清理 / 无条件停）。
 /// - 请求 Some(g)：仅当当前句柄存在且代际恰为 g 才真——旧代际的补偿 stop 命中新代际时为假，不误杀。
@@ -97,12 +142,29 @@ async fn proxy(State(cx): State<Ctx>, req: axum::extract::Request) -> impl IntoR
     let path = req.uri().path().to_string();
     let token_ok = check_token(&cx.token, req.headers().get("x-kiny-token").and_then(|v| v.to_str().ok()));
     if !token_ok {
-        return (StatusCode::UNAUTHORIZED, "invalid token").into_response();
+        return err_json(
+            StatusCode::UNAUTHORIZED,
+            "鉴权失败：x-kiny-token 不匹配。控制文件可能已过期——请在 editor 设置里关掉再开启「启用外部控制」。",
+        );
     }
-    // 读 body（POST /command 为 JSON；GET 为空）
-    let bytes = axum::body::to_bytes(req.into_body(), 1 << 20).await.unwrap_or_else(|_| Bytes::new());
-    let body: serde_json::Value = if bytes.is_empty() { serde_json::Value::Null }
-        else { serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null) };
+    // 读 body（POST /command 为 JSON；GET 为空）。超限与坏 JSON 各自报到点上，绝不降级成空 body。
+    let read = axum::body::to_bytes(req.into_body(), MAX_BODY_BYTES).await;
+    let body = match classify_body(read.as_ref().ok().map(|b| b.as_ref())) {
+        BodyOutcome::Ok(v) => v,
+        BodyOutcome::TooLarge => {
+            // 额度由常量算出，不写死在文案里：两处真相源的话，改了常量文案就无声说谎。
+            return err_json(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                &format!(
+                    "请求体过大：超过 {} MiB 上限（也可能是传输中断）。单个文件请控制在此之内，或拆分到多个文件。",
+                    MAX_BODY_BYTES / 1024 / 1024
+                ),
+            )
+        }
+        BodyOutcome::BadJson => {
+            return err_json(StatusCode::BAD_REQUEST, "请求体不是合法 JSON。")
+        }
+    };
 
     let id = uuid::Uuid::new_v4().to_string();
     let (tx, rx) = oneshot::channel::<Reply>();
@@ -112,7 +174,7 @@ async fn proxy(State(cx): State<Ctx>, req: axum::extract::Request) -> impl IntoR
     // 跑 useExternalControl 的编辑窗。emit 为全局广播，编辑窗监听器照样收到；此处仅守「编辑窗存在」。
     if cx.app.get_webview_window("editor").is_none() {
         cx.app.state::<PendingReplies>().0.lock().unwrap().remove(&id);
-        return (StatusCode::SERVICE_UNAVAILABLE, "editor window not ready").into_response();
+        return err_json(StatusCode::SERVICE_UNAVAILABLE, "editor 窗口尚未就绪（可能仍在启动）。");
     }
     let _ = cx.app.emit("external-control://request", ExternalRequest { id: id.clone(), method, path, body });
 
@@ -121,7 +183,7 @@ async fn proxy(State(cx): State<Ctx>, req: axum::extract::Request) -> impl IntoR
                           [("content-type", "application/json")], reply.body).into_response(),
         _ => {
             cx.app.state::<PendingReplies>().0.lock().unwrap().remove(&id);
-            (StatusCode::GATEWAY_TIMEOUT, "webview 未在时限内回执").into_response()
+            err_json(StatusCode::GATEWAY_TIMEOUT, "editor 未在 30 秒内回执（命令可能仍在执行，或 editor 无响应）。")
         }
     }
 }
@@ -200,7 +262,72 @@ pub fn external_control_reply(app: AppHandle, id: String, status: u16, body: Str
 
 #[cfg(test)]
 mod tests {
-    use super::{check_token, stop_matches};
+    use super::{check_token, classify_body, stop_matches, BodyOutcome, MAX_BODY_BYTES};
+
+    #[test]
+    fn body_limit_is_16_mib() {
+        // 上限被无声收紧 / 放大时当场失败。CLI 侧不复制这个常量（单一真相源在此），
+        // 故它变化时唯一的护栏就是这条断言 + spec。
+        assert_eq!(MAX_BODY_BYTES, 16 * 1024 * 1024);
+        // 413 文案用整数除法算 MiB：常量若改成非整 MiB（如 512 KiB）会打出「超过 0 MiB」，
+        // 比硬编码还糟。改上限时这条会提醒一并改文案的单位。
+        assert_eq!(MAX_BODY_BYTES % (1024 * 1024), 0, "上限须是整 MiB，否则 413 文案会打出 0 MiB");
+    }
+
+    #[test]
+    fn classify_body_parses_valid_json() {
+        match classify_body(Some(br#"{"name":"writeFile"}"#)) {
+            BodyOutcome::Ok(v) => assert_eq!(v["name"], "writeFile"),
+            _ => panic!("合法 JSON 应解析成 Ok"),
+        }
+    }
+
+    #[test]
+    fn classify_body_empty_is_null_not_error() {
+        // GET 请求无 body：既有语义是 Value::Null 照常转发，不能被当成坏请求。
+        match classify_body(Some(b"")) {
+            BodyOutcome::Ok(v) => assert!(v.is_null()),
+            _ => panic!("空 body 应是 Ok(Null)"),
+        }
+    }
+
+    #[test]
+    fn classify_body_none_is_too_large() {
+        // None = 调用方的 to_bytes 已判超限。曾经这一路被 unwrap_or_else 换成空字节串，
+        // 于是超限的请求一路走到「缺少命令名 name」——与真实原因毫无关系的错误。
+        assert!(matches!(classify_body(None), BodyOutcome::TooLarge));
+    }
+
+    /// `classify_body(None)` 的**前提验证**：跑真的 `axum::body::to_bytes`，确认超过 limit 时
+    /// 它确实返回 `Err`、而恰好等于 limit 时成功。
+    ///
+    /// 上面几条测试都是喂 `None` 假装「调用方已判超限」——若 `to_bytes` 实际行为不是这样
+    /// （比如截断而非报错、或 limit 是排他的），整套 413 路径就是空的，而那几条测试照样全绿。
+    /// 这是唯一一处真正把假设钉在真实库行为上的测试。
+    #[tokio::test]
+    async fn to_bytes_errs_beyond_limit_and_succeeds_at_limit() {
+        let over = axum::body::to_bytes(
+            axum::body::Body::from(vec![b'x'; MAX_BODY_BYTES + 1]),
+            MAX_BODY_BYTES,
+        )
+        .await;
+        assert!(over.is_err(), "超出上限时 to_bytes 必须 Err —— 413 路径的整个前提");
+
+        let at = axum::body::to_bytes(
+            axum::body::Body::from(vec![b'x'; MAX_BODY_BYTES]),
+            MAX_BODY_BYTES,
+        )
+        .await;
+        assert!(at.is_ok(), "恰好等于上限应当放行（limit 是包含的），否则额度少一字节");
+        assert_eq!(at.unwrap().len(), MAX_BODY_BYTES);
+    }
+
+    #[test]
+    fn classify_body_rejects_malformed_json() {
+        // 同一个洞的另一半：曾经 unwrap_or(Null) 把坏 JSON 也降级成「缺少命令名 name」。
+        assert!(matches!(classify_body(Some(b"{ not json")), BodyOutcome::BadJson));
+    }
+
     #[test]
     fn token_matches_only_when_equal() {
         assert!(check_token("abc", Some("abc")));

@@ -5,7 +5,7 @@ describe('@kiny/engine 公共导出面', () => {
   it('暴露核心值符号', () => {
     for (const name of [
       'parse', 'ParseError',
-      'analyze', 'resolveStart', 'openingKnotName',
+      'analyze', 'resolveStart', 'openingKnotName', 'COMMAND_NAMES',
       'createStory', 'Story', 'RuntimeError',
       'validateManifest', 'assembleProject', 'loadProjectFromFiles',
     ]) {
