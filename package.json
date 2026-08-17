@@ -32,6 +32,7 @@
     "tauri:build:reader": "npm run build:core && npm --prefix reader run tauri build",
     "tauri:build:reader:android": "npm run build:core && npm --prefix reader run tauri:android:build",
     "release:win": "node scripts/public/build-release.mjs",
+    "release:mac": "node scripts/public/build-release-mac.mjs",
     "play": "npm --prefix engine run play"
   }
 }
