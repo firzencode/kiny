@@ -819,7 +819,7 @@ describe('App 导出独立网页', () => {
     await fileMenu('打开项目...')
     await typeInEditor('x')
     await fileMenu('导出独立网页...')   // memory confirm 默认返 true
-    expect(await screen.findByText('已导出到 /out/雾港-web')).toBeInTheDocument()
+    expect(await screen.findByText(/^已导出到 \/out\/雾港-web/)).toBeInTheDocument()
     expect(sink.length).toBe(1)
     // 已保存：内联数据含改动后的入口源码（确认保存确实先于导出）
     const data = JSON.parse(sink[0].projectData) as { files: Record<string, string> }
@@ -859,6 +859,56 @@ describe('App 导出独立网页', () => {
     expect(data.css).toContain('--kiny-page-bg:#fff')
     expect(data.css).toContain('font-family: "楷体"')
     expect(data.css).toContain('url("data:') // 字体内联，file:// 下才加载得到
+  })
+
+  /** 内联数据里的 manifest 是 JSON 文本，取其 id 用。 */
+  const idOfExport = (projectData: string) =>
+    (JSON.parse((JSON.parse(projectData) as { manifest: string }).manifest) as { id?: string }).id
+
+  it('manifest 无 id：导出前补写回项目文件，导出数据带同一个 id', async () => {
+    const sink: { dest: string; projectData: string; files: string[] }[] = []
+    const g = gwExportWeb({ webpageSink: sink })
+    const written: unknown[] = []
+    const origWrite = g.writeManifest
+    g.writeManifest = async (dir, manifest, file) => { written.push(manifest); return origWrite(dir, manifest, file) }
+    render(<App gateway={g} />)
+    await fileMenu('打开项目...')
+    await fileMenu('导出独立网页...')
+    await waitFor(() => expect(sink.length).toBe(1))
+    const id = idOfExport(sink[0].projectData)
+    expect(id).toMatch(/^[0-9a-f]{32}$/)
+    expect(written).toHaveLength(1)
+    expect((written[0] as { id?: string }).id).toBe(id) // 写回项目文件的与导出进网页的是同一个
+    expect(await screen.findByText(/已为本作品写入唯一标识/)).toBeInTheDocument()
+  })
+
+  it('同一 session 连续导出两次：id 不变，只写回一次', async () => {
+    const sink: { dest: string; projectData: string; files: string[] }[] = []
+    const g = gwExportWeb({ webpageSink: sink })
+    let writes = 0
+    const origWrite = g.writeManifest
+    g.writeManifest = async (dir, manifest, file) => { writes++; return origWrite(dir, manifest, file) }
+    render(<App gateway={g} />)
+    await fileMenu('打开项目...')
+    await fileMenu('导出独立网页...')
+    await waitFor(() => expect(sink.length).toBe(1))
+    await fileMenu('导出独立网页...')
+    await waitFor(() => expect(sink.length).toBe(2))
+    expect(idOfExport(sink[0].projectData)).toBe(idOfExport(sink[1].projectData))
+    expect(writes).toBe(1)
+  })
+
+  it('写回 manifest 失败：导出照常，但数据不带 id（退回按故事名分桶）且提示降级', async () => {
+    const sink: { dest: string; projectData: string; files: string[] }[] = []
+    const g = gwExportWeb({ webpageSink: sink })
+    g.writeManifest = async () => { throw new Error('只读目录') }
+    render(<App gateway={g} />)
+    await fileMenu('打开项目...')
+    await fileMenu('导出独立网页...')
+    await waitFor(() => expect(sink.length).toBe(1))
+    // 一次性随机 id 比没有更糟：作者每导出一次就换一个桶，读者每升级一版都无声丢档
+    expect(idOfExport(sink[0].projectData)).toBeUndefined()
+    expect(await screen.findByText(/未能写入作品标识/)).toBeInTheDocument()
   })
 })
 
@@ -1316,6 +1366,27 @@ describe('项目设置弹窗（T036）', () => {
     await waitFor(() => expect(within(preview).getByText('你往右走。')).toBeInTheDocument())
   })
 
+  it('保存项目设置保留作品 id（它一旦被换掉，读者的存档全体失联）', async () => {
+    const ID = 'a1b2c3d4e5f60718293a4b5c6d7e8f90'
+    const gateway = createMemoryGateway({
+      pickedDir: '/proj',
+      files: {
+        '/proj/kiny.json': JSON.stringify({ name: '雾港', version: '1.0.0', engine: '0.1.0', entry: 'main.kin', id: ID }),
+        '/proj/main.kin': MAIN,
+        '/proj/末.kin': END,
+      },
+    })
+    const writeSpy = vi.spyOn(gateway, 'writeManifest')
+    render(<App gateway={gateway} />)
+    await fileMenu('打开项目...')
+    await screen.findAllByText('雾港')
+    await fileMenu('项目设置...')
+    await userEvent.selectOptions(await screen.findByLabelText('启动入口'), '末.kin')
+    await userEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(writeSpy).toHaveBeenCalled())
+    expect(writeSpy.mock.calls[0][1]).toMatchObject({ entry: '末.kin', id: ID })
+  })
+
   it('改项目名保存 → rename manifest 文件到新名 + 写内容，菜单栏项目名更新', async () => {
     const gateway = gw()
     const writeSpy = vi.spyOn(gateway, 'writeManifest')
@@ -1640,7 +1711,8 @@ describe('App 媒体预览（T093）', () => {
 
     const view = await screen.findByTestId('media-view')
     const img = within(view).getByRole('img') as HTMLImageElement
-    expect(img.getAttribute('src')).toBe('mem://图/立绘.png')
+    // ?v=计数：外部同步刷新用；本用例未触发同步，恒为初值 0。
+    expect(img.getAttribute('src')).toBe('mem://图/立绘.png?v=0')
     expect(within(view).getByTestId('media-status').textContent).toContain('图/立绘.png')
     // 媒体 tab 与 .kin tab 并存，且右侧预览未被顶掉
     expect(screen.getByRole('tablist').textContent).toContain('图/立绘.png')
@@ -1656,7 +1728,7 @@ describe('App 媒体预览（T093）', () => {
     const explorer = await expandDir('音')
     await userEvent.click(within(explorer).getByText('雨.mp3'))
     const audio = await screen.findByTestId('media-audio')
-    expect(audio.getAttribute('src')).toBe('mem://音/雨.mp3')
+    expect(audio.getAttribute('src')).toBe('mem://音/雨.mp3?v=0')
   })
 
   it('点字体 → 不开 tab（没有查看器）', async () => {
@@ -1714,6 +1786,120 @@ describe('App 媒体预览（T093）', () => {
 
     await fileMenu('打开项目...')
     expect(await screen.findByTestId('media-view')).toBeInTheDocument()
-    expect((screen.getByRole('img') as HTMLImageElement).getAttribute('src')).toBe('mem://图/立绘.png')
+    expect((screen.getByRole('img') as HTMLImageElement).getAttribute('src')).toBe('mem://图/立绘.png?v=0')
+  })
+})
+
+describe('外部变更同步（T-watch）', () => {
+  // 起一个 /proj 项目（main.kin + other.kin，均为自足内容，不依赖跨文件跳转），
+  // 注入 watchHook，供各用例经 gateway 方法改内存文件后 fire() 模拟外部信号。
+  const WMAIN = `开场。
+一段可编辑的正文。
+-> END
+`
+  const WOTHER = `=== 其它 ===
+这里是一段测试文本。
+-> END
+`
+  function gwWatch(watchHook: { fire?: () => void }, extra: Record<string, string> = {}) {
+    return createMemoryGateway({
+      pickedDir: '/proj',
+      files: {
+        '/proj/kiny.json': JSON.stringify({ name: '雾港', version: '1.0.0', engine: '0.1.0', entry: 'main.kin' }),
+        '/proj/main.kin': WMAIN,
+        '/proj/other.kin': WOTHER,
+        ...extra,
+      },
+      watchHook,
+    })
+  }
+
+  async function openProject(gateway: ReturnType<typeof gwWatch>) {
+    render(<App gateway={gateway} />)
+    await fileMenu('打开项目...')
+    await screen.findAllByText('雾港')
+  }
+
+  // 信号 → 等 200ms 防抖 + rescan 的 await 链跑完（沿用本文件既有的真实定时器防抖等待惯例）。
+  async function fireAndFlush(watchHook: { fire?: () => void }) {
+    watchHook.fire?.()
+    await new Promise((r) => setTimeout(r, 400))
+  }
+
+  it('外部改干净文件 → 编辑器内容静默刷新', async () => {
+    const watchHook: { fire?: () => void } = {}
+    const gateway = gwWatch(watchHook)
+    await openProject(gateway)
+    await waitFor(() => expect(editorValue()).toContain('一段可编辑的正文'))
+    await gateway.writeFile('/proj', 'main.kin', '=== 新 ===\n新内容。\n-> END\n')
+    await fireAndFlush(watchHook)
+    await waitFor(() => expect(editorValue()).toContain('=== 新 ==='))
+    expect(screen.queryByTestId('sync-banner')).toBeNull()
+  })
+
+  it('外部改脏文件 → 冲突 banner 出现；「载入磁盘版本」换内容；「保留我的版本」收起并保脏', async () => {
+    const watchHook: { fire?: () => void } = {}
+    const gateway = gwWatch(watchHook)
+    await openProject(gateway)
+    await typeInEditor('我的未保存改动', true)
+    await gateway.writeFile('/proj', 'main.kin', '=== 磁盘新版 ===\n外部改的内容。\n-> END\n')
+    await fireAndFlush(watchHook)
+    const banner = await screen.findByRole('alert')
+    expect(within(banner).getByText('此文件在磁盘上已被外部修改')).toBeInTheDocument()
+    await userEvent.click(within(banner).getByRole('button', { name: '载入磁盘版本' }))
+    await waitFor(() => expect(editorValue()).toContain('磁盘新版'))
+    expect(screen.queryByTestId('sync-banner')).toBeNull()
+
+    // 重做一轮冲突：再次弄脏 + 外部再改
+    await typeInEditor('第二次未保存改动', true)
+    await gateway.writeFile('/proj', 'main.kin', '=== 磁盘再改 ===\n再一次外部修改。\n-> END\n')
+    await fireAndFlush(watchHook)
+    const banner2 = await screen.findByRole('alert')
+    await userEvent.click(within(banner2).getByRole('button', { name: '保留我的版本' }))
+    expect(screen.queryByTestId('sync-banner')).toBeNull()
+    expect(editorValue()).toContain('第二次未保存改动')
+    expect(document.querySelector('.tab-dirty')).not.toBeNull()
+  })
+
+  it('外部删除脏文件 → tab 保留 + 删除 banner；Ctrl+S 重建文件', async () => {
+    const watchHook: { fire?: () => void } = {}
+    const gateway = gwWatch(watchHook)
+    await openProject(gateway)
+    const explorer = await screen.findByRole('navigation', { name: '资源管理器' })
+    await userEvent.click(within(explorer).getByText('other.kin'))
+    await waitFor(() => expect(editorValue()).toContain('这里是一段测试文本'))
+    await typeInEditor('未保存的改动', true)
+    await gateway.deletePath('/proj', 'other.kin')
+    await fireAndFlush(watchHook)
+    const banner = await screen.findByRole('alert')
+    expect(within(banner).getByText('此文件已从磁盘删除——保存（Ctrl+S）可在原位置重建')).toBeInTheDocument()
+    const tabs = screen.getByRole('tablist')
+    expect(within(tabs).getByText('other.kin')).toBeInTheDocument()
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true })
+    await waitFor(() => expect(screen.queryByTestId('sync-banner')).toBeNull())
+    const explorerAfter = await screen.findByRole('navigation', { name: '资源管理器' })
+    expect(within(explorerAfter).getByText('other.kin')).toBeInTheDocument()
+  })
+
+  it('外部删除干净文件 → tab 关闭、文件树移除', async () => {
+    const watchHook: { fire?: () => void } = {}
+    const gateway = gwWatch(watchHook)
+    await openProject(gateway)
+    const explorer = await screen.findByRole('navigation', { name: '资源管理器' })
+    await userEvent.click(within(explorer).getByText('other.kin'))
+    await waitFor(() => expect(editorValue()).toContain('这里是一段测试文本'))
+    await gateway.deletePath('/proj', 'other.kin')
+    await fireAndFlush(watchHook)
+    await waitFor(() => expect(screen.queryByText('other.kin')).toBeNull())
+  })
+
+  it('外部新增 .kin → 文件树出现新条目', async () => {
+    const watchHook: { fire?: () => void } = {}
+    const gateway = gwWatch(watchHook)
+    await openProject(gateway)
+    await gateway.writeFile('/proj', 'new.kin', '=== 新文件 ===\n刚新增的文件。\n-> END\n')
+    await fireAndFlush(watchHook)
+    const explorer = await screen.findByRole('navigation', { name: '资源管理器' })
+    await waitFor(() => expect(within(explorer).getByText('new.kin')).toBeInTheDocument())
   })
 })

@@ -8,6 +8,11 @@ export interface Manifest {
   version: string
   engine: string
   entry: string
+  /**
+   * 作品稳定标识（可选）。播放端按作品分桶的场景（导出网页的读者存档）用它，而非会重名、
+   * 会被作者改动的 name。新建项目即生成；老项目在导出独立网页时补写。
+   */
+  id?: string
 }
 
 /** 一个项目文件。path 为相对项目根、'/' 分隔的归一路径。 */
@@ -132,6 +137,18 @@ export interface FileGateway {
   onWindowCloseRequest(handler: () => void): Promise<() => void>
   /** 订阅「用 OS 双击 / 关联打开某 `.kiw` 文件」事件（single-instance 转发，热启动用）；回调收到项目文件绝对路径。返回退订函数。 */
   onOpenProjectFile(handler: (path: string) => void): Promise<() => void>
+  /**
+   * 监听项目目录的外部变化（递归）。onSignal 不携带事件细节——单条 watch 事件语义不可信
+   * （Windows 重命名拆成 remove+create、原子保存产生临时文件噪音），只表示「项目目录可能
+   * 变了」，由调用方防抖后重扫对账。返回退订函数。监听不可用时抛错，调用方静默降级。
+   */
+  watchProject(dir: string, onSignal: () => void): Promise<() => void>
+  /**
+   * 外部变更重扫：同 readProject 的扫描口径（文本载入 source、二进制列名、跳过 manifest
+   * 文件），但不做 kiny.json 迁移、不要求入口文件存在——外部可能刚删掉入口，此时应如实
+   * 返回现状交给校验管道报错，而非拒绝整次同步。manifest 缺失 / 损坏时抛错，调用方跳过本轮。
+   */
+  rescanProject(dir: string): Promise<LoadedProject>
   /** 取走冷启动待打开的 `.kiw` 路径（OS 双击首次拉起时 Rust 暂存）；无则 null。前端 mount 后调用一次。 */
   takeLaunchProject(): Promise<string | null>
   /** 读全部自动保存草稿（落 app-data，与项目目录隔离）；无 / 损坏 → 空 store。 */
@@ -311,9 +328,14 @@ export function starterContentFor(relPath: string): string {
   return ''
 }
 
+/** 生成作品稳定 id（32 位十六进制，与播放端存档 id 同口径）。 */
+export function newStoryId(): string {
+  return crypto.randomUUID().replace(/-/g, '')
+}
+
 /** 起始 manifest 脚手架（newProject 用，name 由调用方填）。 */
 export function starterManifest(name: string): Manifest {
-  return { name, version: '1.0.0', engine: __KINY_VERSION__, entry: 'main.kin' }
+  return { name, version: '1.0.0', engine: __KINY_VERSION__, entry: 'main.kin', id: newStoryId() }
 }
 
 /** 项目名 → sanitize 基名：去 Windows 文件名非法字符与首尾空白，可返回空串。 */
@@ -342,6 +364,13 @@ export function defaultWebpageDirName(storyName: string): string {
   const base = sanitizeProjectBase(storyName)
   return `${base || 'story'}-web`
 }
+
+/**
+ * 「导出独立网页」产物目录的标记文件名（Rust 侧 `export_webpage` 建目录时写下）。
+ * 导出目录常就落在项目文件夹内，带标记的目录一律不进资源树、不进 .kip、不作为资源被拷贝——
+ * 它只是项目内容的一份副本。按标记而非目录名判定，用户重命名导出目录后依然认得出。
+ */
+export const EXPORT_MARKER = '.kiny-export'
 
 /**
  * 组装导出独立网页的内联数据（写入 `window.__KINY_PROJECT__`，对应 viewer 的 InlineProject）：

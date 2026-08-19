@@ -3,12 +3,15 @@ export function TabBar({
   openTabs,
   activeFile,
   dirtyMap,
+  conflictMap = {},
   onSelect,
   onClose,
 }: {
   openTabs: string[]
   activeFile: string | null
   dirtyMap: Record<string, boolean>
+  /** 冲突 / 删除标记（conflict 或 missing 均记 true）；命中时覆盖显示，优先级高于 dirty 圆点。缺省空表（既有调用方不受影响）。 */
+  conflictMap?: Record<string, boolean>
   onSelect: (name: string) => void
   onClose: (name: string) => void
 }) {
@@ -23,7 +26,7 @@ export function TabBar({
           onClick={() => onSelect(name)}
         >
           <span className="tab-name">{name}</span>
-          {dirtyMap[name] && <span className="tab-dirty" aria-hidden />}
+          {conflictMap[name] ? <span className="tab-conflict" aria-hidden /> : dirtyMap[name] && <span className="tab-dirty" aria-hidden />}
           <button
             className="tab-close"
             aria-label={`关闭 ${name}`}

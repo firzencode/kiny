@@ -239,4 +239,11 @@ describe('starterManifest', () => {
   it('engine 取注入的 Kiny 版本', () => {
     expect(starterManifest('我的故事').engine).toBe(__KINY_VERSION__)
   })
+
+  it('带作品稳定 id：32 位十六进制，每次新建各不相同', () => {
+    const a = starterManifest('我的故事')
+    const b = starterManifest('我的故事')
+    expect(a.id).toMatch(/^[0-9a-f]{32}$/)
+    expect(a.id).not.toBe(b.id)
+  })
 })

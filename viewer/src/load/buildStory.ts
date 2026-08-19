@@ -10,8 +10,10 @@ export interface LoadedStory {
   /** 作品角色表（`characters.json`）；未带 / 坏文件 = 空表，不着色。 */
   characters: CharacterTable
   title: string
-  /** 故事版本（manifest version）；与 title 一起作阅读进度持久化的 key（改版即弃旧进度）。 */
+  /** 故事版本（manifest version）；`kiny-progress:` 那条老迁移链按它定位旧键。 */
   version: string
+  /** 作品稳定标识（manifest 的可选 `id`）：存档按它分桶，缺失则回退故事名。 */
+  id: string | undefined
   /** 供保位重放恢复阅读进度用：program + start + 当前 run 的 seed。 */
   program: ValidatedProgram
   start: string
@@ -52,6 +54,7 @@ export function buildStory(
       characters: parseCharacters(charactersText),
       title: res.meta.name,
       version: res.meta.version,
+      id: res.meta.id,
       program: res.program,
       start: res.start,
       seed: res.seed,

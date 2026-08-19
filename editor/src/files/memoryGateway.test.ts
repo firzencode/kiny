@@ -204,6 +204,13 @@ describe('memoryGateway 文件管理原语', () => {
     expect((await gw.readProject('/p')).manifest.entry).toBe('start.kin')
   })
 
+  it('writeManifest → readProject 往返保留作品 id', async () => {
+    const gw = mk({})
+    const id = 'a1b2c3d4e5f60718293a4b5c6d7e8f90'
+    await gw.writeManifest('/p', { name: 'P', version: '1', engine: '0.1.0', entry: 'main.kin', id }, 'kiny.json')
+    expect((await gw.readProject('/p')).manifest.id).toBe(id)
+  })
+
   it('confirm 返回 init 配置值', async () => {
     expect(await mk({}, false).confirm('x')).toBe(false)
     expect(await mk({}, true).confirm('x')).toBe(true)
@@ -322,5 +329,34 @@ describe('memoryGateway AI 对话存储', () => {
   it('init.chatStores 预置可读', async () => {
     const gw = createMemoryGateway({ files: {}, chatStores: { a: store, b: { ...store, projectDir: '/q' } } })
     expect((await gw.listChatStoreKeys()).sort()).toEqual(['a', 'b'])
+  })
+})
+
+describe('watchProject / rescanProject', () => {
+  it('watchProject 把 onSignal 赋到 watchHook.fire，退订后清空', async () => {
+    const watchHook: { fire?: () => void } = {}
+    const gw = createMemoryGateway({ files: { '/p/p.kiw': '{}' }, watchHook })
+    let fired = 0
+    const un = await gw.watchProject('/p', () => { fired++ })
+    watchHook.fire?.()
+    expect(fired).toBe(1)
+    un()
+    expect(watchHook.fire).toBeUndefined()
+  })
+
+  it('rescanProject 与 readProject 同口径扫描，但缺入口不抛错', async () => {
+    const manifest = JSON.stringify({ name: 'p', version: '1.0.0', engine: '0.0.0', entry: 'main.kin' })
+    const gw = createMemoryGateway({ files: { '/p/p.kiw': manifest, '/p/other.kin': '=== a ===' } })
+    // readProject 会因缺 main.kin 抛错；rescanProject 不抛，如实返回现状
+    await expect(gw.readProject('/p')).rejects.toThrow('缺少入口文件')
+    const snap = await gw.rescanProject('/p')
+    expect(snap.manifest.entry).toBe('main.kin')
+    expect(snap.files.map((f) => f.path)).toEqual(['other.kin'])
+    expect(snap.files[0].source).toBe('=== a ===')
+  })
+
+  it('rescanProject 在 manifest 缺失时抛错（调用方跳过本轮）', async () => {
+    const gw = createMemoryGateway({ files: { '/p/main.kin': '=== a ===' } })
+    await expect(gw.rescanProject('/p')).rejects.toThrow()
   })
 })

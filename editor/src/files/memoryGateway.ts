@@ -32,6 +32,8 @@ export interface MemoryGatewayInit {
   openFileHook?: { fire?: (path: string) => void }
   /** onWindowResize 注册的 handler 会被赋到此对象的 fire；测试可调 fire(w,h) 模拟用户拖拽调整窗口。 */
   resizeHook?: { fire?: (width: number, height: number) => void }
+  /** watchProject 注册的 handler 赋到 fire；测试改内存文件（经 writeFile/deletePath 等）后调 fire() 模拟外部变更信号。 */
+  watchHook?: { fire?: () => void }
   /** takeLaunchProject 返回的冷启动待打开路径（取走后置空，模拟单次消费）；缺省 null。 */
   launchProject?: string | null
   /** pickDirectory 返回的注入父目录；缺省回退 pickedDir，再缺省 null。 */
@@ -80,6 +82,15 @@ export function createMemoryGateway(init: MemoryGatewayInit): FileGateway {
       .filter((rel) => !rel.includes('/'))
   }
 
+  const entriesOf = (dir: string): ProjectFileEntry[] =>
+    listAll(dir).map((rel) => {
+      const isKin = isKinFile(rel)
+      // 与真实现同口径：文本文件带 source，二进制不带。
+      return isTextFile(rel)
+        ? { path: rel, isKin, source: files.get(`${dir}/${rel}`)! }
+        : { path: rel, isKin, source: undefined }
+    })
+
   const readProject = async (dir: string): Promise<LoadedProject> => {
     const found = findManifest(rootNames(dir))
     if (!found.ok) throw new Error(found.message)
@@ -92,14 +103,7 @@ export function createMemoryGateway(init: MemoryGatewayInit): FileGateway {
       files.delete(`${dir}/kiny.json`)
       manifestFile = target
     }
-    const rels = listAll(dir)
-    const projFiles: ProjectFileEntry[] = rels.map((rel) => {
-      const isKin = isKinFile(rel)
-      // 与真实现同口径：文本文件（.kin + 作品前端资源）带 source，二进制不带。
-      return isTextFile(rel)
-        ? { path: rel, isKin, source: files.get(`${dir}/${rel}`)! }
-        : { path: rel, isKin, source: undefined }
-    })
+    const projFiles = entriesOf(dir)
     if (!projFiles.some((f) => f.path === manifest.entry)) throw new Error(`缺少入口文件 ${manifest.entry}`)
     return { dir, manifest, manifestFile, files: projFiles, emptyDirs: emptyDirs.get(dir) ?? [] }
   }
@@ -216,6 +220,16 @@ export function createMemoryGateway(init: MemoryGatewayInit): FileGateway {
     onOpenProjectFile: async (handler) => {
       if (init.openFileHook) init.openFileHook.fire = handler
       return () => { if (init.openFileHook) init.openFileHook.fire = undefined }
+    },
+    watchProject: async (_dir, onSignal) => {
+      if (init.watchHook) init.watchHook.fire = onSignal
+      return () => { if (init.watchHook) init.watchHook.fire = undefined }
+    },
+    rescanProject: async (dir) => {
+      const found = findManifest(rootNames(dir))
+      if (!found.ok) throw new Error(found.message)
+      const manifest = JSON.parse(files.get(`${dir}/${found.name}`)!) as Manifest
+      return { dir, manifest, manifestFile: found.name, files: entriesOf(dir), emptyDirs: emptyDirs.get(dir) ?? [] }
     },
     takeLaunchProject: async () => { const p = launchProject; launchProject = null; return p },
     readDraftStore: async () => structuredClone(draftStore),

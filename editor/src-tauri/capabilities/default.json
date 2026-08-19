@@ -14,6 +14,8 @@
     "core:window:allow-center",
     "core:webview:allow-create-webview-window",
     "fs:default",
+    "fs:allow-watch",
+    "fs:allow-unwatch",
     "dialog:default",
     "log:default",
     "opener:default",

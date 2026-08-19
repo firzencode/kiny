@@ -1,5 +1,5 @@
 import { open, ask, save } from '@tauri-apps/plugin-dialog'
-import { readTextFile, writeTextFile, readFile, readDir, mkdir, exists, rename, remove, copyFile, BaseDirectory } from '@tauri-apps/plugin-fs'
+import { readTextFile, writeTextFile, readFile, readDir, mkdir, exists, rename, remove, copyFile, watch, BaseDirectory } from '@tauri-apps/plugin-fs'
 import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow, currentMonitor, LogicalSize } from '@tauri-apps/api/window'
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
@@ -9,7 +9,7 @@ import { findManifest } from '@kiny/engine'
 import type { ResolveAsset } from '@kiny/player'
 import {
   type FileGateway, type LoadedProject, type Manifest, type ProjectFileEntry, type WindowMode,
-  STARTER_MAIN_KIN, STARTER_THEME_CSS, normalizeNewFileName, starterContentFor, isKinFile, starterManifest, projectFileName, projectFolderName, assertSafeRelPath, assertRenameSafe, isTextFile,
+  STARTER_MAIN_KIN, STARTER_THEME_CSS, normalizeNewFileName, starterContentFor, isKinFile, starterManifest, projectFileName, projectFolderName, assertSafeRelPath, assertRenameSafe, isTextFile, EXPORT_MARKER,
 } from './gateway'
 import { loadWorkbenchSize, computeLaunchSize, LAUNCH_WINDOW, WORKBENCH_WINDOW, WORKBENCH_MIN_SIZE } from '../state/windowSize'
 import { type DraftStore, parseDraftStore, emptyDraftStore } from '../state/drafts'
@@ -90,12 +90,18 @@ async function grantProjectScope(dir: string): Promise<void> {
   await invoke('allow_project_dir', { dir })
 }
 
-/** 递归扫 dir：收集全部文件相对路径与空目录相对路径。跳过所定位的 manifest 文件（不进资源树）。 */
+/**
+ * 递归扫 dir：收集全部文件相对路径与空目录相对路径。跳过所定位的 manifest 文件（不进资源树），
+ * 以及带 `.kiny-export` 标记的「导出独立网页」产物目录——作者常把网页导到项目文件夹内，
+ * 那份产物是项目内容的副本，混进资源树会让同名 css / 图片重复出现、还会被资源发现当成
+ * 项目资源内联进下一次导出。
+ */
 async function scan(root: string, manifestFile: string): Promise<{ files: string[]; emptyDirs: string[] }> {
   const files: string[] = []
   const emptyDirs: string[] = []
   const walk = async (abs: string, rel: string): Promise<void> => {
     const ents = await readDir(abs)
+    if (rel && ents.some((e) => e.isFile && e.name === EXPORT_MARKER)) return // 导出产物目录，整棵跳过
     const kept = ents.filter((e) => !(e.isDirectory && (e.name.startsWith('.') || e.name === 'node_modules')))
     let childCount = 0
     for (const e of kept) {
@@ -108,6 +114,30 @@ async function scan(root: string, manifestFile: string): Promise<{ files: string
   }
   await walk(root, '')
   return { files, emptyDirs }
+}
+
+/** 扫描 + 文本载入，组装一份项目快照（readProject 与 rescanProject 共用）。 */
+async function loadSnapshot(dir: string, manifestFile: string, manifest: Manifest): Promise<LoadedProject> {
+  const { files: rels, emptyDirs } = await scan(dir, manifestFile)
+  rels.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+  emptyDirs.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+  const files: ProjectFileEntry[] = []
+  for (const rel of rels) {
+    const isKin = isKinFile(rel)
+    // 文本文件（.kin + css/js/json/txt/md/html）载入文本供编辑；二进制只列名。
+    // 读不出文本（非 UTF-8 的 .txt/.json 在中文环境里很常见）时降级成「只列名」——
+    // 一个编码异常的旁挂文件不该让整个项目打不开；`.kin` 例外，它读不了就是真错误。
+    let source: string | undefined
+    if (isTextFile(rel)) {
+      try {
+        source = await readTextFile(await join(dir, rel))
+      } catch (e) {
+        if (isKin) throw e
+      }
+    }
+    files.push(source !== undefined ? { path: rel, isKin, source } : { path: rel, isKin })
+  }
+  return { dir, manifest, manifestFile, files, emptyDirs }
 }
 
 async function readProject(dir: string): Promise<LoadedProject> {
@@ -128,27 +158,9 @@ async function readProject(dir: string): Promise<LoadedProject> {
       /* 保持 manifestFile = 'kiny.json'，只读旧项目仍可打开 */
     }
   }
-  const { files: rels, emptyDirs } = await scan(dir, manifestFile)
-  rels.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
-  emptyDirs.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
-  const files: ProjectFileEntry[] = []
-  for (const rel of rels) {
-    const isKin = isKinFile(rel)
-    // 文本文件（.kin + css/js/json/txt/md/html）载入文本供编辑；二进制只列名。
-    // 读不出文本（非 UTF-8 的 .txt/.json 在中文环境里很常见）时降级成「只列名」——
-    // 一个编码异常的旁挂文件不该让整个项目打不开；`.kin` 例外，它读不了就是真错误。
-    let source: string | undefined
-    if (isTextFile(rel)) {
-      try {
-        source = await readTextFile(await join(dir, rel))
-      } catch (e) {
-        if (isKin) throw e
-      }
-    }
-    files.push(source !== undefined ? { path: rel, isKin, source } : { path: rel, isKin })
-  }
-  if (!files.some((f) => f.path === manifest.entry)) throw new Error(`缺少入口文件 ${manifest.entry}`)
-  return { dir, manifest, manifestFile, files, emptyDirs }
+  const project = await loadSnapshot(dir, manifestFile, manifest)
+  if (!project.files.some((f) => f.path === manifest.entry)) throw new Error(`缺少入口文件 ${manifest.entry}`)
+  return project
 }
 
 export const tauriFileGateway: FileGateway = {
@@ -195,6 +207,12 @@ export const tauriFileGateway: FileGateway = {
   },
   writeFile: async (dir, rel, text) => {
     assertSafeRelPath(rel)
+    // missing 文件（缓冲脏、磁盘已删）承诺「保存即在原路径重建」——若连所在目录也被外部整体
+    // 删除，不补建父目录会导致这条承诺落空、Ctrl+S 直接报错。仿 createFile 的既有做法。
+    if (rel.includes('/')) {
+      const parent = await join(dir, rel.slice(0, rel.lastIndexOf('/')))
+      if (!(await exists(parent))) await mkdir(parent, { recursive: true })
+    }
     await writeTextFile(await join(dir, rel), text)
   },
   readTextFile: async (dir, rel) => {
@@ -322,6 +340,17 @@ export const tauriFileGateway: FileGateway = {
   async onOpenProjectFile(handler) {
     // single-instance（Rust 侧）解析出 .kiw 参数后 emit 此事件；payload 为文件绝对路径。
     return listen<string>('open-project-file', (e) => handler(e.payload))
+  },
+  async watchProject(dir, onSignal) {
+    // delayMs：插件层一级防抖（notify debouncer），事件风暴在 Rust 侧先合并一道。
+    return watch(dir, () => onSignal(), { recursive: true, delayMs: 300 })
+  },
+  async rescanProject(dir) {
+    const rootNames = (await readDir(dir)).filter((e) => e.isFile).map((e) => e.name)
+    const found = findManifest(rootNames)
+    if (!found.ok) throw new Error(found.message)
+    const manifest = JSON.parse(await readTextFile(await join(dir, found.name))) as Manifest
+    return loadSnapshot(dir, found.name, manifest)
   },
   async takeLaunchProject() {
     return invoke<string | null>('take_launch_project')

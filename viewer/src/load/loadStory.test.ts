@@ -35,6 +35,23 @@ describe('loadStory', () => {
     }
   })
 
+  it('manifest 带 id → 透传给存档分桶；不带 → undefined（回退故事名）', async () => {
+    const ID = 'a1b2c3d4e5f60718293a4b5c6d7e8f90'
+    ;(window as unknown as { __KINY_PROJECT__?: unknown }).__KINY_PROJECT__ = {
+      manifest: JSON.stringify({ name: '内联故事', version: '1.0.0', engine: '0.1.0', entry: 'main.kin', id: ID }),
+      files: { 'main.kin': MAIN },
+    }
+    const withId = await loadStory(123)
+    expect(withId.ok && withId.value.id).toBe(ID)
+
+    ;(window as unknown as { __KINY_PROJECT__?: unknown }).__KINY_PROJECT__ = {
+      manifest: MANIFEST,
+      files: { 'main.kin': MAIN },
+    }
+    const noId = await loadStory(123)
+    expect(noId.ok && noId.value.id).toBeUndefined()
+  })
+
   it('内联 characters 被解析进角色表；缺席 / 写坏 → 空表且故事照常', async () => {
     ;(window as unknown as { __KINY_PROJECT__?: unknown }).__KINY_PROJECT__ = {
       manifest: MANIFEST,

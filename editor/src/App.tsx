@@ -4,7 +4,7 @@ import type { ValidatedProgram } from '@kiny/engine'
 import { discoverAssets, buildProjectCss, scopeCss, familyOf, parseCharacters, CHARACTERS_FILE } from '@kiny/player'
 import type { PlayState, ResolveAsset, InteractionStep, AssetIssue } from '@kiny/player'
 import type { FileGateway, Manifest } from './files/gateway'
-import { defaultKipName, defaultWebpageDirName, buildProjectData, projectFileName, isTextFile, isThemeFile, isCharactersFile, isKinFile } from './files/gateway'
+import { defaultKipName, defaultWebpageDirName, buildProjectData, newStoryId, projectFileName, isTextFile, isThemeFile, isCharactersFile, isKinFile } from './files/gateway'
 import { editorReducer, initialEditorState, anyDirty, activeBuffer } from './state/editorReducer'
 import { useDebouncedValidation, type ValidationOutcome } from './hooks/useDebouncedValidation'
 import { createIncrementalValidator, kinSourcesOf } from './validate/validate'
@@ -45,6 +45,7 @@ import { SettingsDialog } from './components/SettingsDialog'
 import { ProjectSettingsDialog } from './components/ProjectSettingsDialog'
 import { NewProjectDialog } from './components/NewProjectDialog'
 import { useAutosave } from './hooks/useAutosave'
+import { useProjectWatch } from './hooks/useProjectWatch'
 import { detectRecoverable, type RecoverableItem } from './state/drafts'
 import { loadSettings, saveSettings, applySettingsVars, clampSettings, DEFAULT_SETTINGS, SETTINGS_BOUNDS, type Settings } from './state/settings'
 import { AiPanel } from './components/ai/AiPanel'
@@ -113,6 +114,9 @@ export function App({ gateway }: { gateway: FileGateway }) {
   const [pendingClose, setPendingClose] = useState<CloseIntent | null>(null)
   // 崩溃恢复提示：重开项目检测到残留草稿（草稿 ≠ 磁盘）时弹出。
   const [recovery, setRecovery] = useState<{ projectDir: string; items: RecoverableItem[] } | null>(null)
+  // 外部同步轮次计数：二进制内容变化 diff 看不见（内存只有文件名），每轮重扫后 bump，
+  // 当前打开的媒体预览 URL 携带它强制重载（代价只是偶尔一次多余重取）。
+  const [mediaSyncTick, setMediaSyncTick] = useState(0)
   // 导入资源同名冲突：弹三选框；resolver 承接 Promise，选择后回填。
   const [importConflict, setImportConflict] = useState<{ destRel: string } | null>(null)
   const conflictResolver = useRef<((d: { choice: ConflictChoice; applyRest: boolean }) => void) | null>(null)
@@ -161,9 +165,12 @@ export function App({ gateway }: { gateway: FileGateway }) {
     const path = state.activeFile
     if (path === null || active !== null) return null
     const kind = mediaKind(path)
-    return kind === null ? null : { path, kind, url: resolveRef.current(path) }
+    if (kind === null) return null
+    const base = resolveRef.current(path)
+    // ?v=计数：外部替换素材后强制媒体重载（asset 协议忽略 query，仅作缓存区分）。
+    return { path, kind, url: `${base}${base.includes('?') ? '&' : '?'}v=${mediaSyncTick}` }
     // resolveRef 随项目切换更新（projectDir 一并变），故与 activeFile 同列依赖即足。
-  }, [state.activeFile, state.projectDir, active])
+  }, [state.activeFile, state.projectDir, active, mediaSyncTick])
   const nodes = useMemo(() => (active ? parseNodes(active.source) : []), [active])
   // 当前文件诊断（喂 EditorPane 画行内波浪线）；跨文件总览仍走 DiagnosticsList。
   const currentDiags = useMemo(
@@ -314,6 +321,15 @@ export function App({ gateway }: { gateway: FileGateway }) {
     paused: recovery !== null,
   })
 
+  // 项目目录外部变更监听（恒开）：读 committedStateRef 防止重扫回来撞上过期闭包。
+  useProjectWatch({
+    gateway,
+    projectDir: state.projectDir,
+    getState: () => committedStateRef.current,
+    dispatch,
+    onSynced: () => setMediaSyncTick((t) => t + 1),
+  })
+
   // 防抖校验：跑全部缓冲
   const run = useCallback((rid: number): ValidationOutcome => {
     // 只把 `.kin` 送进校验（口径见 kinSourcesOf——动作层 validate 消费的是同一份）。
@@ -456,7 +472,7 @@ export function App({ gateway }: { gateway: FileGateway }) {
     }
   }
   const onExportWebpage = async () => {
-    if (!state.projectDir || !state.manifest) return
+    if (!state.projectDir || !state.manifest || !state.manifestFile) return
     if (anyDirty(state)) {
       if (!(await gateway.confirm('导出前需保存全部改动，保存并继续？'))) return
       if (!(await saveAllDirty())) return
@@ -475,16 +491,34 @@ export function App({ gateway }: { gateway: FileGateway }) {
       readCss: (p) => state.files[p]?.source ?? null,
       resolveAsset: (p) => fontUris.get(p) ?? p,
     }).css
+    // 作品稳定 id：读者的存档按它分桶，同名不同作品才不互相覆盖。老项目没有，导出前补写回项目文件
+    // ——即「导出」这个动作**会写项目的 manifest**（仅此一次、仅在缺 id 时），同 onSaveProjectSettings，
+    // 写的是内存里那份，故 `.kiw` 若在上次监听同步后被外部改过，这一写会盖掉外部改动。
+    // 写回失败则本次导出**不带** id、退回按故事名分桶——塞个一次性随机 id 会让作者每导出一次就
+    // 换一个桶、读者每升级一版都无声丢档，比它要解决的同名撞键更常态化。
+    let manifest = state.manifest
+    let idSuffix = ''
+    if (!manifest.id) {
+      const withId = { ...manifest, id: newStoryId() }
+      try {
+        await gateway.writeManifest(state.projectDir, withId, state.manifestFile)
+        dispatch({ type: 'manifest_updated', manifest: withId, manifestFile: state.manifestFile, projectDir: state.projectDir })
+        manifest = withId
+        idSuffix = '（已为本作品写入唯一标识，用于区分同名作品的读者存档）'
+      } catch {
+        idSuffix = '，但未能写入作品标识，同名作品的存档可能互相覆盖'
+      }
+    }
     // 角色表原文随页内联（同 css：`file://` 下不能 fetch 旁挂文本）。
     const projectData = buildProjectData(
-      state.manifest,
+      manifest,
       Object.values(state.files),
       exportCss,
       state.files[CHARACTERS_FILE]?.source ?? '',
     )
     try {
-      const dest = await gateway.exportWebpage(state.projectDir, parent, defaultWebpageDirName(state.manifest.name), projectData)
-      setNotice(`已导出到 ${dest}`, 'success')
+      const dest = await gateway.exportWebpage(state.projectDir, parent, defaultWebpageDirName(manifest.name), projectData)
+      setNotice(`已导出到 ${dest}${idSuffix}`, 'success')
     } catch (e) {
       setNotice(`导出失败：${errMsg(e)}`)
     }
@@ -774,14 +808,14 @@ export function App({ gateway }: { gateway: FileGateway }) {
         } catch {
           // 罕见：rename 已成、write 未成。文件已在新名下（内容仍旧），manifestFile 须跟到 target
           // 避免后续写回旧名；manifest 内容保持 cur（磁盘未更新）。弹窗留驻等重试。
-          dispatch({ type: 'manifest_updated', manifest: cur, manifestFile: target })
+          dispatch({ type: 'manifest_updated', manifest: cur, manifestFile: target, projectDir: dir })
           setNotice('项目文件已重命名，但写入内容失败，请重试保存')
           return
         }
-        dispatch({ type: 'manifest_updated', manifest: draft, manifestFile: target })
+        dispatch({ type: 'manifest_updated', manifest: draft, manifestFile: target, projectDir: dir })
       } else {
         await gateway.writeManifest(dir, draft, curFile)
-        dispatch({ type: 'manifest_updated', manifest: draft, manifestFile: curFile })
+        dispatch({ type: 'manifest_updated', manifest: draft, manifestFile: curFile, projectDir: dir })
       }
       setProjectSettingsOpen(false)
       setNotice('项目设置已保存', 'success')
@@ -874,6 +908,13 @@ export function App({ gateway }: { gateway: FileGateway }) {
   const dirtyMap = useMemo(() => {
     const m: Record<string, boolean> = {}
     for (const f of Object.values(state.files)) m[f.path] = f.dirty
+    return m
+  }, [state.files])
+
+  // 冲突 / 删除标记（tab 与文件树共用一份口径：conflict 或 missing 均记 true）。
+  const conflictMap = useMemo(() => {
+    const m: Record<string, boolean> = {}
+    for (const [p, f] of Object.entries(state.files)) if (f.conflict === true || f.missing === true) m[p] = true
     return m
   }, [state.files])
 
@@ -986,6 +1027,7 @@ export function App({ gateway }: { gateway: FileGateway }) {
               entries={state.entries}
               emptyDirs={state.emptyDirs}
               dirtyMap={dirtyMap}
+              conflictMap={conflictMap}
               activeFile={state.activeFile}
               entry={state.entry}
               onOpenFile={(path) => dispatch({ type: 'open_tab', path })}
@@ -1025,11 +1067,29 @@ export function App({ gateway }: { gateway: FileGateway }) {
             openTabs={state.openTabs}
             activeFile={state.activeFile}
             dirtyMap={dirtyMap}
+            conflictMap={conflictMap}
             onSelect={(path) => dispatch({ type: 'set_active', path })}
             onClose={requestCloseTab}
           />
           {active ? (
             <>
+              {(active.conflict === true || active.missing === true) && (
+                <div className="sync-banner" role="alert" data-testid="sync-banner">
+                  <span className="sync-banner-msg">
+                    {active.missing === true ? '此文件已从磁盘删除——保存（Ctrl+S）可在原位置重建' : '此文件在磁盘上已被外部修改'}
+                  </span>
+                  {active.missing !== true && (
+                    <>
+                      <button type="button" className="sync-banner-btn" onClick={() => dispatch({ type: 'conflict_resolved', path: active.path, useDisk: true })}>
+                        载入磁盘版本
+                      </button>
+                      <button type="button" className="sync-banner-btn" onClick={() => dispatch({ type: 'conflict_resolved', path: active.path, useDisk: false })}>
+                        保留我的版本
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
               {ai.running && (
                 <div className="editor-readonly-banner" role="status">AI 正在修改，编辑区暂时只读</div>
               )}

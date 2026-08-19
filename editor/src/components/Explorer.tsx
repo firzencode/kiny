@@ -18,7 +18,7 @@ interface CtxMenu {
 }
 
 export function Explorer({
-  projectName, entries, emptyDirs, dirtyMap, activeFile, entry,
+  projectName, entries, emptyDirs, dirtyMap, conflictMap = {}, activeFile, entry,
   onOpenFile, onCreateFile, newFileFocusToken,
   onRename, onDelete, onCreateFolder, onMove, onImportAssets,
   collapsed, onToggleCollapse, style,
@@ -27,6 +27,8 @@ export function Explorer({
   entries: ProjectFileEntry[]
   emptyDirs: string[]
   dirtyMap: Record<string, boolean>
+  /** 冲突 / 删除标记（conflict 或 missing 均记 true）；命中时覆盖显示，优先级高于 dirty 圆点。缺省空表（既有调用方不受影响）。 */
+  conflictMap?: Record<string, boolean>
   activeFile: string | null
   entry: string | null
   onOpenFile: (path: string) => void
@@ -195,7 +197,7 @@ export function Explorer({
           <>
             <span className="frow-name">{n.name}</span>
             {n.path === entry && <span className="frow-entry" aria-label="入口文件">⌂</span>}
-            {dirtyMap[n.path] && <span className="frow-dirty" aria-hidden />}
+            {conflictMap[n.path] ? <span className="frow-conflict" aria-hidden /> : dirtyMap[n.path] && <span className="frow-dirty" aria-hidden />}
           </>
         )}
       </li>

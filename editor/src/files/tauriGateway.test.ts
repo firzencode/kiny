@@ -120,6 +120,50 @@ describe('tauriFileGateway.newProject / pickDirectory', () => {
   })
 })
 
+describe('tauriFileGateway.readProject 资源树', () => {
+  const manifest = { name: '故事', version: '1.0.0', engine: '0.13.0', entry: 'main.kin' }
+  beforeEach(() => {
+    [readDir, readTextFile, invoke].forEach((m) => m.mockReset())
+    invoke.mockResolvedValue(undefined)
+    readTextFile.mockImplementation(async (p: string) => (p.endsWith('.kiw') ? JSON.stringify(manifest) : 'x'))
+  })
+
+  it('带 .kiny-export 标记的导出目录不进资源树', async () => {
+    // 作者把网页导到项目文件夹内是常见姿势；那份产物是项目内容的副本，
+    // 混进资源树会让 theme.css 这类文件重复出现，还会被资源发现内联进下次导出。
+    readDir.mockImplementation(async (p: string) => {
+      if (p === '/p') return [
+        { name: '故事.kiw', isFile: true, isDirectory: false },
+        { name: 'main.kin', isFile: true, isDirectory: false },
+        { name: 'theme.css', isFile: true, isDirectory: false },
+        { name: '故事-web', isFile: false, isDirectory: true },
+      ]
+      if (p === '/p/故事-web') return [
+        { name: '.kiny-export', isFile: true, isDirectory: false },
+        { name: 'index.html', isFile: true, isDirectory: false },
+        { name: 'theme.css', isFile: true, isDirectory: false },
+      ]
+      return []
+    })
+    const proj = await tauriFileGateway.readProject('/p')
+    expect(proj.files.map((f) => f.path)).toEqual(['main.kin', 'theme.css'])
+  })
+
+  it('无标记的普通子目录照常收进资源树', async () => {
+    readDir.mockImplementation(async (p: string) => {
+      if (p === '/p') return [
+        { name: '故事.kiw', isFile: true, isDirectory: false },
+        { name: 'main.kin', isFile: true, isDirectory: false },
+        { name: 'assets', isFile: false, isDirectory: true },
+      ]
+      if (p === '/p/assets') return [{ name: 'bg.png', isFile: true, isDirectory: false }]
+      return []
+    })
+    const proj = await tauriFileGateway.readProject('/p')
+    expect(proj.files.map((f) => f.path)).toEqual(['assets/bg.png', 'main.kin'])
+  })
+})
+
 describe('tauriFileGateway AI 对话存储', () => {
   const store = { version: 1 as const, projectDir: '/p', conversations: [] }
   beforeEach(() => {

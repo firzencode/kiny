@@ -259,3 +259,109 @@ describe('replay · 输入步（交互序列泛化）', () => {
     expect(prose).toContain('你好，晓。')
   })
 })
+
+describe('选项文案校验（先按文案找回原选项，找不到才退回按位置——文案改动不判分歧）', () => {
+  const BRANCH_TREE = `开场。
+* [向左] -> A
+* [向右] -> B
+=== A ===
+左。
+-> END
+=== B ===
+右。
+-> END
+`
+
+  // 作者把两个选项调了顺序：pos 0 现在是「向右」，而存档记的是「向左」。
+  const BRANCH_TREE_REORDERED = `开场。
+* [向右] -> B
+* [向左] -> A
+=== A ===
+左。
+-> END
+=== B ===
+右。
+-> END
+`
+
+  // 作者把 pos 0 的文案从「向左」改成了「往左边走」（错字/措辞调整），指向的分支不变。
+  const BRANCH_TREE_RETEXT = `开场。
+* [往左边走] -> A
+* [向右] -> B
+=== A ===
+左。
+-> END
+=== B ===
+右。
+-> END
+`
+
+  // 三个选项，其中两个文案重复（都叫「继续」），第三个不同：用来验证「记录的文案在当前选项里匹配到
+  // 多个」时（而非缺失）的回退——记录 pos=2/text="继续"，pos 2 当前文案是「向右」（不符，触发查找），
+  // 但「继续」在当前选项里匹配到 pos 0 和 pos 1 两个，数量不唯一 → 应回退按 pos 2 走，而非误选 0/1。
+  const BRANCH_TREE_DUP = `开场。
+* [继续] -> A
+* [继续] -> B
+* [向右] -> C
+=== A ===
+左。
+-> END
+=== B ===
+中。
+-> END
+=== C ===
+右。
+-> END
+`
+
+  it('text 与当前选项一致 → 照常应用', () => {
+    const { program, start } = build(BRANCH_TREE)
+    const seq: InteractionStep[] = [{ kind: 'choice', pos: 0, text: '向左' }]
+    const r = replay(program, start, 1, seq, RESOLVE)
+    expect(r.appliedCount).toBe(1)
+  })
+
+  it('调整选项顺序 → 按文案找到唯一匹配，改走该位置，续对原分支（不再判分歧）', () => {
+    const { program, start } = build(BRANCH_TREE_REORDERED)
+    // 存档记的是 pos 0 = 「向左」；重排后 pos 0 变成「向右」，pos 1 才是「向左」。
+    const seq: InteractionStep[] = [{ kind: 'choice', pos: 0, text: '向左' }]
+    const r = replay(program, start, 1, seq, RESOLVE)
+    expect(r.appliedCount).toBe(1) // 找到了，照常应用，不停住
+    expect(r.state.ended).toBe(true)
+    const prose = r.state.log.filter((e) => e.kind === 'narration').map((e: any) => plainText(e.spans))
+    expect(prose).toContain('左。') // 真走进了「向左」→A 分支，不是「向右」→B
+    expect(prose).not.toContain('右。')
+  })
+
+  it('改了文案（找不到匹配）→ 退回按原 pos 走，照常可读', () => {
+    const { program, start } = build(BRANCH_TREE_RETEXT)
+    // 存档记的是 pos 0 = 「向左」；作者已把该选项文案改成「往左边走」，找不到任何选项等于「向左」。
+    const seq: InteractionStep[] = [{ kind: 'choice', pos: 0, text: '向左' }]
+    const r = replay(program, start, 1, seq, RESOLVE)
+    expect(r.appliedCount).toBe(1) // 退回按 pos 0 走，而非停住判分歧
+    expect(r.state.ended).toBe(true)
+    const prose = r.state.log.filter((e) => e.kind === 'narration').map((e: any) => plainText(e.spans))
+    expect(prose).toContain('左。') // pos 0（现文案「往左边走」）指向的仍是 A 分支
+  })
+
+  it('文案在当前选项里匹配到多个（重复，无从判断）→ 退回按原 pos 走', () => {
+    const { program, start } = build(BRANCH_TREE_DUP)
+    // 存档记的是 pos 2 = 「继续」（记录时 pos 2 那个选项文案还是「继续」）；当前 pos 2 已变成「向右」，
+    // 触发按文案查找，但「继续」当前匹配到 pos 0 和 pos 1 两个 → 不唯一 → 退回按 pos 2 走。
+    const seq: InteractionStep[] = [{ kind: 'choice', pos: 2, text: '继续' }]
+    const r = replay(program, start, 1, seq, RESOLVE)
+    expect(r.appliedCount).toBe(1) // 退回按 pos 2 走，而非误选 pos 0/1
+    expect(r.state.ended).toBe(true)
+    const prose = r.state.log.filter((e) => e.kind === 'narration').map((e: any) => plainText(e.spans))
+    expect(prose).toContain('右。') // pos 2（现文案「向右」）指向 C 分支
+    expect(prose).not.toContain('左。')
+    expect(prose).not.toContain('中。')
+  })
+
+  it('text 缺失（旧存档）→ 退回只按位置重放，向后兼容', () => {
+    const { program, start } = build(BRANCH_TREE)
+    const seq: InteractionStep[] = [{ kind: 'choice', pos: 0 }]
+    const r = replay(program, start, 1, seq, RESOLVE)
+    expect(r.appliedCount).toBe(1)
+  })
+})

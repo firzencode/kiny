@@ -7,18 +7,36 @@ body { margin: 0; font-family: var(--kiny-prose-font); background: var(--kiny-pa
 .app-status { display: flex; align-items: center; justify-content: center; min-height: 100vh; opacity: .7; }
 .app-error { color: #ff8585; padding: 0 24px; text-align: center; }
 
-/* 阅读进度：分歧回退提示（顶部一过性状态条）+「重新开始」入口（右上角，低干扰） */
+/* 阅读进度：分歧回退提示（一过性状态条）。top: 52px 接在 .viewer-bar 正下方——
+   二者都是 fixed + 顶部铺满，若同 top: 0 顶栏会整条盖住这条提示。 */
 .app-notice {
-  position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  position: fixed; top: 52px; left: 0; right: 0; z-index: 100;
   padding: 8px 16px; text-align: center; font-size: 13px;
   background: rgba(210, 162, 76, .18); color: #f0d9a8; border-bottom: 1px solid rgba(210, 162, 76, .3);
 }
-.restart-btn {
-  position: fixed; top: 10px; right: 12px; z-index: 100;
-  padding: 5px 12px; font: inherit; font-size: 12.5px; cursor: pointer;
-  color: #cdd2dd; background: rgba(30, 34, 44, .8); border: 1px solid rgba(255, 255, 255, .18); border-radius: 6px;
+/* 阅读顶栏（52px，与 reader 对齐；`@panel` 侧栏的 top: 52px 正好接在其下） */
+.viewer-bar {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  height: 52px; display: flex; align-items: center; gap: 10px; padding: 0 14px;
+  background: linear-gradient(rgba(8, 11, 16, .72), rgba(8, 11, 16, 0));
+  pointer-events: none;
 }
-.restart-btn:hover { background: rgba(45, 50, 62, .9); }
+.viewer-bar > * { pointer-events: auto; }
+.viewer-title { font-size: 12.5px; color: #9aa1b2; letter-spacing: .06em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 45%; }
+.viewer-saves-btn, .viewer-restart-btn {
+  padding: 5px 12px; font: inherit; font-size: 12.5px; cursor: pointer;
+  color: #cdd2dd; background: rgba(30, 34, 44, .8);
+  border: 1px solid rgba(255, 255, 255, .18); border-radius: 6px;
+}
+.viewer-saves-btn { margin-left: auto; }
+/* 让开 player 的静音键（右上角固定位），与 reader / shelf 同口径。 */
+.viewer-restart-btn { margin-right: 42px; }
+.viewer-saves-btn:hover, .viewer-restart-btn:hover { background: rgba(45, 50, 62, .9); }
+
+@media (pointer: coarse) {
+  .viewer-saves-btn, .viewer-restart-btn { min-height: 44px; }
+}
 /* @panel 左 / 右侧栏从右上角控件（重新开始 / 静音键，高 ~40px）下方开始，不与其重叠（对齐 reader 的 52px）。 */
 .panel-left, .panel-right { top: 52px; }
 
@@ -32,3 +50,45 @@ body { margin: 0; font-family: var(--kiny-prose-font); background: var(--kiny-pa
 .start-credit { position: absolute; bottom: 20px; font-size: .8rem; letter-spacing: .04em;
   color: #8b949e; text-decoration: none; opacity: .7; transition: opacity .15s; }
 .start-credit:hover { opacity: 1; text-decoration: underline; }
+
+/* 存档 / 读档面板：结构与 reader / shelf 同款，颜色在此固化（viewer 无变量体系） */
+.saves-overlay { position: fixed; inset: 0; z-index: 200; background: rgba(6, 8, 12, .55); display: grid; place-items: center; }
+.saves-panel { width: min(440px, 92vw); max-height: 80vh; overflow: auto; padding: 16px;
+  background: #151922; border: 1px solid rgba(255, 255, 255, .14); border-radius: 12px; color: #dfe3ea; }
+.saves-head { display: flex; align-items: center; margin-bottom: 12px; }
+.saves-head h2 { margin: 0; font-size: 16px; font-weight: 600; }
+.saves-close { margin-left: auto; width: 30px; height: 30px; border-radius: 8px; cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, .14); background: transparent; color: #9aa1b2; font-size: 16px; }
+.saves-close:hover { color: #fff; background: rgba(255, 255, 255, .08); }
+.saves-new { width: 100%; padding: 9px 0; font: inherit; font-size: 13px; cursor: pointer;
+  color: #d2a24c; background: rgba(210, 162, 76, .16); border: 1px solid rgba(210, 162, 76, .3); border-radius: 9px; }
+.saves-new:hover { background: rgba(210, 162, 76, .24); }
+.saves-empty { color: #79808f; font-size: 13px; text-align: center; padding: 18px 0; }
+.saves-list { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.saves-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+  background: #1b2029; border: 1px solid rgba(255, 255, 255, .08); border-radius: 10px; }
+.saves-meta { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 3px; }
+.saves-label { font-size: 13.5px; color: #dfe3ea; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.saves-tag { font-size: 11px; color: #d2a24c; background: rgba(210, 162, 76, .16); border-radius: 5px; padding: 1px 6px; margin-right: 7px; }
+.saves-time { font-size: 11.5px; color: #79808f; }
+.saves-load { flex: none; padding: 6px 12px; font: inherit; font-size: 12.5px; cursor: pointer;
+  color: #d2a24c; background: transparent; border: 1px solid rgba(210, 162, 76, .3); border-radius: 8px; }
+.saves-load:hover { background: rgba(210, 162, 76, .16); }
+.saves-del { flex: none; width: 30px; height: 30px; border-radius: 8px; cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, .14); background: transparent; }
+.saves-del:hover { background: #c8443a; border-color: #c8443a; }
+.saves-del-confirm { flex: none; padding: 6px 10px; font: inherit; font-size: 12px; cursor: pointer;
+  color: #fff; background: #c8443a; border: 1px solid #c8443a; border-radius: 8px; }
+.saves-del-confirm:hover { background: #d8554b; }
+.saves-notice { margin: 12px 0 0; font-size: 12.5px; color: #ffb4ac; }
+
+/* 一过性 toast（存档成功 / 失败） */
+.viewer-toast { position: fixed; left: 50%; bottom: 34px; transform: translateX(-50%); z-index: 300;
+  padding: 9px 16px; font-size: 13px; color: #dfe3ea;
+  background: rgba(20, 24, 32, .92); border: 1px solid rgba(255, 255, 255, .14); border-radius: 9px; }
+
+/* 触摸设备：可点区域够大（同 reader / shelf 的 44px 口径） */
+@media (pointer: coarse) {
+  .saves-new, .saves-load, .saves-del-confirm { min-height: 44px; }
+  .saves-close, .saves-del { min-width: 44px; min-height: 44px; }
+}

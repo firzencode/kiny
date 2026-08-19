@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { editorReducer, initialEditorState, anyDirty, activeBuffer } from './editorReducer'
-import type { LoadedProject } from '../files/gateway'
+import { editorReducer, initialEditorState, anyDirty, activeBuffer, type EditorState } from './editorReducer'
+import type { LoadedProject, ProjectFileEntry } from '../files/gateway'
+import { computeExternalSync, type ExternalSyncPayload } from '../files/rescan'
 
 const project: LoadedProject = {
   dir: '/p',
@@ -106,6 +107,7 @@ describe('editorReducer 多文件', () => {
       type: 'manifest_updated',
       manifest: { name: '雾港改', version: '2.0.0', engine: '0.1.0', entry: '末.kin' },
       manifestFile: '雾港改.kiw',
+      projectDir: '/p',
     })
     expect(s.manifest).toEqual({ name: '雾港改', version: '2.0.0', engine: '0.1.0', entry: '末.kin' })
     expect(s.manifestFile).toBe('雾港改.kiw')
@@ -122,9 +124,20 @@ describe('editorReducer 多文件', () => {
       type: 'manifest_updated',
       manifest: { ...loaded.manifest!, name: '雾港改', version: '2.0.0' },
       manifestFile: '雾港改.kiw',
+      projectDir: '/p',
     })
     expect(s.entry).toBe('main.kin')
     expect(s.runId).toBe(loaded.runId) // entry 未变，不触发重算
+  })
+
+  it('manifest_updated：projectDir 与当前项目不符 → 整条丢弃（await 期间切了项目，旧 manifest 不落进新项目）', () => {
+    const s = editorReducer(loaded, {
+      type: 'manifest_updated',
+      manifest: { name: '别的作品', version: '9.9.9', engine: '0.1.0', entry: '末.kin' },
+      manifestFile: '别的作品.kiw',
+      projectDir: '/另一个项目',
+    })
+    expect(s).toBe(loaded) // 原样返回：manifest / manifestFile / entry / runId 全不动
   })
 
   it('source_changed：改对应缓冲 + dirty + runId++', () => {
@@ -501,5 +514,206 @@ describe('媒体 tab（图片 / 音频）', () => {
     expect(s.openTabs).toEqual(['main.kin'])
     expect(s.activeFile).toBe('main.kin')
     expect(s.entries.map((e) => e.path)).not.toContain('图/立绘.png')
+  })
+})
+
+// 便捷：从 project_loaded 起步的基础态（main.kin 打开为活动 tab）
+const baseProject = (files: { path: string; source?: string }[]): EditorState =>
+  editorReducer(initialEditorState, {
+    type: 'project_loaded',
+    project: {
+      dir: '/p',
+      manifest: { name: 'p', version: '1.0.0', engine: '0.0.0', entry: 'main.kin' },
+      manifestFile: 'p.kiw',
+      files: files.map((f) => ({ path: f.path, isKin: f.path.endsWith('.kin'), ...(f.source !== undefined ? { source: f.source } : {}) })),
+      emptyDirs: [],
+    },
+  })
+
+const syncWith = (s: EditorState, snapFiles: { path: string; source?: string }[]) => {
+  const payload = computeExternalSync(s, {
+    dir: '/p', manifest: s.manifest!, manifestFile: s.manifestFile!,
+    files: snapFiles.map((f) => ({ path: f.path, isKin: f.path.endsWith('.kin'), ...(f.source !== undefined ? { source: f.source } : {}) })),
+    emptyDirs: [],
+  })
+  return payload ? editorReducer(s, { type: 'external_sync', sync: payload }) : s
+}
+
+describe('external_sync', () => {
+  it('干净缓冲静默刷新：source/savedSource 对齐，runId bump', () => {
+    const s0 = baseProject([{ path: 'main.kin', source: 'A' }])
+    const s1 = syncWith(s0, [{ path: 'main.kin', source: 'B' }])
+    expect(s1.files['main.kin']).toMatchObject({ source: 'B', savedSource: 'B', dirty: false })
+    expect(s1.runId).toBe(s0.runId + 1)
+  })
+
+  it('脏缓冲冲突：内容不动、savedSource 对齐磁盘、conflict 标记', () => {
+    let s = baseProject([{ path: 'main.kin', source: 'A' }])
+    s = editorReducer(s, { type: 'source_changed', path: 'main.kin', source: '我改的' })
+    const s1 = syncWith(s, [{ path: 'main.kin', source: 'B' }])
+    expect(s1.files['main.kin']).toMatchObject({ source: '我改的', savedSource: 'B', dirty: true, conflict: true })
+  })
+
+  it('新增文本文件建干净缓冲、进 entries/fileOrder；新增二进制只进 entries', () => {
+    const s0 = baseProject([{ path: 'main.kin', source: 'A' }])
+    const s1 = syncWith(s0, [{ path: 'main.kin', source: 'A' }, { path: 'b.kin', source: 'B' }, { path: 'img.png' }])
+    expect(s1.files['b.kin']).toMatchObject({ source: 'B', dirty: false })
+    expect(s1.files['img.png']).toBeUndefined()
+    expect(s1.entries.map((e: ProjectFileEntry) => e.path)).toEqual(['b.kin', 'img.png', 'main.kin'])
+    expect(s1.fileOrder).toContain('b.kin')
+  })
+
+  it('干净文件被删：缓冲移除、tab 关闭、activeFile 切邻位', () => {
+    let s = baseProject([{ path: 'a.kin', source: 'A' }, { path: 'main.kin', source: 'M' }])
+    s = editorReducer(s, { type: 'open_tab', path: 'a.kin' })   // tabs: [main, a]，active=a
+    const s1 = syncWith(s, [{ path: 'main.kin', source: 'M' }])
+    expect(s1.files['a.kin']).toBeUndefined()
+    expect(s1.openTabs).toEqual(['main.kin'])
+    expect(s1.activeFile).toBe('main.kin')
+  })
+
+  it('脏文件被删：缓冲保留、missing 标记、tab 保留', () => {
+    let s = baseProject([{ path: 'a.kin', source: 'A' }, { path: 'main.kin', source: 'M' }])
+    s = editorReducer(s, { type: 'open_tab', path: 'a.kin' })
+    s = editorReducer(s, { type: 'source_changed', path: 'a.kin', source: '改了' })
+    const s1 = syncWith(s, [{ path: 'main.kin', source: 'M' }])
+    expect(s1.files['a.kin']).toMatchObject({ source: '改了', dirty: true, missing: true })
+    expect(s1.openTabs).toContain('a.kin')
+    expect(s1.entries.some((e: ProjectFileEntry) => e.path === 'a.kin')).toBe(false)
+  })
+
+  it('reduce 时刻裁决：payload 判定 reloaded，但排队等待期间用户的 source_changed 先应用（缓冲已脏）→ 按 conflict 语义处理，不覆写 source', () => {
+    // 竞态：computeExternalSync 算 payload 时缓冲是干净的（判定 reloaded），但 dispatch
+    // 真正落地前，用户的 source_changed 先被处理——此刻缓冲已经脏了。payload 只是建议，
+    // reducer 必须按应用那一刻的 s.files 状态裁决，否则会用磁盘内容覆写掉刚键入的内容。
+    const s0 = baseProject([{ path: 'main.kin', source: 'A' }])
+    const raced = editorReducer(s0, { type: 'source_changed', path: 'main.kin', source: '用户刚键入' })
+    const payload: ExternalSyncPayload = {
+      snapshot: { dir: '/p', manifest: s0.manifest!, manifestFile: s0.manifestFile!, files: [{ path: 'main.kin', isKin: true, source: '磁盘新内容' }], emptyDirs: [] },
+      reloaded: { 'main.kin': '磁盘新内容' },
+      conflicted: {},
+      missingDirty: [],
+    }
+    const s1 = editorReducer(raced, { type: 'external_sync', sync: payload })
+    expect(s1.files['main.kin']).toMatchObject({ source: '用户刚键入', savedSource: '磁盘新内容', dirty: true, conflict: true })
+  })
+
+  it('reduce 时刻裁决：payload 判定 conflicted，但排队等待期间用户先手动保存（缓冲已变干净）→ 按 reloaded 语义对齐，不留冲突标记', () => {
+    const s0 = baseProject([{ path: 'main.kin', source: 'A' }])
+    const dirty = editorReducer(s0, { type: 'source_changed', path: 'main.kin', source: '我改的' })
+    const saved = editorReducer(dirty, { type: 'saved', path: 'main.kin', written: '我改的' })
+    const payload: ExternalSyncPayload = {
+      snapshot: { dir: '/p', manifest: s0.manifest!, manifestFile: s0.manifestFile!, files: [{ path: 'main.kin', isKin: true, source: '磁盘另一版本' }], emptyDirs: [] },
+      reloaded: {},
+      conflicted: { 'main.kin': '磁盘另一版本' },
+      missingDirty: [],
+    }
+    const s1 = editorReducer(saved, { type: 'external_sync', sync: payload })
+    expect(s1.files['main.kin']).toMatchObject({ source: '磁盘另一版本', savedSource: '磁盘另一版本', dirty: false })
+    expect(s1.files['main.kin'].conflict).toBeFalsy()
+  })
+
+  it('快照条目本轮读盘失败丢 source（如 Windows 文件锁），但缓冲脏 → 原样保留缓冲与 tab，不静默丢改动', () => {
+    let s = baseProject([{ path: 'a.kin', source: 'A' }, { path: 'main.kin', source: 'M' }])
+    s = editorReducer(s, { type: 'open_tab', path: 'a.kin' })
+    s = editorReducer(s, { type: 'source_changed', path: 'a.kin', source: '改了但没保存' })
+    const payload: ExternalSyncPayload = {
+      snapshot: {
+        dir: '/p', manifest: s.manifest!, manifestFile: s.manifestFile!,
+        files: [{ path: 'a.kin', isKin: true }, { path: 'main.kin', isKin: true, source: 'M' }], // a.kin 本轮读不出文本
+        emptyDirs: [],
+      },
+      reloaded: {}, conflicted: {}, missingDirty: [],
+    }
+    const s1 = editorReducer(s, { type: 'external_sync', sync: payload })
+    expect(s1.files['a.kin']).toMatchObject({ source: '改了但没保存', dirty: true })
+    expect(s1.openTabs).toContain('a.kin')
+    expect(s1.activeFile).toBe('a.kin')
+  })
+
+  it('快照条目本轮读盘失败丢 source，缓冲干净 → 丢弃（下一轮重扫再对账，不留幽灵）', () => {
+    const s = baseProject([{ path: 'a.kin', source: 'A' }, { path: 'main.kin', source: 'M' }])
+    const payload: ExternalSyncPayload = {
+      snapshot: {
+        dir: '/p', manifest: s.manifest!, manifestFile: s.manifestFile!,
+        files: [{ path: 'a.kin', isKin: true }, { path: 'main.kin', isKin: true, source: 'M' }],
+        emptyDirs: [],
+      },
+      reloaded: {}, conflicted: {}, missingDirty: [],
+    }
+    const s1 = editorReducer(s, { type: 'external_sync', sync: payload })
+    expect(s1.files['a.kin']).toBeUndefined()
+  })
+
+  it('manifest.entry 外部变化：entry 状态跟新', () => {
+    const s0 = baseProject([{ path: 'main.kin', source: 'A' }, { path: 'other.kin', source: 'B' }])
+    const payload = computeExternalSync(s0, {
+      dir: '/p', manifest: { ...s0.manifest!, entry: 'other.kin' }, manifestFile: 'p.kiw',
+      files: s0.entries, emptyDirs: [],
+    })!
+    const s1 = editorReducer(s0, { type: 'external_sync', sync: payload })
+    expect(s1.entry).toBe('other.kin')
+  })
+})
+
+describe('conflict_resolved', () => {
+  const conflicted = () => {
+    let s = baseProject([{ path: 'main.kin', source: 'A' }])
+    s = editorReducer(s, { type: 'source_changed', path: 'main.kin', source: '我改的' })
+    return syncWith(s, [{ path: 'main.kin', source: 'B' }])
+  }
+  it('useDisk=true：丢内存改动、载入磁盘版（= savedSource），冲突解除', () => {
+    const s1 = editorReducer(conflicted(), { type: 'conflict_resolved', path: 'main.kin', useDisk: true })
+    expect(s1.files['main.kin']).toMatchObject({ source: 'B', savedSource: 'B', dirty: false })
+    expect(s1.files['main.kin'].conflict).toBeFalsy()
+  })
+  it('useDisk=false：保留内存版、仅清标记，保持脏', () => {
+    const s1 = editorReducer(conflicted(), { type: 'conflict_resolved', path: 'main.kin', useDisk: false })
+    expect(s1.files['main.kin']).toMatchObject({ source: '我改的', savedSource: 'B', dirty: true })
+    expect(s1.files['main.kin'].conflict).toBeFalsy()
+  })
+})
+
+describe('saved 与标记的交互', () => {
+  it('保存冲突文件：清 conflict（savedSource=written）', () => {
+    let s = baseProject([{ path: 'main.kin', source: 'A' }])
+    s = editorReducer(s, { type: 'source_changed', path: 'main.kin', source: '我改的' })
+    s = syncWith(s, [{ path: 'main.kin', source: 'B' }])
+    const s1 = editorReducer(s, { type: 'saved', path: 'main.kin', written: '我改的' })
+    expect(s1.files['main.kin']).toMatchObject({ dirty: false, savedSource: '我改的' })
+    expect(s1.files['main.kin'].conflict).toBeFalsy()
+  })
+  it('保存 missing 文件：清 missing、entries/fileOrder 重建该文件', () => {
+    let s = baseProject([{ path: 'a.kin', source: 'A' }, { path: 'main.kin', source: 'M' }])
+    s = editorReducer(s, { type: 'open_tab', path: 'a.kin' })
+    s = editorReducer(s, { type: 'source_changed', path: 'a.kin', source: '改了' })
+    s = syncWith(s, [{ path: 'main.kin', source: 'M' }])
+    const s1 = editorReducer(s, { type: 'saved', path: 'a.kin', written: '改了' })
+    expect(s1.files['a.kin'].missing).toBeFalsy()
+    expect(s1.entries.some((e) => e.path === 'a.kin')).toBe(true)
+    expect(s1.fileOrder).toContain('a.kin')
+  })
+  it('discard_tab 丢弃 missing 文件：缓冲整体移除（不留幽灵）', () => {
+    let s = baseProject([{ path: 'a.kin', source: 'A' }, { path: 'main.kin', source: 'M' }])
+    s = editorReducer(s, { type: 'open_tab', path: 'a.kin' })
+    s = editorReducer(s, { type: 'source_changed', path: 'a.kin', source: '改了' })
+    s = syncWith(s, [{ path: 'main.kin', source: 'M' }])
+    const s1 = editorReducer(s, { type: 'discard_tab', path: 'a.kin' })
+    expect(s1.files['a.kin']).toBeUndefined()
+    expect(s1.openTabs).not.toContain('a.kin')
+  })
+  it('回归：conflict→missing 链路不产生双标记僵尸态', () => {
+    // ①脏文件外部被改 → conflict
+    let s = baseProject([{ path: 'a.kin', source: 'A' }, { path: 'main.kin', source: 'M' }])
+    s = editorReducer(s, { type: 'source_changed', path: 'a.kin', source: '我改的' })
+    s = syncWith(s, [{ path: 'a.kin', source: '磁盘版B' }, { path: 'main.kin', source: 'M' }])
+    expect(s.files['a.kin']).toMatchObject({ conflict: true, missing: undefined })
+    // ②同一文件又被外部删除 → missing（同时清 conflict）
+    const s2 = syncWith(s, [{ path: 'main.kin', source: 'M' }])
+    expect(s2.files['a.kin']).toMatchObject({ missing: true, dirty: true })
+    expect(s2.files['a.kin'].conflict).toBeFalsy() // conflict 被清
+    // ③此时 conflict_resolved(useDisk:true) 是 no-op（cur.conflict !== true）
+    const s3 = editorReducer(s2, { type: 'conflict_resolved', path: 'a.kin', useDisk: true })
+    expect(s3).toBe(s2) // 无变化
   })
 })
